@@ -2,9 +2,9 @@
 Error handling tests for httpmorph
 """
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_server import MockHTTPServer
 
 
@@ -43,7 +43,9 @@ class TestErrorHandling:
         assert response.error != 0
         assert response.error_message is not None
         # DNS failures show up as connection failures
-        assert "connect" in response.error_message.lower() or "fail" in response.error_message.lower()
+        assert (
+            "connect" in response.error_message.lower() or "fail" in response.error_message.lower()
+        )
 
     def test_timeout_error(self):
         """Test request timeout"""
@@ -52,7 +54,10 @@ class TestErrorHandling:
             # Should have an error indicating timeout
             assert response.error is not None and response.error != 0
             assert response.error_message is not None
-            assert "timeout" in response.error_message.lower() or "timed out" in response.error_message.lower()
+            assert (
+                "timeout" in response.error_message.lower()
+                or "timed out" in response.error_message.lower()
+            )
 
     def test_tls_certificate_error(self):
         """Test TLS certificate verification error
@@ -89,6 +94,7 @@ class TestErrorHandling:
             response = httpmorph.get(f"{server.url}/status/200")
             # Response is not JSON, trying to parse should fail gracefully
             import json
+
             with pytest.raises(json.JSONDecodeError):
                 json.loads(response.body)
 
@@ -193,6 +199,7 @@ class TestThreadSafety:
         import concurrent.futures
 
         with MockHTTPServer() as server:
+
             def make_request():
                 session = httpmorph.Session(browser="chrome")
                 return session.get(f"{server.url}/get")
@@ -238,12 +245,10 @@ class TestInputValidation:
         import datetime
 
         from tests.test_server import MockHTTPServer
+
         with pytest.raises(TypeError):
             with MockHTTPServer() as server:
-                httpmorph.post(
-                    f"{server.url}/post",
-                    json={"date": datetime.datetime.now()}
-                )
+                httpmorph.post(f"{server.url}/post", json={"date": datetime.datetime.now()})
 
     def test_conflicting_body_parameters(self):
         """Test conflicting body parameters
@@ -252,12 +257,11 @@ class TestInputValidation:
         This test verifies the request succeeds (no exception).
         """
         from tests.test_server import MockHTTPServer
+
         # When both are specified, json takes precedence
         with MockHTTPServer() as server:
             response = httpmorph.post(
-                f"{server.url}/post",
-                json={"key": "value"},
-                data={"key": "other"}
+                f"{server.url}/post", json={"key": "value"}, data={"key": "other"}
             )
             # Request should succeed with json body
             assert response.status_code == 200

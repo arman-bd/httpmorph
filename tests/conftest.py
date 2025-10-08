@@ -2,8 +2,9 @@
 Pytest configuration and fixtures for httpmorph tests
 """
 
-import httpmorph
 import pytest
+
+import httpmorph
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -22,6 +23,7 @@ def initialize_httpmorph():
 def http_server():
     """Create a test HTTP server"""
     from tests.test_server import MockHTTPServer
+
     server = MockHTTPServer()
     server.start()
     yield server
@@ -32,6 +34,7 @@ def http_server():
 def https_server():
     """Create a test HTTPS server"""
     from tests.test_server import MockHTTPServer
+
     try:
         server = MockHTTPServer(ssl_enabled=True)
         server.start()
@@ -76,12 +79,8 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (requires network)"
     )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "ssl: mark test as requiring SSL support"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "ssl: mark test as requiring SSL support")
 
 
 def pytest_collection_modifyitems(config, items):

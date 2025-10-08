@@ -2,8 +2,9 @@
 Basic tests for httpmorph
 """
 
-import httpmorph
 import pytest
+
+import httpmorph
 
 
 def test_import():
@@ -63,9 +64,7 @@ def test_post_with_json():
 
     data = {"key": "value", "number": 42}
     response = httpmorph.post(
-        "https://postman-echo.com/post",
-        json=data,
-        headers={"Content-Type": "application/json"}
+        "https://postman-echo.com/post", json=data, headers={"Content-Type": "application/json"}
     )
 
     assert response.status_code == 200
@@ -101,6 +100,7 @@ def test_performance():
 
         # Test requests
         import requests
+
         start = time.time()
         for _ in range(iterations):
             requests.get(url)

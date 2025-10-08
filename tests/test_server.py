@@ -24,7 +24,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests"""
         # Strip query parameters for path matching
-        path_without_query = self.path.split('?')[0]
+        path_without_query = self.path.split("?")[0]
 
         if path_without_query == "/get":
             self.send_response(200)
@@ -34,7 +34,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
                 "method": "GET",
                 "path": self.path,
                 "headers": dict(self.headers),
-                "args": {}
+                "args": {},
             }
             self.wfile.write(json.dumps(response).encode())
 
@@ -59,9 +59,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            response = {
-                "headers": dict(self.headers)
-            }
+            response = {"headers": dict(self.headers)}
             self.wfile.write(json.dumps(response).encode())
 
         elif path_without_query == "/delay/1":
@@ -78,6 +76,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
 
         elif path_without_query == "/gzip":
             import gzip
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Encoding", "gzip")
@@ -90,9 +89,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            response = {
-                "user-agent": self.headers.get("User-Agent", "")
-            }
+            response = {"user-agent": self.headers.get("User-Agent", "")}
             self.wfile.write(json.dumps(response).encode())
 
         elif path_without_query.startswith("/redirect/"):
@@ -101,7 +98,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
                 count = int(path_without_query.split("/")[-1])
                 if count > 1:
                     self.send_response(302)
-                    self.send_header("Location", f"/redirect/{count-1}")
+                    self.send_header("Location", f"/redirect/{count - 1}")
                     self.end_headers()
                 else:
                     self.send_response(302)
@@ -141,9 +138,9 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
                 "russian": "Привет мир",
                 "emoji": "👋🌍🎉",
                 "mixed": "Hello 世界 🌍",
-                "special": "¡Hñola! Çà va? Ñoño"
+                "special": "¡Hñola! Çà va? Ñoño",
             }
-            self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
+            self.wfile.write(json.dumps(response, ensure_ascii=False).encode("utf-8"))
 
         elif path_without_query == "/binary":
             # Return binary data
@@ -179,7 +176,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             # Mix of UTF-8 and latin-1 characters
             text = "UTF-8: 你好 Latin-1: café résumé"
-            self.wfile.write(text.encode('utf-8'))
+            self.wfile.write(text.encode("utf-8"))
 
         elif path_without_query == "/very-long-line":
             # Return response with very long line
@@ -187,7 +184,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             long_line = "A" * 10000 + "\n"
-            self.wfile.write(long_line.encode('utf-8'))
+            self.wfile.write(long_line.encode("utf-8"))
 
         elif path_without_query == "/null-bytes":
             # Return response with null bytes
@@ -205,7 +202,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Handle POST requests"""
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
 
         if self.path == "/post":
@@ -223,7 +220,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
                 "path": self.path,
                 "headers": dict(self.headers),
                 "data": body.decode() if body else "",
-                "json": json_data
+                "json": json_data,
             }
             self.wfile.write(json.dumps(response).encode())
 
@@ -231,10 +228,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            response = {
-                "method": "POST",
-                "form": body.decode() if body else ""
-            }
+            response = {"method": "POST", "form": body.decode() if body else ""}
             self.wfile.write(json.dumps(response).encode())
 
         else:
@@ -245,17 +239,13 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         """Handle PUT requests"""
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        response = {
-            "method": "PUT",
-            "path": self.path,
-            "data": body.decode() if body else ""
-        }
+        response = {"method": "PUT", "path": self.path, "data": body.decode() if body else ""}
         self.wfile.write(json.dumps(response).encode())
 
     def do_DELETE(self):
@@ -263,10 +253,7 @@ class MockHTTPHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        response = {
-            "method": "DELETE",
-            "path": self.path
-        }
+        response = {"method": "DELETE", "path": self.path}
         self.wfile.write(json.dumps(response).encode())
 
 
@@ -283,17 +270,14 @@ class MockHTTPServer:
 
     def start(self):
         """Start the test server"""
-        self.server = HTTPServer(('127.0.0.1', self.port), MockHTTPHandler)
+        self.server = HTTPServer(("127.0.0.1", self.port), MockHTTPHandler)
 
         if self.ssl_enabled:
             # Create self-signed certificate for testing
             self._create_self_signed_cert()
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(self.cert_file, self.key_file)
-            self.server.socket = context.wrap_socket(
-                self.server.socket,
-                server_side=True
-            )
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
 
         # Get the actual port if 0 was specified
         self.port = self.server.server_port
@@ -337,45 +321,49 @@ class MockHTTPServer:
             )
 
             # Generate certificate
-            subject = issuer = x509.Name([
-                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),
-                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "httpmorph"),
-                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
-            ])
+            subject = issuer = x509.Name(
+                [
+                    x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+                    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),
+                    x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),
+                    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "httpmorph"),
+                    x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+                ]
+            )
 
-            cert = x509.CertificateBuilder().subject_name(
-                subject
-            ).issuer_name(
-                issuer
-            ).public_key(
-                key.public_key()
-            ).serial_number(
-                x509.random_serial_number()
-            ).not_valid_before(
-                datetime.datetime.utcnow()
-            ).not_valid_after(
-                datetime.datetime.utcnow() + datetime.timedelta(days=1)
-            ).add_extension(
-                x509.SubjectAlternativeName([
-                    x509.DNSName("localhost"),
-                    x509.DNSName("127.0.0.1"),
-                ]),
-                critical=False,
-            ).sign(key, hashes.SHA256())
+            cert = (
+                x509.CertificateBuilder()
+                .subject_name(subject)
+                .issuer_name(issuer)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.datetime.utcnow())
+                .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=1))
+                .add_extension(
+                    x509.SubjectAlternativeName(
+                        [
+                            x509.DNSName("localhost"),
+                            x509.DNSName("127.0.0.1"),
+                        ]
+                    ),
+                    critical=False,
+                )
+                .sign(key, hashes.SHA256())
+            )
 
             # Write certificate and key to temp files
-            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.crt') as f:
+            with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".crt") as f:
                 f.write(cert.public_bytes(serialization.Encoding.PEM))
                 self.cert_file = f.name
 
-            with tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.key') as f:
-                f.write(key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.TraditionalOpenSSL,
-                    encryption_algorithm=serialization.NoEncryption()
-                ))
+            with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".key") as f:
+                f.write(
+                    key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.TraditionalOpenSSL,
+                        encryption_algorithm=serialization.NoEncryption(),
+                    )
+                )
                 self.key_file = f.name
 
         except ImportError:

@@ -2,9 +2,9 @@
 Integration tests for httpmorph with real HTTPS endpoints
 """
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_server import MockHTTPServer
 
 
@@ -43,9 +43,9 @@ class TestRealHTTPSIntegration:
         response = httpmorph.get("https://api.github.com")
         assert response.status_code == 200
         import json
+
         data = json.loads(response.body)
         assert "current_user_url" in data
-
 
     def test_httpbin_get(self):
         """Test local mock server GET endpoint"""
@@ -53,45 +53,32 @@ class TestRealHTTPSIntegration:
             response = httpmorph.get(f"{server.url}/get")
             assert response.status_code == 200
             import json
+
             data = json.loads(response.body)
             assert "headers" in data
             assert "method" in data
 
-
     def test_httpbin_post_json(self):
         """Test local mock server POST with JSON"""
-        payload = {
-            "key": "value",
-            "number": 42,
-            "nested": {"a": 1, "b": 2}
-        }
+        payload = {"key": "value", "number": 42, "nested": {"a": 1, "b": 2}}
         with MockHTTPServer() as server:
-            response = httpmorph.post(
-                f"{server.url}/post",
-                json=payload
-            )
+            response = httpmorph.post(f"{server.url}/post", json=payload)
             assert response.status_code == 200
             import json
+
             data = json.loads(response.body)
             assert data["json"] == payload
 
-
     def test_httpbin_headers(self):
         """Test local mock server headers endpoint"""
-        custom_headers = {
-            "X-Custom-Header": "test-value",
-            "User-Agent": "httpmorph-test/1.0"
-        }
+        custom_headers = {"X-Custom-Header": "test-value", "User-Agent": "httpmorph-test/1.0"}
         with MockHTTPServer() as server:
-            response = httpmorph.get(
-                f"{server.url}/headers",
-                headers=custom_headers
-            )
+            response = httpmorph.get(f"{server.url}/headers", headers=custom_headers)
             assert response.status_code == 200
             import json
+
             data = json.loads(response.body)
             assert "X-Custom-Header" in data["headers"]
-
 
     def test_httpbin_user_agent(self):
         """Test User-Agent header"""
@@ -99,9 +86,9 @@ class TestRealHTTPSIntegration:
             response = httpmorph.get(f"{server.url}/user-agent")
             assert response.status_code == 200
             import json
+
             data = json.loads(response.body)
             assert "user-agent" in data
-
 
     def test_httpbin_gzip(self):
         """Test gzip compression"""
@@ -109,9 +96,9 @@ class TestRealHTTPSIntegration:
             response = httpmorph.get(f"{server.url}/gzip")
             assert response.status_code == 200
             import json
+
             data = json.loads(response.body)
             assert data["gzipped"] is True
-
 
     def test_httpbin_status_codes(self):
         """Test various HTTP status codes"""
@@ -132,14 +119,9 @@ class TestRealHTTPSIntegration:
             # Without redirect following, we get the redirect status code
             assert response.status_code in [301, 302, 307, 308]
 
-
     def test_multiple_domains_in_sequence(self):
         """Test requests to multiple different domains"""
-        domains = [
-            "https://example.com",
-            "https://www.google.com",
-            "https://api.github.com"
-        ]
+        domains = ["https://example.com", "https://www.google.com", "https://api.github.com"]
 
         session = httpmorph.Session(browser="chrome")
         for domain in domains:
@@ -147,16 +129,11 @@ class TestRealHTTPSIntegration:
             assert response.status_code in [200, 301, 302]
             print(f"{domain}: {response.status_code}")
 
-
     def test_concurrent_requests_different_domains(self):
         """Test concurrent requests to different domains"""
         import concurrent.futures
 
-        urls = [
-            "https://example.com",
-            "https://www.google.com",
-            "https://api.github.com"
-        ]
+        urls = ["https://example.com", "https://www.google.com", "https://api.github.com"]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(httpmorph.get, url) for url in urls]
@@ -189,7 +166,6 @@ class TestTLSVersions:
 class TestPerformance:
     """Performance tests with real endpoints"""
 
-
     def test_batch_requests_performance(self):
         """Test performance of batch requests"""
         import time
@@ -207,7 +183,7 @@ class TestPerformance:
 
         avg_time = total_time / iterations
         print(f"Average request time: {avg_time:.3f}s")
-        print(f"Requests per second: {1/avg_time:.2f}")
+        print(f"Requests per second: {1 / avg_time:.2f}")
 
         # Should be reasonably fast
         assert avg_time < 2.0  # Less than 2 seconds per request

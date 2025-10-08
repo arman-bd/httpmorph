@@ -109,6 +109,7 @@ if not VENDOR_EXISTS:
     print("  • nghttp2 (HTTP/2 library)")
     print("\n" + "=" * 70 + "\n")
 
+
 # Get OpenSSL and nghttp2 paths based on platform
 def get_library_paths():
     """Detect platform and return appropriate library paths."""
@@ -117,18 +118,24 @@ def get_library_paths():
     if IS_MACOS:
         # Try Homebrew paths
         try:
-            openssl_prefix = subprocess.check_output(
-                ["brew", "--prefix", "openssl@3"],
-                stderr=subprocess.DEVNULL
-            ).decode().strip()
+            openssl_prefix = (
+                subprocess.check_output(
+                    ["brew", "--prefix", "openssl@3"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
         except (subprocess.CalledProcessError, FileNotFoundError):
             openssl_prefix = "/opt/homebrew/opt/openssl@3"
 
         try:
-            nghttp2_prefix = subprocess.check_output(
-                ["brew", "--prefix", "libnghttp2"],
-                stderr=subprocess.DEVNULL
-            ).decode().strip()
+            nghttp2_prefix = (
+                subprocess.check_output(
+                    ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
         except (subprocess.CalledProcessError, FileNotFoundError):
             nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
 
@@ -155,17 +162,24 @@ def get_library_paths():
             nghttp2_lib = None
             try:
                 import subprocess
-                include_output = subprocess.check_output(
-                    ["pkg-config", "--cflags-only-I", "libnghttp2"],
-                    stderr=subprocess.DEVNULL
-                ).decode().strip()
+
+                include_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--cflags-only-I", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
+                )
                 if include_output:
                     nghttp2_include = include_output.replace("-I", "").strip()
 
-                lib_output = subprocess.check_output(
-                    ["pkg-config", "--libs-only-L", "libnghttp2"],
-                    stderr=subprocess.DEVNULL
-                ).decode().strip()
+                lib_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--libs-only-L", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
+                )
                 if lib_output:
                     nghttp2_lib = lib_output.replace("-L", "").strip()
             except (subprocess.CalledProcessError, FileNotFoundError):
@@ -188,17 +202,24 @@ def get_library_paths():
         openssl_lib = None
         try:
             import subprocess
-            include_output = subprocess.check_output(
-                ["pkg-config", "--cflags-only-I", "openssl"],
-                stderr=subprocess.DEVNULL
-            ).decode().strip()
+
+            include_output = (
+                subprocess.check_output(
+                    ["pkg-config", "--cflags-only-I", "openssl"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
             if include_output:
                 openssl_include = include_output.replace("-I", "").strip()
 
-            lib_output = subprocess.check_output(
-                ["pkg-config", "--libs-only-L", "openssl"],
-                stderr=subprocess.DEVNULL
-            ).decode().strip()
+            lib_output = (
+                subprocess.check_output(
+                    ["pkg-config", "--libs-only-L", "openssl"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
             if lib_output:
                 openssl_lib = lib_output.replace("-L", "").strip()
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -240,6 +261,7 @@ def get_library_paths():
             "nghttp2_include": "C:/Program Files/nghttp2/include",
             "nghttp2_lib": "C:/Program Files/nghttp2/lib",
         }
+
 
 LIB_PATHS = get_library_paths()
 
@@ -296,7 +318,7 @@ extensions = [
         libraries=["ssl", "crypto", "nghttp2", "z"],
         extra_compile_args=["-std=c11", "-O2"],
         language="c",
-    )
+    ),
 ]
 
 # Cythonize extensions

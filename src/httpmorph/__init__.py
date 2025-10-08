@@ -30,6 +30,7 @@ from httpmorph._client_c import (
 # Try to import HTTP/2 C extension (optional)
 try:
     from httpmorph import _http2  # noqa: F401
+
     HAS_HTTP2 = True
 except ImportError:
     HAS_HTTP2 = False

@@ -61,16 +61,10 @@ def example_post_json():
     print("\n=== POST Request with JSON ===")
 
     try:
-        data = {
-            "username": "test_user",
-            "email": "test@example.com",
-            "age": 25
-        }
+        data = {"username": "test_user", "email": "test@example.com", "age": 25}
 
         response = httpmorph.post(
-            "https://httpbin.org/post",
-            json=data,
-            headers={"Content-Type": "application/json"}
+            "https://httpbin.org/post", json=data, headers={"Content-Type": "application/json"}
         )
 
         print(f"Status: {response.status_code}")
@@ -87,14 +81,11 @@ def example_custom_headers():
         headers = {
             "User-Agent": "CustomBot/1.0",
             "Accept": "application/json",
-            "X-Custom-Header": "CustomValue"
+            "X-Custom-Header": "CustomValue",
         }
 
         session = httpmorph.Session(browser="chrome")
-        response = session.get(
-            "https://httpbin.org/headers",
-            headers=headers
-        )
+        response = session.get("https://httpbin.org/headers", headers=headers)
 
         print(f"Status: {response.status_code}")
     except NotImplementedError:
@@ -109,12 +100,11 @@ def example_rotating_fingerprint():
         for i in range(5):
             # Each request uses a different random browser fingerprint
             response = httpmorph.get(
-                "https://httpbin.org/get",
-                browser="random",
-                rotate_fingerprint=True
+                "https://httpbin.org/get", browser="random", rotate_fingerprint=True
             )
-            print(f"Request {i+1} - Status: {response.status_code}, "
-                  f"JA3: {response.ja3_fingerprint}")
+            print(
+                f"Request {i + 1} - Status: {response.status_code}, JA3: {response.ja3_fingerprint}"
+            )
     except NotImplementedError:
         print("Not yet implemented - C extension needs to be built")
 
@@ -136,19 +126,20 @@ def example_performance_test():
         fast_time = time.time() - start
 
         print(f"httpmorph: {iterations} requests in {fast_time:.2f}s")
-        print(f"Average: {fast_time/iterations*1000:.1f}ms per request")
+        print(f"Average: {fast_time / iterations * 1000:.1f}ms per request")
 
         # Compare with requests
         try:
             import requests
+
             start = time.time()
             for _ in range(iterations):
                 requests.get(url)
             requests_time = time.time() - start
 
             print(f"requests: {iterations} requests in {requests_time:.2f}s")
-            print(f"Average: {requests_time/iterations*1000:.1f}ms per request")
-            print(f"Speedup: {requests_time/fast_time:.2f}x faster")
+            print(f"Average: {requests_time / iterations * 1000:.1f}ms per request")
+            print(f"Speedup: {requests_time / fast_time:.2f}x faster")
         except ImportError:
             print("requests library not installed for comparison")
 
