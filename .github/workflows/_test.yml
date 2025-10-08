@@ -56,11 +56,18 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: Cache vendor dependencies
+      id: cache-vendor
       uses: actions/cache@v4
       with:
-        path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}
+        path: |
+          vendor/boringssl/build
+          vendor/liburing/install
+          vendor/liburing/src
+          vendor/nghttp2/install
+          vendor/nghttp2/lib/.libs
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v2
         restore-keys: |
+          vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-
           vendor-${{ runner.os }}-
 
     - name: Setup vendor dependencies
