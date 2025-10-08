@@ -35,7 +35,7 @@ echo "==> Setting up BoringSSL..."
 
 if [ ! -d "boringssl" ]; then
     echo "Cloning BoringSSL..."
-    git clone https://boringssl.googlesource.com/boringssl
+    git clone --depth 1 https://boringssl.googlesource.com/boringssl
 fi
 
 cd boringssl
@@ -64,6 +64,13 @@ if [ ! -f "build/ssl/libssl.a" ]; then
     make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
     echo "✓ BoringSSL built successfully"
+
+    # Clean up .git directory to save cache space
+    cd "$VENDOR_DIR/boringssl"
+    if [ -d ".git" ]; then
+        echo "Cleaning up .git directory to save cache space..."
+        rm -rf .git
+    fi
 else
     echo "✓ BoringSSL already built"
 fi
@@ -79,7 +86,7 @@ if [ "$OS" = "Linux" ]; then
 
     if [ ! -d "liburing" ]; then
         echo "Cloning liburing..."
-        git clone https://github.com/axboe/liburing.git
+        git clone --depth 1 https://github.com/axboe/liburing.git
     fi
 
     cd liburing
@@ -92,6 +99,13 @@ if [ "$OS" = "Linux" ]; then
         make install
 
         echo "✓ liburing built successfully"
+
+        # Clean up .git directory to save cache space
+        cd "$VENDOR_DIR/liburing"
+        if [ -d ".git" ]; then
+            echo "Cleaning up .git directory to save cache space..."
+            rm -rf .git
+        fi
     else
         echo "✓ liburing already built"
     fi
