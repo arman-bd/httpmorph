@@ -122,40 +122,47 @@ fi
 echo ""
 echo "==> Setting up nghttp2..."
 
-if [ ! -d "nghttp2" ]; then
-    echo "Downloading nghttp2..."
-
-    NGHTTP2_VERSION="1.59.0"
-    curl -L "https://github.com/nghttp2/nghttp2/releases/download/v${NGHTTP2_VERSION}/nghttp2-${NGHTTP2_VERSION}.tar.gz" \
-         -o nghttp2.tar.gz
-
-    tar xzf nghttp2.tar.gz
-    mv "nghttp2-${NGHTTP2_VERSION}" nghttp2
-    rm nghttp2.tar.gz
-fi
-
-cd nghttp2
-
-if [ ! -f "lib/.libs/libnghttp2.a" ]; then
-    echo "Building nghttp2..."
-
-    # Build with -fPIC for use in shared libraries
-    CFLAGS="-fPIC" ./configure --prefix="$VENDOR_DIR/nghttp2/install" \
-                --enable-lib-only \
-                --enable-static \
-                --disable-shared \
-                --disable-examples \
-                --disable-python-bindings
-
-    make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-    make install
-
-    echo "✓ nghttp2 built successfully"
+# On macOS, use Homebrew's nghttp2 if available
+if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
+    echo "✓ Using Homebrew's libnghttp2"
+    echo "  Location: $(brew --prefix libnghttp2)"
 else
-    echo "✓ nghttp2 already built"
-fi
+    # Build from source on Linux or if Homebrew version not available
+    if [ ! -d "nghttp2" ]; then
+        echo "Downloading nghttp2..."
 
-cd "$VENDOR_DIR"
+        NGHTTP2_VERSION="1.59.0"
+        curl -L "https://github.com/nghttp2/nghttp2/releases/download/v${NGHTTP2_VERSION}/nghttp2-${NGHTTP2_VERSION}.tar.gz" \
+             -o nghttp2.tar.gz
+
+        tar xzf nghttp2.tar.gz
+        mv "nghttp2-${NGHTTP2_VERSION}" nghttp2
+        rm nghttp2.tar.gz
+    fi
+
+    cd nghttp2
+
+    if [ ! -f "lib/.libs/libnghttp2.a" ]; then
+        echo "Building nghttp2..."
+
+        # Build with -fPIC for use in shared libraries
+        CFLAGS="-fPIC" ./configure --prefix="$VENDOR_DIR/nghttp2/install" \
+                    --enable-lib-only \
+                    --enable-static \
+                    --disable-shared \
+                    --disable-examples \
+                    --disable-python-bindings
+
+        make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+        make install
+
+        echo "✓ nghttp2 built successfully"
+    else
+        echo "✓ nghttp2 already built"
+    fi
+
+    cd "$VENDOR_DIR"
+fi
 
 #
 # Summary
@@ -170,7 +177,11 @@ echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
 if [ "$OS" = "Linux" ]; then
     echo "  ✓ liburing:   $VENDOR_DIR/liburing/install"
 fi
-echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
+if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
+    echo "  ✓ nghttp2:    $(brew --prefix libnghttp2) (Homebrew)"
+else
+    echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
+fi
 echo ""
 echo "You can now run: make build"
 echo ""

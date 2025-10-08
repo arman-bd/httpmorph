@@ -60,7 +60,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v3
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v4
         restore-keys: |
           vendor-${{ runner.os }}-
 
