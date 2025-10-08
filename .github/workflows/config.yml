@@ -1,0 +1,87 @@
+#
+# Global CI/CD Configuration
+#
+# This is a reusable workflow config that defines common settings across all workflows.
+# Edit this file to control which OS and Python versions to test against.
+#
+# During development, you can comment out OS/Python versions to speed up CI runs.
+#
+
+name: Global Config
+
+on:
+  workflow_call:
+    outputs:
+      # OS matrix - comment out any you don't want to test
+      os-matrix:
+        description: "Operating systems to test"
+        value: ${{ jobs.config.outputs.os-matrix }}
+
+      # Python versions - comment out any you don't want to test
+      python-matrix:
+        description: "Python versions to test"
+        value: ${{ jobs.config.outputs.python-matrix }}
+
+      # Primary OS/Python for single-runner jobs (benchmark, coverage, etc.)
+      primary-os:
+        description: "Primary OS for single-runner jobs"
+        value: ${{ jobs.config.outputs.primary-os }}
+
+      primary-python:
+        description: "Primary Python version for single-runner jobs"
+        value: ${{ jobs.config.outputs.primary-python }}
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      os-matrix: ${{ steps.set-config.outputs.os-matrix }}
+      python-matrix: ${{ steps.set-config.outputs.python-matrix }}
+      primary-os: ${{ steps.set-config.outputs.primary-os }}
+      primary-python: ${{ steps.set-config.outputs.primary-python }}
+
+    steps:
+      - id: set-config
+        run: |
+          # ============================================================
+          # CONFIGURATION - Edit this section
+          # ============================================================
+
+          # Operating Systems to test
+          # Comment out any OS you want to skip during development
+          OS_MATRIX='[
+            "ubuntu-latest",
+            # "macos-latest",
+            # "windows-latest"
+          ]'
+
+          # Python versions to test
+          # Comment out any version you want to skip during development
+          PYTHON_MATRIX='[
+            # "3.9",
+            # "3.10",
+            "3.11"
+            # "3.12"
+          ]'
+
+          # Primary OS and Python for single-runner jobs
+          PRIMARY_OS="ubuntu-latest"
+          PRIMARY_PYTHON="3.11"
+
+          # ============================================================
+          # END CONFIGURATION
+          # ============================================================
+
+          # Compact JSON (remove newlines and extra spaces)
+          OS_MATRIX_COMPACT=$(echo "$OS_MATRIX" | jq -c .)
+          PYTHON_MATRIX_COMPACT=$(echo "$PYTHON_MATRIX" | jq -c .)
+
+          echo "os-matrix=$OS_MATRIX_COMPACT" >> $GITHUB_OUTPUT
+          echo "python-matrix=$PYTHON_MATRIX_COMPACT" >> $GITHUB_OUTPUT
+          echo "primary-os=$PRIMARY_OS" >> $GITHUB_OUTPUT
+          echo "primary-python=$PRIMARY_PYTHON" >> $GITHUB_OUTPUT
+
+          echo "✓ Configuration loaded:"
+          echo "  OS: $OS_MATRIX_COMPACT"
+          echo "  Python: $PYTHON_MATRIX_COMPACT"
+          echo "  Primary: $PRIMARY_OS / $PRIMARY_PYTHON"

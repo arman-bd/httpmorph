@@ -1,0 +1,189 @@
+#
+# Master CI/CD Pipeline
+#
+# This workflow orchestrates all CI/CD jobs. Comment out any jobs you want to skip during development.
+# OS and Python version configuration is centralized in config.yml.
+#
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  # ============================================================
+  # Load Configuration
+  # ============================================================
+  load-config:
+    uses: ./.github/workflows/config.yml
+
+  # ============================================================
+  # Pipeline Jobs - Comment out any you want to skip
+  # ============================================================
+
+  # Job 1: Run tests across all OS/Python combinations
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: load-config
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.load-config.outputs.os-matrix) }}
+        python-version: ${{ fromJSON(needs.load-config.outputs.python-matrix) }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+    - name: Install system dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: brew install cmake ninja openssl@3 libnghttp2
+
+    - name: Install system dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: choco install cmake -y
+
+    - name: Setup MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup vendor dependencies
+      run: |
+        chmod +x scripts/setup_vendors.sh
+        ./scripts/setup_vendors.sh
+      shell: bash
+
+    - name: Install package
+      run: pip install -e ".[dev]"
+
+    - name: Lint
+      run: ruff check src/ tests/
+
+    - name: Run tests
+      run: pytest tests/ -v --cov=httpmorph --cov-report=xml
+
+    - name: Upload coverage
+      if: matrix.os == needs.load-config.outputs.primary-os && matrix.python-version == needs.load-config.outputs.primary-python
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+
+  # Job 2: Run benchmarks (comment out to skip)
+  # benchmark:
+  #   name: Benchmark
+  #   needs: [load-config, test]
+  #   runs-on: ${{ needs.load-config.outputs.primary-os }}
+
+  #   steps:
+  #   - uses: actions/checkout@v4
+
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: ${{ needs.load-config.outputs.primary-python }}
+  #       cache: 'pip'
+
+  #   - name: Install dependencies
+  #     run: |
+  #       sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev
+  #       chmod +x scripts/setup_vendors.sh
+  #       ./scripts/setup_vendors.sh
+  #       pip install -e ".[dev,benchmark]"
+
+  #   - name: Run benchmarks
+  #     run: pytest benchmarks/ --benchmark-only --benchmark-json=benchmark.json
+
+  #   - name: Store benchmark
+  #     uses: benchmark-action/github-action-benchmark@v1
+  #     with:
+  #       tool: 'pytest'
+  #       output-file-path: benchmark.json
+  #       github-token: ${{ secrets.GITHUB_TOKEN }}
+  #       auto-push: true
+
+  # Job 3: Type checking (comment out to skip)
+  # typecheck:
+  #   name: Type Check
+  #   needs: load-config
+  #   runs-on: ${{ needs.load-config.outputs.primary-os }}
+  #
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: ${{ needs.load-config.outputs.primary-python }}
+  #       cache: 'pip'
+  #
+  #   - name: Install package
+  #     run: pip install -e ".[dev]"
+  #
+  #   - name: Run mypy
+  #     run: mypy src/
+
+  # Job 4: Security scanning (comment out to skip)
+  # security:
+  #   name: Security Scan
+  #   needs: load-config
+  #   runs-on: ${{ needs.load-config.outputs.primary-os }}
+  #
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v5
+  #     with:
+  #       python-version: ${{ needs.load-config.outputs.primary-python }}
+  #
+  #   - name: Run bandit
+  #     run: |
+  #       pip install bandit
+  #       bandit -r src/ -f json -o bandit-report.json
+  #
+  #   - name: Upload security report
+  #     uses: actions/upload-artifact@v4
+  #     with:
+  #       name: security-report
+  #       path: bandit-report.json
+
+  # ============================================================
+  # Status Check - All jobs must pass
+  # ============================================================
+  all-checks-passed:
+    name: All Checks Passed
+    needs: [test]  # Add other job dependencies here when uncommented
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check all jobs succeeded
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "❌ Tests failed"
+            exit 1
+          fi
+          # Uncomment when benchmark job is enabled
+          # if [ "${{ needs.benchmark.result }}" != "success" ]; then
+          #   echo "❌ Benchmarks failed"
+          #   exit 1
+          # fi
+          echo "✅ All checks passed!"

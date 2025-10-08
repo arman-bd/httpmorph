@@ -109,9 +109,106 @@ if not VENDOR_EXISTS:
     print("  • nghttp2 (HTTP/2 library)")
     print("\n" + "=" * 70 + "\n")
 
-# Get OpenSSL and libnghttp2 paths from homebrew
-OPENSSL_PREFIX = "/opt/homebrew/opt/openssl@3"
-LIBNGHTTP2_PREFIX = "/opt/homebrew/opt/libnghttp2"
+# Get OpenSSL and nghttp2 paths based on platform
+def get_library_paths():
+    """Detect platform and return appropriate library paths."""
+    import subprocess
+
+    if IS_MACOS:
+        # Try Homebrew paths
+        try:
+            openssl_prefix = subprocess.check_output(
+                ["brew", "--prefix", "openssl@3"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            openssl_prefix = "/opt/homebrew/opt/openssl@3"
+
+        try:
+            nghttp2_prefix = subprocess.check_output(
+                ["brew", "--prefix", "libnghttp2"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+
+        return {
+            "openssl_include": f"{openssl_prefix}/include",
+            "openssl_lib": f"{openssl_prefix}/lib",
+            "nghttp2_include": f"{nghttp2_prefix}/include",
+            "nghttp2_lib": f"{nghttp2_prefix}/lib",
+        }
+
+    elif IS_LINUX:
+        # Use vendor dependencies if available, otherwise system paths
+        vendor_dir = Path("vendor")
+
+        # Check if vendor nghttp2 exists
+        vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
+        if vendor_nghttp2.exists():
+            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_lib = str(vendor_nghttp2 / "lib")
+        else:
+            # Try pkg-config for nghttp2
+            try:
+                import subprocess
+                nghttp2_include = subprocess.check_output(
+                    ["pkg-config", "--cflags-only-I", "libnghttp2"],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip().replace("-I", "")
+                nghttp2_lib = subprocess.check_output(
+                    ["pkg-config", "--libs-only-L", "libnghttp2"],
+                    stderr=subprocess.DEVNULL
+                ).decode().strip().replace("-L", "")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fall back to common system paths
+                nghttp2_include = "/usr/include"
+                nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
+                # Also check alternative paths
+                if not Path(nghttp2_lib).exists():
+                    for alt_path in ["/usr/lib64", "/usr/lib"]:
+                        if Path(alt_path).exists():
+                            nghttp2_lib = alt_path
+                            break
+
+        # Try pkg-config for OpenSSL
+        try:
+            import subprocess
+            openssl_include = subprocess.check_output(
+                ["pkg-config", "--cflags-only-I", "openssl"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip().replace("-I", "")
+            openssl_lib = subprocess.check_output(
+                ["pkg-config", "--libs-only-L", "openssl"],
+                stderr=subprocess.DEVNULL
+            ).decode().strip().replace("-L", "")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Use system OpenSSL on Linux
+            openssl_include = "/usr/include"
+            openssl_lib = "/usr/lib/x86_64-linux-gnu"
+            if not Path(openssl_lib).exists():
+                for alt_path in ["/usr/lib64", "/usr/lib"]:
+                    if Path(alt_path).exists():
+                        openssl_lib = alt_path
+                        break
+
+        return {
+            "openssl_include": openssl_include,
+            "openssl_lib": openssl_lib,
+            "nghttp2_include": nghttp2_include,
+            "nghttp2_lib": nghttp2_lib,
+        }
+
+    else:
+        # Windows or other platforms - use default system paths
+        return {
+            "openssl_include": "C:/Program Files/OpenSSL/include",
+            "openssl_lib": "C:/Program Files/OpenSSL/lib",
+            "nghttp2_include": "C:/Program Files/nghttp2/include",
+            "nghttp2_lib": "C:/Program Files/nghttp2/lib",
+        }
+
+LIB_PATHS = get_library_paths()
 
 # Define C extension modules
 extensions = [
@@ -128,12 +225,12 @@ extensions = [
             str(INCLUDE_DIR),
             str(CORE_DIR),
             str(TLS_DIR),
-            f"{OPENSSL_PREFIX}/include",
-            f"{LIBNGHTTP2_PREFIX}/include",
+            LIB_PATHS["openssl_include"],
+            LIB_PATHS["nghttp2_include"],
         ],
         library_dirs=[
-            f"{OPENSSL_PREFIX}/lib",
-            f"{LIBNGHTTP2_PREFIX}/lib",
+            LIB_PATHS["openssl_lib"],
+            LIB_PATHS["nghttp2_lib"],
         ],
         libraries=["ssl", "crypto", "nghttp2", "z"],
         extra_compile_args=["-std=c11", "-O2", "-DHAVE_NGHTTP2"],  # HTTP/2 enabled with EOF fix
@@ -148,12 +245,12 @@ extensions = [
         ],
         include_dirs=[
             str(CORE_DIR),
-            f"{OPENSSL_PREFIX}/include",
-            f"{LIBNGHTTP2_PREFIX}/include",
+            LIB_PATHS["openssl_include"],
+            LIB_PATHS["nghttp2_include"],
         ],
         library_dirs=[
-            f"{OPENSSL_PREFIX}/lib",
-            f"{LIBNGHTTP2_PREFIX}/lib",
+            LIB_PATHS["openssl_lib"],
+            LIB_PATHS["nghttp2_lib"],
         ],
         libraries=["ssl", "crypto", "nghttp2", "z"],
         extra_compile_args=["-std=c11", "-O2"],
