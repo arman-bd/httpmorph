@@ -1,0 +1,23 @@
+#!/bin/bash
+# Pre-commit hook for httpmorph
+# Runs linting before allowing commits
+#
+# To install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+echo "🔍 Running code quality checks..."
+echo ""
+
+# Run linting
+echo "📋 Linting with ruff..."
+if ruff check src/ tests/; then
+    echo "✅ Linting passed"
+else
+    echo "❌ Linting failed - please fix errors"
+    exit 1
+fi
+
+echo ""
+echo "✨ All checks passed!"
+echo "✅ Ready to commit"

@@ -1,0 +1,40 @@
+# Ruff configuration for httpmorph
+# This file provides IDE-friendly ruff settings
+
+line-length = 100
+target-version = "py38"
+fix = true
+
+# Exclude vendor directory
+exclude = [
+    "vendor/",
+    ".venv/",
+    "build/",
+    "dist/",
+]
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # function calls in argument defaults
+    "C901",  # too complex
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[lint.per-file-ignores]
+"tests/*" = ["B", "F401", "F811"]  # Allow unused imports and redefinitions in tests
+"benchmarks/*" = ["B"]

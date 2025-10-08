@@ -1,0 +1,26 @@
+# Ruff ignore patterns
+
+# Third-party dependencies
+vendor/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Compiled C extensions
+*.so
+*.pyd
+*.dll
+
+# IDE
+.vscode/
+.idea/
