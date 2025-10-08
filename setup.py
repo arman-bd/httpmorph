@@ -141,28 +141,40 @@ def get_library_paths():
 
     elif IS_LINUX:
         # Use vendor dependencies if available, otherwise system paths
-        vendor_dir = Path("vendor")
+        vendor_dir = Path("vendor").resolve()
 
         # Check if vendor nghttp2 exists
         vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
-        if vendor_nghttp2.exists():
+        if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
             nghttp2_include = str(vendor_nghttp2 / "include")
             nghttp2_lib = str(vendor_nghttp2 / "lib")
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
         else:
             # Try pkg-config for nghttp2
+            nghttp2_include = None
+            nghttp2_lib = None
             try:
                 import subprocess
-                nghttp2_include = subprocess.check_output(
+                include_output = subprocess.check_output(
                     ["pkg-config", "--cflags-only-I", "libnghttp2"],
                     stderr=subprocess.DEVNULL
-                ).decode().strip().replace("-I", "")
-                nghttp2_lib = subprocess.check_output(
+                ).decode().strip()
+                if include_output:
+                    nghttp2_include = include_output.replace("-I", "").strip()
+
+                lib_output = subprocess.check_output(
                     ["pkg-config", "--libs-only-L", "libnghttp2"],
                     stderr=subprocess.DEVNULL
-                ).decode().strip().replace("-L", "")
+                ).decode().strip()
+                if lib_output:
+                    nghttp2_lib = lib_output.replace("-L", "").strip()
             except (subprocess.CalledProcessError, FileNotFoundError):
-                # Fall back to common system paths
+                pass
+
+            # Fall back to common system paths if pkg-config didn't work
+            if not nghttp2_include:
                 nghttp2_include = "/usr/include"
+            if not nghttp2_lib:
                 nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
                 # Also check alternative paths
                 if not Path(nghttp2_lib).exists():
@@ -172,25 +184,46 @@ def get_library_paths():
                             break
 
         # Try pkg-config for OpenSSL
+        openssl_include = None
+        openssl_lib = None
         try:
             import subprocess
-            openssl_include = subprocess.check_output(
+            include_output = subprocess.check_output(
                 ["pkg-config", "--cflags-only-I", "openssl"],
                 stderr=subprocess.DEVNULL
-            ).decode().strip().replace("-I", "")
-            openssl_lib = subprocess.check_output(
+            ).decode().strip()
+            if include_output:
+                openssl_include = include_output.replace("-I", "").strip()
+
+            lib_output = subprocess.check_output(
                 ["pkg-config", "--libs-only-L", "openssl"],
                 stderr=subprocess.DEVNULL
-            ).decode().strip().replace("-L", "")
+            ).decode().strip()
+            if lib_output:
+                openssl_lib = lib_output.replace("-L", "").strip()
         except (subprocess.CalledProcessError, FileNotFoundError):
-            # Use system OpenSSL on Linux
+            pass
+
+        # Use system OpenSSL on Linux if pkg-config didn't work
+        if not openssl_include:
             openssl_include = "/usr/include"
+        if not openssl_lib:
             openssl_lib = "/usr/lib/x86_64-linux-gnu"
             if not Path(openssl_lib).exists():
                 for alt_path in ["/usr/lib64", "/usr/lib"]:
                     if Path(alt_path).exists():
                         openssl_lib = alt_path
                         break
+
+        # Validate paths before returning
+        if not openssl_include or not openssl_include.strip():
+            openssl_include = "/usr/include"
+        if not openssl_lib or not openssl_lib.strip():
+            openssl_lib = "/usr/lib/x86_64-linux-gnu"
+        if not nghttp2_include or not nghttp2_include.strip():
+            nghttp2_include = "/usr/include"
+        if not nghttp2_lib or not nghttp2_lib.strip():
+            nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
 
         return {
             "openssl_include": openssl_include,
@@ -209,6 +242,14 @@ def get_library_paths():
         }
 
 LIB_PATHS = get_library_paths()
+
+# Debug output
+print("\nLibrary paths detected:")
+print(f"  OpenSSL include: {LIB_PATHS['openssl_include']}")
+print(f"  OpenSSL lib: {LIB_PATHS['openssl_lib']}")
+print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
+print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
+print()
 
 # Define C extension modules
 extensions = [
