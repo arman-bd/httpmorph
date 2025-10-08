@@ -34,6 +34,14 @@ jobs:
       if: runner.os == 'macOS'
       run: brew install cmake ninja openssl@3 libnghttp2
 
+    - name: Cache vendor dependencies
+      uses: actions/cache@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}
+        restore-keys: |
+          vendor-${{ runner.os }}-
+
     - name: Setup vendor dependencies
       run: |
         chmod +x scripts/setup_vendors.sh
