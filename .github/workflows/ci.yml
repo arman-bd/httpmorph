@@ -12,7 +12,7 @@ jobs:
   # Load Configuration
   # ============================================================
   load-config:
-    uses: ./.github/workflows/config/config.yml
+    uses: ./.github/workflows/_config.yml
 
   # ============================================================
   # Test Job
@@ -20,7 +20,7 @@ jobs:
   test:
     needs: load-config
     if: needs.load-config.outputs.enable-tests == 'true'
-    uses: ./.github/workflows/jobs/test.yml
+    uses: ./.github/workflows/_test.yml
     with:
       os-matrix: ${{ needs.load-config.outputs.os-matrix }}
       python-matrix: ${{ needs.load-config.outputs.python-matrix }}
@@ -33,7 +33,7 @@ jobs:
   benchmark:
     needs: [load-config, test]
     if: needs.load-config.outputs.enable-benchmark == 'true'
-    uses: ./.github/workflows/jobs/benchmark.yml
+    uses: ./.github/workflows/_benchmark.yml
     with:
       primary-os: ${{ needs.load-config.outputs.primary-os }}
       primary-python: ${{ needs.load-config.outputs.primary-python }}
