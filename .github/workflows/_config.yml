@@ -61,7 +61,7 @@ jobs:
           # Operating Systems to test
           # Comment out any OS you want to skip during development
           OS_MATRIX='[
-            "ubuntu-latest"
+            "macos-latest"
           ]'
           # To add more OS: "macos-latest", "windows-latest"
 
@@ -73,7 +73,7 @@ jobs:
           # To add more versions: "3.9", "3.10", "3.12"
 
           # Primary OS and Python for single-runner jobs
-          PRIMARY_OS="ubuntu-latest"
+          PRIMARY_OS="macos-latest"
           PRIMARY_PYTHON="3.11"
 
           # Enable/Disable Jobs
