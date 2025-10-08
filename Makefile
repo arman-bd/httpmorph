@@ -1,4 +1,4 @@
-.PHONY: help setup build install test clean benchmark docs lint format sync
+.PHONY: help setup build install test clean benchmark docs lint format sync docker-build docker-test docker-shell
 
 help:
 	@echo "httpmorph - Development commands"
@@ -14,6 +14,11 @@ help:
 	@echo "  make benchmark   - Run benchmarks"
 	@echo "  make lint        - Run linters (ruff, mypy)"
 	@echo "  make format      - Format code (ruff)"
+	@echo ""
+	@echo "Docker (CI Testing):"
+	@echo "  make docker-build  - Build Docker test container (mimics CI)"
+	@echo "  make docker-test   - Run tests in Docker"
+	@echo "  make docker-shell  - Open shell in Docker for debugging"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean       - Remove build artifacts"
@@ -81,3 +86,16 @@ rebuild: clean setup build
 # Check if everything is working
 check: lint test
 	@echo "All checks passed!"
+
+# Docker targets for CI testing
+docker-build:
+	@echo "Building Docker test container (mimics GitHub Actions)..."
+	docker build -f Dockerfile.test -t httpmorph-test .
+
+docker-test: docker-build
+	@echo "Running tests in Docker container..."
+	docker run --rm httpmorph-test pytest tests/ -v
+
+docker-shell:
+	@echo "Opening shell in Docker container for debugging..."
+	docker run --rm -it -v $(PWD):/workspace httpmorph-test bash

@@ -125,7 +125,8 @@ cd nghttp2
 if [ ! -f "lib/.libs/libnghttp2.a" ]; then
     echo "Building nghttp2..."
 
-    ./configure --prefix="$VENDOR_DIR/nghttp2/install" \
+    # Build with -fPIC for use in shared libraries
+    CFLAGS="-fPIC" ./configure --prefix="$VENDOR_DIR/nghttp2/install" \
                 --enable-lib-only \
                 --enable-static \
                 --disable-shared \

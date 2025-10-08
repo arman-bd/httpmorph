@@ -2,9 +2,12 @@
  * browser_profiles.c - Browser TLS/HTTP fingerprint profiles implementation
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "browser_profiles.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>  /* for strcasecmp */
 #include <time.h>
 
 /* Chrome 131 Profile */
@@ -86,7 +89,7 @@ const browser_profile_t PROFILE_CHROME_131 = {
         .window_update = 15663105,
     },
 
-    .ja3_hash = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0",
+    .ja3_hash = "cd08e31494f9531f560d64c695473da9",  /* MD5 of JA3 string */
 };
 
 /* Chrome 124 Profile (older version) */
