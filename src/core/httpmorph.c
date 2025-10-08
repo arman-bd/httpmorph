@@ -9,6 +9,9 @@
  * - Connection pooling
  */
 
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+
 #include "../include/httpmorph.h"
 #include "../tls/browser_profiles.h"
 #include "io_engine.h"
@@ -16,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>  /* for strcasecmp */
 #include <time.h>
 #include <zlib.h>
 
@@ -1409,7 +1413,7 @@ static int http2_on_frame_recv_callback(nghttp2_session *session,
 }
 
 /* Perform HTTP/2 request */
-static int http2_request(SSL *ssl, httpmorph_request_t *request,
+static int http2_request(SSL *ssl, const httpmorph_request_t *request,
                          const char *host, const char *path,
                          httpmorph_response_t *response) {
     nghttp2_session *session;
@@ -2047,8 +2051,9 @@ http2_done:
 #endif
 
     /* 5. Decompress gzip if Content-Encoding: gzip or body starts with gzip magic bytes */
-    const char *content_encoding = httpmorph_response_get_header(response, "Content-Encoding");
-    bool should_decompress = false;
+    {
+        const char *content_encoding = httpmorph_response_get_header(response, "Content-Encoding");
+        bool should_decompress = false;
 
     if (content_encoding && strstr(content_encoding, "gzip")) {
         should_decompress = true;
@@ -2064,14 +2069,15 @@ http2_done:
         decompress_gzip(response);
     }
 
-    /* 6. Check if total time exceeded timeout */
-    uint64_t elapsed_us = get_time_us() - start_time;
-    uint64_t timeout_us = (uint64_t)request->timeout_ms * 1000;
-    if (elapsed_us > timeout_us) {
-        response->error = HTTPMORPH_ERROR_TIMEOUT;
-        response->error_message = strdup("Request timed out");
-    } else {
-        response->error = HTTPMORPH_OK;
+        /* 6. Check if total time exceeded timeout */
+        uint64_t elapsed_us = get_time_us() - start_time;
+        uint64_t timeout_us = (uint64_t)request->timeout_ms * 1000;
+        if (elapsed_us > timeout_us) {
+            response->error = HTTPMORPH_ERROR_TIMEOUT;
+            response->error_message = strdup("Request timed out");
+        } else {
+            response->error = HTTPMORPH_OK;
+        }
     }
 
 cleanup:
