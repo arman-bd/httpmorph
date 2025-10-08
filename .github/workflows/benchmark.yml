@@ -1,0 +1,37 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev
+        chmod +x scripts/setup_vendors.sh
+        ./scripts/setup_vendors.sh
+        pip install -e ".[dev,benchmark]"
+
+    - name: Run benchmarks
+      run: pytest benchmarks/ --benchmark-only --benchmark-json=benchmark.json
+
+    - name: Store benchmark
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true

@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Cython generated files (only in bindings directory)
+src/bindings/*.c
+src/bindings/*.html
+_httpmorph.cpp
+
+# C/C++
+*.o
+*.a
+*.dylib
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Documentation
+docs/_build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+.venv/
+
+# uv
+.uv/
+uv.lock
+
+# Vendor dependencies (downloaded by scripts/setup_vendors.sh)
+vendor/
+
+# Benchmarks
+benchmarks/results/
+*.prof
+
+# Environment variables
+.env
+examples/.env
