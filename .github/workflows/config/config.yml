@@ -31,6 +31,15 @@ on:
         description: "Primary Python version for single-runner jobs"
         value: ${{ jobs.config.outputs.primary-python }}
 
+      # Job toggles
+      enable-tests:
+        description: "Enable test job"
+        value: ${{ jobs.config.outputs.enable-tests }}
+
+      enable-benchmark:
+        description: "Enable benchmark job"
+        value: ${{ jobs.config.outputs.enable-benchmark }}
+
 jobs:
   config:
     runs-on: ubuntu-latest
@@ -39,6 +48,8 @@ jobs:
       python-matrix: ${{ steps.set-config.outputs.python-matrix }}
       primary-os: ${{ steps.set-config.outputs.primary-os }}
       primary-python: ${{ steps.set-config.outputs.primary-python }}
+      enable-tests: ${{ steps.set-config.outputs.enable-tests }}
+      enable-benchmark: ${{ steps.set-config.outputs.enable-benchmark }}
 
     steps:
       - id: set-config
@@ -68,6 +79,11 @@ jobs:
           PRIMARY_OS="ubuntu-latest"
           PRIMARY_PYTHON="3.11"
 
+          # Enable/Disable Jobs
+          # Set to "true" or "false"
+          ENABLE_TESTS="true"
+          ENABLE_BENCHMARK="false"
+
           # ============================================================
           # END CONFIGURATION
           # ============================================================
@@ -80,8 +96,12 @@ jobs:
           echo "python-matrix=$PYTHON_MATRIX_COMPACT" >> $GITHUB_OUTPUT
           echo "primary-os=$PRIMARY_OS" >> $GITHUB_OUTPUT
           echo "primary-python=$PRIMARY_PYTHON" >> $GITHUB_OUTPUT
+          echo "enable-tests=$ENABLE_TESTS" >> $GITHUB_OUTPUT
+          echo "enable-benchmark=$ENABLE_BENCHMARK" >> $GITHUB_OUTPUT
 
           echo "✓ Configuration loaded:"
           echo "  OS: $OS_MATRIX_COMPACT"
           echo "  Python: $PYTHON_MATRIX_COMPACT"
           echo "  Primary: $PRIMARY_OS / $PRIMARY_PYTHON"
+          echo "  Tests: $ENABLE_TESTS"
+          echo "  Benchmark: $ENABLE_BENCHMARK"

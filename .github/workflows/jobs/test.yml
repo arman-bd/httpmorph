@@ -1,10 +1,20 @@
 name: Test
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+  workflow_call:
+    inputs:
+      os-matrix:
+        required: true
+        type: string
+      python-matrix:
+        required: true
+        type: string
+      primary-os:
+        required: true
+        type: string
+      primary-python:
+        required: true
+        type: string
 
 jobs:
   test:
@@ -13,8 +23,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        os: ${{ fromJSON(inputs.os-matrix) }}
+        python-version: ${{ fromJSON(inputs.python-matrix) }}
 
     steps:
     - uses: actions/checkout@v4
@@ -29,11 +39,13 @@ jobs:
 
     - name: Install system dependencies (Linux)
       if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
-      run: brew install cmake ninja
+      run: brew install cmake ninja openssl@3 libnghttp2
 
     - name: Install system dependencies (Windows)
       if: runner.os == 'Windows'
@@ -59,7 +71,7 @@ jobs:
       run: pytest tests/ -v --cov=httpmorph --cov-report=xml
 
     - name: Upload coverage
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      if: matrix.os == inputs.primary-os && matrix.python-version == inputs.primary-python
       uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml

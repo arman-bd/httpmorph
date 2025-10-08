@@ -1,0 +1,54 @@
+name: Benchmark
+
+on:
+  workflow_call:
+    inputs:
+      primary-os:
+        required: true
+        type: string
+      primary-python:
+        required: true
+        type: string
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ${{ inputs.primary-os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.primary-python }}
+        cache: 'pip'
+
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+    - name: Install system dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: brew install cmake ninja openssl@3 libnghttp2
+
+    - name: Setup vendor dependencies
+      run: |
+        chmod +x scripts/setup_vendors.sh
+        ./scripts/setup_vendors.sh
+
+    - name: Install package
+      run: pip install -e ".[dev,benchmark]"
+
+    - name: Run benchmarks
+      run: pytest benchmarks/ --benchmark-only --benchmark-json=benchmark.json
+
+    - name: Store benchmark
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
