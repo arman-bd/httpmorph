@@ -25,6 +25,17 @@ cd "$VENDOR_DIR"
 
 # Detect OS
 OS="$(uname -s)"
+case "$OS" in
+    MINGW*|MSYS*|CYGWIN*)
+        OS="Windows"
+        ;;
+    Darwin)
+        OS="Darwin"
+        ;;
+    Linux)
+        OS="Linux"
+        ;;
+esac
 echo "Detected OS: $OS"
 echo ""
 
@@ -126,6 +137,10 @@ echo "==> Setting up nghttp2..."
 if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
     echo "✓ Using Homebrew's libnghttp2"
     echo "  Location: $(brew --prefix libnghttp2)"
+# On Windows, use vcpkg or skip (to be implemented)
+elif [ "$OS" = "Windows" ]; then
+    echo "⊘ nghttp2 on Windows requires manual setup via vcpkg"
+    echo "  Run: vcpkg install nghttp2:x64-windows"
 else
     # Build from source on Linux or if Homebrew version not available
     if [ ! -d "nghttp2" ]; then
@@ -179,6 +194,8 @@ if [ "$OS" = "Linux" ]; then
 fi
 if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
     echo "  ✓ nghttp2:    $(brew --prefix libnghttp2) (Homebrew)"
+elif [ "$OS" = "Windows" ]; then
+    echo "  ⊘ nghttp2:    Install via vcpkg (nghttp2:x64-windows)"
 else
     echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
 fi

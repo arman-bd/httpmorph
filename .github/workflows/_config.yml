@@ -61,7 +61,7 @@ jobs:
           # Operating Systems to test
           # Comment out any OS you want to skip during development
           OS_MATRIX='[
-            "macos-latest", "ubuntu-latest"
+            "windows-latest"
           ]'
           # To add more OS: "macos-latest", "windows-latest"
 

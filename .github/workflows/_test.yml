@@ -49,11 +49,25 @@ jobs:
 
     - name: Install system dependencies (Windows)
       if: runner.os == 'Windows'
-      run: choco install cmake -y
+      run: |
+        choco install cmake -y
+        choco install openssl -y
 
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
+
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows'
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: 'c8696863d371ab7f46e213d8f5ca923c4aef2a00'
+
+    - name: Install nghttp2 via vcpkg (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        vcpkg install nghttp2:x64-windows
+      shell: bash
 
     - name: Cache vendor dependencies
       id: cache-vendor
