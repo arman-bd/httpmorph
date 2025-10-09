@@ -137,14 +137,19 @@ echo "==> Setting up nghttp2..."
 if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
     echo "✓ Using Homebrew's libnghttp2"
     echo "  Location: $(brew --prefix libnghttp2)"
+# On Windows with vcpkg, use vcpkg's nghttp2
+elif [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+    echo "✓ Using vcpkg's nghttp2"
+    echo "  Location: $VCPKG_ROOT/installed/x64-windows"
 # On Windows with MSYS2, use the MSYS2 package
 elif [ "$OS" = "Windows" ] && [ -d "/mingw64/include/nghttp2" ]; then
     echo "✓ Using MSYS2's nghttp2"
     echo "  Location: /mingw64"
-# On Windows without MSYS2, skip
+# On Windows without vcpkg or MSYS2, skip
 elif [ "$OS" = "Windows" ]; then
-    echo "⊘ nghttp2 on Windows requires MSYS2 or vcpkg"
-    echo "  Run: pacman -S mingw-w64-x86_64-nghttp2 (MSYS2)"
+    echo "⊘ nghttp2 on Windows requires vcpkg or MSYS2"
+    echo "  vcpkg: vcpkg install nghttp2:x64-windows"
+    echo "  MSYS2: pacman -S mingw-w64-x86_64-nghttp2"
 else
     # Build from source on Linux or if Homebrew version not available
     if [ ! -d "nghttp2" ]; then
@@ -198,10 +203,12 @@ if [ "$OS" = "Linux" ]; then
 fi
 if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
     echo "  ✓ nghttp2:    $(brew --prefix libnghttp2) (Homebrew)"
+elif [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+    echo "  ✓ nghttp2:    $VCPKG_ROOT/installed/x64-windows (vcpkg)"
 elif [ "$OS" = "Windows" ] && [ -d "/mingw64/include/nghttp2" ]; then
     echo "  ✓ nghttp2:    /mingw64 (MSYS2)"
 elif [ "$OS" = "Windows" ]; then
-    echo "  ⊘ nghttp2:    Install via MSYS2 (mingw-w64-x86_64-nghttp2)"
+    echo "  ⊘ nghttp2:    Install via vcpkg or MSYS2"
 else
     echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
 fi
