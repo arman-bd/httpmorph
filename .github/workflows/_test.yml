@@ -88,7 +88,7 @@ jobs:
     - name: Install dependencies via vcpkg (Windows)
       if: runner.os == 'Windows'
       run: |
-        vcpkg install openssl:x64-windows nghttp2:x64-windows --clean-after-build
+        vcpkg install openssl:x64-windows nghttp2:x64-windows zlib:x64-windows --clean-after-build
       shell: bash
 
     - name: Cache vendor dependencies

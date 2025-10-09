@@ -253,13 +253,36 @@ def get_library_paths():
             "nghttp2_lib": nghttp2_lib,
         }
 
+    elif IS_WINDOWS:
+        # Windows - use vcpkg if available, otherwise default paths
+        import os
+
+        vcpkg_root = os.environ.get("VCPKG_ROOT", "C:/vcpkg")
+        vcpkg_installed = Path(vcpkg_root) / "installed" / "x64-windows"
+
+        if vcpkg_installed.exists():
+            print(f"Using vcpkg dependencies from: {vcpkg_installed}")
+            return {
+                "openssl_include": str(vcpkg_installed / "include"),
+                "openssl_lib": str(vcpkg_installed / "lib"),
+                "nghttp2_include": str(vcpkg_installed / "include"),
+                "nghttp2_lib": str(vcpkg_installed / "lib"),
+            }
+        else:
+            # Fall back to default paths
+            return {
+                "openssl_include": "C:/Program Files/OpenSSL/include",
+                "openssl_lib": "C:/Program Files/OpenSSL/lib",
+                "nghttp2_include": "C:/Program Files/nghttp2/include",
+                "nghttp2_lib": "C:/Program Files/nghttp2/lib",
+            }
     else:
-        # Windows or other platforms - use default system paths
+        # Other platforms - use default system paths
         return {
-            "openssl_include": "C:/Program Files/OpenSSL/include",
-            "openssl_lib": "C:/Program Files/OpenSSL/lib",
-            "nghttp2_include": "C:/Program Files/nghttp2/include",
-            "nghttp2_lib": "C:/Program Files/nghttp2/lib",
+            "openssl_include": "/usr/include",
+            "openssl_lib": "/usr/lib",
+            "nghttp2_include": "/usr/include",
+            "nghttp2_lib": "/usr/lib",
         }
 
 
@@ -272,6 +295,12 @@ print(f"  OpenSSL lib: {LIB_PATHS['openssl_lib']}")
 print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
 print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
 print()
+
+# Platform-specific compile args for extensions
+if IS_WINDOWS:
+    EXT_COMPILE_ARGS = ["/O2", "/DHAVE_NGHTTP2"]
+else:
+    EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
 
 # Define C extension modules
 extensions = [
@@ -296,7 +325,7 @@ extensions = [
             LIB_PATHS["nghttp2_lib"],
         ],
         libraries=["ssl", "crypto", "nghttp2", "z"],
-        extra_compile_args=["-std=c11", "-O2", "-DHAVE_NGHTTP2"],  # HTTP/2 enabled with EOF fix
+        extra_compile_args=EXT_COMPILE_ARGS,
         language="c",
     ),
     # HTTP/2 client extension
@@ -316,7 +345,7 @@ extensions = [
             LIB_PATHS["nghttp2_lib"],
         ],
         libraries=["ssl", "crypto", "nghttp2", "z"],
-        extra_compile_args=["-std=c11", "-O2"],
+        extra_compile_args=EXT_COMPILE_ARGS if IS_WINDOWS else ["-std=c11", "-O2"],
         language="c",
     ),
 ]
