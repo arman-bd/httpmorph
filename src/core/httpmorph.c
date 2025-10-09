@@ -19,13 +19,18 @@
 #ifdef _WIN32
     #define _CRT_SECURE_NO_WARNINGS
     #define strcasecmp _stricmp
+    #define strncasecmp _strnicmp
     #define strdup _strdup
     #define close closesocket
     #define ssize_t SSIZE_T
     /* Helper for snprintf size parameter (Windows uses int, POSIX uses size_t) */
     #define SNPRINTF_SIZE(size) ((int)(size))
+    /* Windows select() ignores first parameter (nfds) */
+    #define SELECT_NFDS(sockfd) 0
 #else
     #define SNPRINTF_SIZE(size) (size)
+    /* POSIX select() needs nfds = highest fd + 1 */
+    #define SELECT_NFDS(sockfd) ((sockfd) + 1)
 #endif
 
 #include "../include/httpmorph.h"
@@ -778,7 +783,7 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
             tv.tv_sec = timeout_ms / 1000;
             tv.tv_usec = (timeout_ms % 1000) * 1000;
 
-            ret = select(sockfd + 1, NULL, &write_fds, NULL, &tv);
+            ret = select(SELECT_NFDS(sockfd), NULL, &write_fds, NULL, &tv);
             if (ret > 0) {
                 /* Check if connection succeeded */
                 int error = 0;
@@ -1593,7 +1598,7 @@ static int http2_request(SSL *ssl, const httpmorph_request_t *request,
         tv.tv_sec = 5;  /* 5 second timeout */
         tv.tv_usec = 0;
 
-        int select_rv = select(sockfd + 1, &readfds, &writefds, NULL, &tv);
+        int select_rv = select(SELECT_NFDS(sockfd), &readfds, &writefds, NULL, &tv);
         if (select_rv < 0) {
             /* Error */
             rv = -1;

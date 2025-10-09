@@ -2,7 +2,9 @@
  * browser_profiles.c - Browser TLS/HTTP fingerprint profiles implementation
  */
 
-#define _POSIX_C_SOURCE 200809L
+#ifndef _WIN32
+    #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "browser_profiles.h"
 #include <stdlib.h>
@@ -232,7 +234,7 @@ const browser_profile_t* browser_profile_get(const char *name) {
 const browser_profile_t* browser_profile_random(void) {
     static bool seeded = false;
     if (!seeded) {
-        srand(time(NULL));
+        srand((unsigned int)time(NULL));
         seeded = true;
     }
 

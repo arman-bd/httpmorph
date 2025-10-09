@@ -245,7 +245,7 @@ int io_socket_create_nonblocking(int domain, int type, int protocol) {
     int sockfd = socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
 #else
     /* macOS and Windows don't support SOCK_NONBLOCK flag */
-    int sockfd = socket(domain, type, protocol);
+    int sockfd = (int)socket(domain, type, protocol);
     if (sockfd >= 0) {
 #ifdef _WIN32
         u_long mode = 1;
