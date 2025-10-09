@@ -296,11 +296,16 @@ print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
 print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
 print()
 
-# Platform-specific compile args for extensions
+# Platform-specific compile args and libraries for extensions
 if IS_WINDOWS:
     EXT_COMPILE_ARGS = ["/O2", "/DHAVE_NGHTTP2"]
+    # vcpkg library names on Windows (without .lib extension)
+    # Links to: libssl.lib, libcrypto.lib, nghttp2.lib, zlib.lib
+    EXT_LIBRARIES = ["libssl", "libcrypto", "nghttp2", "zlib"]
 else:
     EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
+    # Unix library names
+    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
 # Define C extension modules
 extensions = [
@@ -324,7 +329,7 @@ extensions = [
             LIB_PATHS["openssl_lib"],
             LIB_PATHS["nghttp2_lib"],
         ],
-        libraries=["ssl", "crypto", "nghttp2", "z"],
+        libraries=EXT_LIBRARIES,
         extra_compile_args=EXT_COMPILE_ARGS,
         language="c",
     ),
@@ -344,7 +349,7 @@ extensions = [
             LIB_PATHS["openssl_lib"],
             LIB_PATHS["nghttp2_lib"],
         ],
-        libraries=["ssl", "crypto", "nghttp2", "z"],
+        libraries=EXT_LIBRARIES,
         extra_compile_args=EXT_COMPILE_ARGS if IS_WINDOWS else ["-std=c11", "-O2"],
         language="c",
     ),

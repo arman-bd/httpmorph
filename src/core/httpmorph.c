@@ -28,6 +28,7 @@
     #include <ws2tcpip.h>
     #include <windows.h>
     #define strcasecmp _stricmp
+    #define strdup _strdup
     #define close closesocket
     #define ssize_t SSIZE_T
     #pragma comment(lib, "ws2_32.lib")
