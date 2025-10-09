@@ -58,11 +58,19 @@ jobs:
     - name: Setup vcpkg (Windows)
       if: runner.os == 'Windows'
       run: |
-        git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
-        cd C:/vcpkg
-        ./bootstrap-vcpkg.bat
-        echo "VCPKG_ROOT=C:/vcpkg" >> $GITHUB_ENV
-        echo "C:/vcpkg" >> $GITHUB_PATH
+        # Use pre-installed vcpkg on GitHub runners
+        if [ -d "C:/vcpkg" ]; then
+          echo "Using pre-installed vcpkg"
+          VCPKG_ROOT="C:/vcpkg"
+        else
+          echo "Installing vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
+          cd C:/vcpkg
+          ./bootstrap-vcpkg.bat
+          VCPKG_ROOT="C:/vcpkg"
+        fi
+        echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+        echo "$VCPKG_ROOT" >> $GITHUB_PATH
       shell: bash
 
     - name: Cache vcpkg packages (Windows)
@@ -72,9 +80,10 @@ jobs:
         path: |
           C:/vcpkg/installed
           C:/vcpkg/packages
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}-v1
+          C:/vcpkg/buildtrees
+        key: vcpkg-nghttp2-${{ runner.os }}-v1
         restore-keys: |
-          vcpkg-${{ runner.os }}-
+          vcpkg-nghttp2-${{ runner.os }}-
 
     - name: Install nghttp2 via vcpkg (Windows)
       if: runner.os == 'Windows'
