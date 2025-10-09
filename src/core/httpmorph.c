@@ -28,13 +28,12 @@
     #include <ws2tcpip.h>
     #include <windows.h>
     #define strcasecmp _stricmp
-#else
-    #include <strings.h>  /* for strcasecmp */
     #define close closesocket
     #define ssize_t SSIZE_T
     #pragma comment(lib, "ws2_32.lib")
     typedef int socklen_t;
 #else
+    #include <strings.h>  /* for strcasecmp */
     #include <unistd.h>
     #include <errno.h>
     #include <fcntl.h>
