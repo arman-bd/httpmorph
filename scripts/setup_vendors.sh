@@ -52,7 +52,12 @@ fi
 cd boringssl
 
 # Check if already built
-if [ ! -f "build/ssl/libssl.a" ]; then
+BUILD_MARKER="build/ssl/libssl.a"
+if [ "$OS" = "Windows" ]; then
+    BUILD_MARKER="build/ssl/Release/ssl.lib"
+fi
+
+if [ ! -f "$BUILD_MARKER" ]; then
     echo "Building BoringSSL..."
 
     # BoringSSL requires CMake and Go
@@ -68,11 +73,21 @@ if [ ! -f "build/ssl/libssl.a" ]; then
     mkdir -p build
     cd build
 
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-          ..
-
-    make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    # Configure based on OS
+    if [ "$OS" = "Windows" ]; then
+        # Windows with MSVC - use Ninja generator for faster builds
+        cmake -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              ..
+        ninja
+    else
+        # Linux/macOS - use Unix Makefiles
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              ..
+        make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    fi
 
     echo "✓ BoringSSL built successfully"
 
