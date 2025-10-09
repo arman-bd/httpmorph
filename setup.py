@@ -46,10 +46,12 @@ if IS_WINDOWS:
     EXTRA_COMPILE_ARGS = [
         "/O2",  # Optimization
         "/W3",  # Warning level 3
-        "/std:c11",  # C11 standard
         "/D_WIN32",
         "/D_CRT_SECURE_NO_WARNINGS",
     ]
+    # Note: /std:c11 is only available in VS 2019 16.8+ (MSVC 19.28+)
+    # For older versions, MSVC uses C89 with C99/C11 extensions by default
+    # We rely on C99 features like loop variable declarations which are supported
     EXTRA_LINK_ARGS = ["ws2_32.lib"]  # Winsock library
 else:
     # GCC/Clang flags

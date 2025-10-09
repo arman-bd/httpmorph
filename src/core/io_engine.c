@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>  /* for PRIu64 */
 
 /* Platform-specific headers */
 #ifdef _WIN32
@@ -176,7 +177,7 @@ void io_engine_destroy(io_engine_t *engine) {
         close(engine->engine_fd);
     }
 
-    printf("[io_engine] Stats - submitted: %lu, completed: %lu, failed: %lu\n",
+    printf("[io_engine] Stats - submitted: %" PRIu64 ", completed: %" PRIu64 ", failed: %" PRIu64 "\n",
            engine->ops_submitted, engine->ops_completed, engine->ops_failed);
 
     free(engine);
@@ -243,12 +244,17 @@ int io_socket_create_nonblocking(int domain, int type, int protocol) {
 #ifdef __linux__
     int sockfd = socket(domain, type | SOCK_NONBLOCK | SOCK_CLOEXEC, protocol);
 #else
-    /* macOS doesn't support SOCK_NONBLOCK flag */
+    /* macOS and Windows don't support SOCK_NONBLOCK flag */
     int sockfd = socket(domain, type, protocol);
     if (sockfd >= 0) {
+#ifdef _WIN32
+        u_long mode = 1;
+        ioctlsocket(sockfd, FIONBIO, &mode);
+#else
         int flags = fcntl(sockfd, F_GETFL, 0);
         fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
         fcntl(sockfd, F_SETFD, FD_CLOEXEC);
+#endif
     }
 #endif
     return sockfd;
@@ -261,19 +267,32 @@ int io_socket_set_performance_opts(int sockfd) {
     int opt = 1;
 
     /* Enable TCP_NODELAY (disable Nagle's algorithm) */
+#ifdef _WIN32
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&opt, sizeof(opt)) < 0) {
+#else
     if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) < 0) {
+#endif
         return -1;
     }
 
     /* Enable SO_KEEPALIVE */
+#ifdef _WIN32
+    if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (char*)&opt, sizeof(opt)) < 0) {
+#else
     if (setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt)) < 0) {
+#endif
         return -1;
     }
 
     /* Set SO_RCVBUF and SO_SNDBUF for larger buffers */
     int buf_size = 256 * 1024;  /* 256KB */
+#ifdef _WIN32
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (char*)&buf_size, sizeof(buf_size));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (char*)&buf_size, sizeof(buf_size));
+#else
     setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &buf_size, sizeof(buf_size));
     setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, &buf_size, sizeof(buf_size));
+#endif
 
     return 0;
 }

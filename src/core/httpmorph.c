@@ -9,8 +9,24 @@
  * - Connection pooling
  */
 
-#define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 700
+/* POSIX feature macros (only for POSIX systems) */
+#ifndef _WIN32
+    #define _POSIX_C_SOURCE 200809L
+    #define _XOPEN_SOURCE 700
+#endif
+
+/* Windows compatibility macros (MUST come before standard library includes) */
+#ifdef _WIN32
+    #define _CRT_SECURE_NO_WARNINGS
+    #define strcasecmp _stricmp
+    #define strdup _strdup
+    #define close closesocket
+    #define ssize_t SSIZE_T
+    /* Helper for snprintf size parameter (Windows uses int, POSIX uses size_t) */
+    #define SNPRINTF_SIZE(size) ((int)(size))
+#else
+    #define SNPRINTF_SIZE(size) (size)
+#endif
 
 #include "../include/httpmorph.h"
 #include "../tls/browser_profiles.h"
@@ -27,12 +43,27 @@
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
-    #define strcasecmp _stricmp
-    #define strdup _strdup
-    #define close closesocket
-    #define ssize_t SSIZE_T
     #pragma comment(lib, "ws2_32.lib")
     typedef int socklen_t;
+
+    /* strnlen is not available in older MSVC versions */
+    #if _MSC_VER < 1900  /* Before Visual Studio 2015 */
+        static size_t strnlen(const char *s, size_t n) {
+            const char *p = (const char *)memchr(s, 0, n);
+            return p ? (size_t)(p - s) : n;
+        }
+    #endif
+
+    /* strndup is not available on Windows MSVC */
+    static char* strndup(const char *s, size_t n) {
+        size_t len = strnlen(s, n);
+        char *dup = (char*)malloc(len + 1);
+        if (dup) {
+            memcpy(dup, s, len);
+            dup[len] = '\0';
+        }
+        return dup;
+    }
 #else
     #include <strings.h>  /* for strcasecmp */
     #include <unistd.h>
@@ -141,9 +172,16 @@ typedef struct {
 
 /* Helper: Get current time in microseconds */
 static uint64_t get_time_us(void) {
+#ifdef _WIN32
+    LARGE_INTEGER frequency, counter;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+    return (uint64_t)((counter.QuadPart * 1000000) / frequency.QuadPart);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+#endif
 }
 
 /* Helper: Parse URL */
@@ -725,7 +763,11 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
             break;
         }
 
+#ifdef _WIN32
+        if (WSAGetLastError() == WSAEWOULDBLOCK) {
+#else
         if (errno == EINPROGRESS) {
+#endif
             /* Connection in progress - wait with select */
             fd_set write_fds;
             struct timeval tv;
@@ -741,7 +783,11 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
                 /* Check if connection succeeded */
                 int error = 0;
                 socklen_t len = sizeof(error);
+#ifdef _WIN32
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, (int*)&len) == 0 && error == 0) {
+#else
                 if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
+#endif
                     break;  /* Success */
                 }
             }
@@ -766,13 +812,22 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
 
         /* Set performance options */
         int opt = 1;
+#ifdef _WIN32
+        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&opt, sizeof(opt));
+#else
         setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+#endif
 
         /* Set receive timeout to prevent indefinite blocking */
+#ifdef _WIN32
+        DWORD timeout_dw = timeout_ms;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout_dw, sizeof(timeout_dw));
+#else
         struct timeval recv_timeout;
         recv_timeout.tv_sec = timeout_ms / 1000;
         recv_timeout.tv_usec = (timeout_ms % 1000) * 1000;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+#endif
 
         *connect_time_us = get_time_us() - start_time;
     }
@@ -978,7 +1033,7 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         default:             ja3_version = 0x0303; break;  /* Default to TLS 1.2 */
     }
 
-    int written = snprintf(p, end - p, "%u", ja3_version);
+    int written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", ja3_version);
     if (written < 0 || written >= (end - p)) {
         return NULL;
     }
@@ -989,7 +1044,7 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
     if (profile && profile->cipher_suite_count > 0) {
         for (size_t i = 0; i < profile->cipher_suite_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
-            written = snprintf(p, end - p, "%u", profile->cipher_suites[i]);
+            written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->cipher_suites[i]);
             if (written > 0 && written < (end - p)) p += written;
         }
     } else {
@@ -997,7 +1052,7 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         const SSL_CIPHER *cipher = SSL_get_current_cipher(ssl);
         if (cipher) {
             uint16_t cipher_id = SSL_CIPHER_get_id(cipher) & 0xFFFF;
-            written = snprintf(p, end - p, "%u", cipher_id);
+            written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", cipher_id);
             if (written > 0 && written < (end - p)) p += written;
         }
     }
@@ -1007,12 +1062,12 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
     if (profile && profile->extension_count > 0) {
         for (size_t i = 0; i < profile->extension_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
-            written = snprintf(p, end - p, "%u", profile->extensions[i]);
+            written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->extensions[i]);
             if (written > 0 && written < (end - p)) p += written;
         }
     } else {
         /* Fallback: common extensions */
-        written = snprintf(p, end - p, "0-10-11-13-16-23-35-43-45-51");
+        written = snprintf(p, SNPRINTF_SIZE(end - p), "0-10-11-13-16-23-35-43-45-51");
         if (written > 0 && written < (end - p)) p += written;
     }
 
@@ -1021,12 +1076,12 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
     if (profile && profile->curve_count > 0) {
         for (size_t i = 0; i < profile->curve_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
-            written = snprintf(p, end - p, "%u", profile->curves[i]);
+            written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->curves[i]);
             if (written > 0 && written < (end - p)) p += written;
         }
     } else {
         /* Fallback: common curves */
-        written = snprintf(p, end - p, "29-23-24");
+        written = snprintf(p, SNPRINTF_SIZE(end - p), "29-23-24");
         if (written > 0 && written < (end - p)) p += written;
     }
 
@@ -1082,17 +1137,17 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
         /* HTTP proxy requires absolute URI: GET http://host:port/path HTTP/1.1 */
         if ((strcmp(scheme, "http") == 0 && port == 80) ||
             (strcmp(scheme, "https") == 0 && port == 443)) {
-            p += snprintf(p, end - p, "%s %s://%s%s HTTP/1.1\r\n",
+            p += snprintf(p, SNPRINTF_SIZE(end - p), "%s %s://%s%s HTTP/1.1\r\n",
                          method_str, scheme, host, path);
         } else {
-            p += snprintf(p, end - p, "%s %s://%s:%u%s HTTP/1.1\r\n",
+            p += snprintf(p, SNPRINTF_SIZE(end - p), "%s %s://%s:%u%s HTTP/1.1\r\n",
                          method_str, scheme, host, port, path);
         }
     } else {
         /* Direct connection or HTTPS through proxy (after CONNECT): use relative path */
-        p += snprintf(p, end - p, "%s %s HTTP/1.1\r\n", method_str, path);
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "%s %s HTTP/1.1\r\n", method_str, path);
     }
-    p += snprintf(p, end - p, "Host: %s\r\n", host);
+    p += snprintf(p, SNPRINTF_SIZE(end - p), "Host: %s\r\n", host);
 
     /* Add minimal required headers if not provided */
     bool has_user_agent = false;
@@ -1109,13 +1164,13 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
     if (!has_user_agent) {
         /* Use request's user agent if set, otherwise use generic */
         const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.0";
-        p += snprintf(p, end - p, "User-Agent: %s\r\n", user_agent);
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "User-Agent: %s\r\n", user_agent);
     }
     if (!has_accept) {
-        p += snprintf(p, end - p, "Accept: */*\r\n");
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Accept: */*\r\n");
     }
     if (!has_connection) {
-        p += snprintf(p, end - p, "Connection: close\r\n");
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Connection: close\r\n");
     }
 
     /* Add Proxy-Authorization header for HTTP proxy (not HTTPS/CONNECT) */
@@ -1128,24 +1183,24 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
 
         char *encoded = base64_encode(credentials, strlen(credentials));
         if (encoded) {
-            p += snprintf(p, end - p, "Proxy-Authorization: Basic %s\r\n", encoded);
+            p += snprintf(p, SNPRINTF_SIZE(end - p), "Proxy-Authorization: Basic %s\r\n", encoded);
             free(encoded);
         }
     }
 
     /* Add request headers */
     for (size_t i = 0; i < request->header_count; i++) {
-        p += snprintf(p, end - p, "%s: %s\r\n",
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "%s: %s\r\n",
                      request->header_keys[i], request->header_values[i]);
     }
 
     /* Content-Length if body present */
     if (request->body && request->body_len > 0) {
-        p += snprintf(p, end - p, "Content-Length: %zu\r\n", request->body_len);
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Content-Length: %zu\r\n", request->body_len);
     }
 
     /* End of headers */
-    p += snprintf(p, end - p, "\r\n");
+    p += snprintf(p, SNPRINTF_SIZE(end - p), "\r\n");
 
     /* Send request headers */
     size_t total_sent = 0;
@@ -1634,7 +1689,12 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
                     break;
                 }
                 /* Check errno for timeout */
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err == WSAEWOULDBLOCK || err == WSAETIMEDOUT) {
+#else
                 if (errno == EWOULDBLOCK || errno == EAGAIN || errno == ETIMEDOUT) {
+#endif
                     return HTTPMORPH_ERROR_TIMEOUT;
                 }
                 return HTTPMORPH_ERROR_NETWORK;
@@ -1823,9 +1883,9 @@ static int decompress_gzip(httpmorph_response_t *response) {
     z_stream stream;
     memset(&stream, 0, sizeof(stream));
     stream.next_in = response->body;
-    stream.avail_in = response->body_len;
+    stream.avail_in = (uInt)response->body_len;  /* Cast size_t to uInt for zlib */
     stream.next_out = decompressed;
-    stream.avail_out = decompressed_capacity;
+    stream.avail_out = (uInt)decompressed_capacity;  /* Cast size_t to uInt for zlib */
 
     /* Use inflateInit2 with windowBits=15+16 for gzip */
     int ret = inflateInit2(&stream, 15 + 16);
@@ -1849,7 +1909,7 @@ static int decompress_gzip(httpmorph_response_t *response) {
 
         decompressed = new_decompressed;
         stream.next_out = decompressed + decompressed_capacity;
-        stream.avail_out = new_capacity - decompressed_capacity;
+        stream.avail_out = (uInt)(new_capacity - decompressed_capacity);  /* Cast size_t to uInt for zlib */
         decompressed_capacity = new_capacity;
 
         ret = inflate(&stream, Z_FINISH);

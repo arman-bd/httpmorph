@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # Windows compatibility testing using MinGW-w64 cross-compiler
+  windows-mingw:
+    build:
+      context: .
+      dockerfile: Dockerfile.windows-mingw
+    volumes:
+      - .:/workspace
+      - vcpkg-windows:/opt/vcpkg/installed
+      - vcpkg-buildtrees:/opt/vcpkg/buildtrees
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - VCPKG_ROOT=/opt/vcpkg
+    command: test-windows-build
+
+  # Interactive shell for manual Windows build testing
+  windows-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile.windows-mingw
+    volumes:
+      - .:/workspace
+      - vcpkg-windows:/opt/vcpkg/installed
+      - vcpkg-buildtrees:/opt/vcpkg/buildtrees
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - VCPKG_ROOT=/opt/vcpkg
+    command: bash
+    stdin_open: true
+    tty: true
+
+volumes:
+  vcpkg-windows:
+    driver: local
+  vcpkg-buildtrees:
+    driver: local
