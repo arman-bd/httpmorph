@@ -57,15 +57,16 @@ jobs:
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
 
-    - name: Install nghttp2 (Windows)
+    - name: Setup MSYS2 and install nghttp2 (Windows)
       if: runner.os == 'Windows'
-      run: |
-        # Install nghttp2 via chocolatey (simpler than vcpkg)
-        # Note: This installs the shared library version
-        curl -L https://github.com/nghttp2/nghttp2/releases/download/v1.59.0/nghttp2-1.59.0-win64.zip -o nghttp2.zip
-        unzip nghttp2.zip -d C:/nghttp2
-        echo "NGHTTP2_ROOT=C:/nghttp2/nghttp2-1.59.0-win64" >> $GITHUB_ENV
-      shell: bash
+      uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          mingw-w64-x86_64-nghttp2
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-ninja
 
     - name: Cache vendor dependencies
       id: cache-vendor
