@@ -85,10 +85,10 @@ jobs:
         restore-keys: |
           vcpkg-nghttp2-${{ runner.os }}-
 
-    - name: Install nghttp2 via vcpkg (Windows)
+    - name: Install dependencies via vcpkg (Windows)
       if: runner.os == 'Windows'
       run: |
-        vcpkg install nghttp2:x64-windows --clean-after-build
+        vcpkg install openssl:x64-windows nghttp2:x64-windows --clean-after-build
       shell: bash
 
     - name: Cache vendor dependencies
