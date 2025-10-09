@@ -109,15 +109,13 @@ class TestRealHTTPSIntegration:
                 assert response.status_code == code
 
     def test_httpbin_redirect(self):
-        """Test redirect handling
-
-        Note: follow_redirects parameter not yet implemented.
-        Server returns 302 redirect which is the expected behavior.
-        """
+        """Test redirect handling - redirects are now followed by default"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/redirect/3")
-            # Without redirect following, we get the redirect status code
-            assert response.status_code in [301, 302, 307, 308]
+            # Redirects are followed by default, should get 200 at final destination
+            assert response.status_code == 200
+            # Should have redirect history
+            assert len(response.history) == 3
 
     def test_multiple_domains_in_sequence(self):
         """Test requests to multiple different domains"""

@@ -106,12 +106,13 @@ class TestClient:
                 assert all(r.status_code == 200 for r in responses)
 
     def test_timeout(self):
-        """Test request timeout"""
+        """Test request timeout raises Timeout exception"""
+        import pytest
+
         with MockHTTPServer() as server:
-            # Timeout should return a response with error
-            response = httpmorph.get(f"{server.url}/delay/1", timeout=0.1)
-            # Should have an error (status_code=0 or error set)
-            assert response.status_code == 0 or response.error is not None
+            # Timeout should raise Timeout exception (requests-compatible)
+            with pytest.raises(httpmorph.Timeout):
+                httpmorph.get(f"{server.url}/delay/1", timeout=0.1)
 
     def test_response_timing(self):
         """Test response timing information"""

@@ -20,9 +20,6 @@ help:
 	@echo "  make docker-build          - Build Docker test container (mimics CI)"
 	@echo "  make docker-test           - Run tests in Docker"
 	@echo "  make docker-shell          - Open shell in Docker for debugging"
-	@echo "  make docker-windows-quick  - Quick Windows API check (works on ARM64/M1/M2)"
-	@echo "  make docker-windows        - Full Windows test (requires x86_64 host)"
-	@echo "  make docker-win-shell      - Open Windows test shell for debugging"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean       - Remove build artifacts"
@@ -108,24 +105,3 @@ docker-test: docker-build
 docker-shell:
 	@echo "Opening shell in Docker container for debugging..."
 	docker run --rm -it -v $(PWD):/workspace httpmorph-test bash
-
-# Windows compatibility testing with MinGW cross-compile
-docker-windows:
-	@echo "Testing Windows compatibility with MinGW-w64..."
-	@echo "Note: This tests API compatibility, not full MSVC behavior."
-	@echo "Note: Requires x86_64 host (may fail on ARM64/Apple Silicon due to vcpkg limitations)"
-	docker-compose -f docker/docker-compose.windows-test.yml up windows-mingw
-
-# Quick Windows syntax check (works on ARM64/Apple Silicon)
-docker-windows-quick:
-	@echo "Quick Windows API compatibility check..."
-	docker build -f docker/Dockerfile.windows-quick -t httpmorph-windows-quick .
-	docker run --rm httpmorph-windows-quick
-
-docker-win-shell:
-	@echo "Opening Windows test shell (MinGW cross-compile environment)..."
-	docker-compose -f docker/docker-compose.windows-test.yml run windows-shell
-
-docker-windows-build:
-	@echo "Building Windows test image..."
-	docker build -f docker/Dockerfile.windows-mingw -t httpmorph-windows-test .

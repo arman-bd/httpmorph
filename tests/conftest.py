@@ -2,6 +2,11 @@
 Pytest configuration and fixtures for httpmorph tests
 """
 
+import subprocess
+import time
+from pathlib import Path
+
+import filelock
 import pytest
 
 import httpmorph
@@ -72,6 +77,28 @@ def safari_session():
         yield session
     except (NotImplementedError, AttributeError):
         pytest.skip("Session not yet implemented")
+
+
+@pytest.fixture(scope="session")
+def httpbin_server():
+    """Use MockHTTPServer for httpbin-compatible testing"""
+    from tests.test_server import MockHTTPServer
+
+    server = MockHTTPServer()
+    server.start()
+    yield server.url
+    server.stop()
+
+
+@pytest.fixture(scope="session")
+def mock_httpbin_server():
+    """Use MockHTTPServer for tests where Docker httpbin fails"""
+    from tests.test_server import MockHTTPServer
+
+    server = MockHTTPServer()
+    server.start()
+    yield server.url
+    server.stop()
 
 
 def pytest_configure(config):

@@ -431,7 +431,7 @@ httpmorph_client_t* httpmorph_client_create(void) {
 
     /* Default configuration */
     client->timeout_ms = 30000;  /* 30 seconds */
-    client->follow_redirects = false;
+    client->follow_redirects = false;  /* Python layer handles redirects for better control */
     client->max_redirects = 10;
     client->io_engine = default_io_engine;
 
@@ -1147,7 +1147,13 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
         /* Direct connection or HTTPS through proxy (after CONNECT): use relative path */
         p += snprintf(p, SNPRINTF_SIZE(end - p), "%s %s HTTP/1.1\r\n", method_str, path);
     }
-    p += snprintf(p, SNPRINTF_SIZE(end - p), "Host: %s\r\n", host);
+
+    /* Add Host header with port if non-standard */
+    if ((strcmp(scheme, "http") == 0 && port != 80) || (strcmp(scheme, "https") == 0 && port != 443)) {
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Host: %s:%u\r\n", host, port);
+    } else {
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Host: %s\r\n", host);
+    }
 
     /* Add minimal required headers if not provided */
     bool has_user_agent = false;
@@ -1722,8 +1728,7 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
         return -1;
     }
 
-    /* Mark end of headers */
-    *headers_end = '\0';
+    /* Save headers end position before modifying buffer */
     char *body_start = headers_end + 4;  /* Point to body data after \r\n\r\n */
     size_t body_in_buffer = buffer_pos - (body_start - buffer);
 
@@ -1731,7 +1736,8 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
     char *line_end;
     bool first_line = true;
 
-    while ((line_end = strstr(line_start, "\r\n")) != NULL) {
+    /* Parse headers line by line up to headers_end */
+    while (line_start < headers_end && (line_end = strstr(line_start, "\r\n")) != NULL) {
         *line_end = '\0';
 
         if (first_line) {
@@ -1763,9 +1769,6 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
         }
 
         line_start = line_end + 2;
-        if (*line_start == '\0') {
-            break;
-        }
     }
 
     /* Read response body */

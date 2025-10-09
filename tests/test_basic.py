@@ -58,17 +58,21 @@ def test_simple_get():
     assert response.body is not None
 
 
-def test_post_with_json():
+def test_post_with_json(httpbin_server):
     """Test POST request with JSON data"""
-    import json
-
     data = {"key": "value", "number": 42}
-    response = httpmorph.post(
-        "https://postman-echo.com/post", json=data, headers={"Content-Type": "application/json"}
-    )
+    response = httpmorph.post(f"{httpbin_server}/post", json=data)
 
     assert response.status_code == 200
-    response_data = json.loads(response.body)
+
+    # Test compatibility: should work with both .body and .json()
+    if hasattr(response, "json"):
+        response_data = response.json()
+    else:
+        import json
+
+        response_data = json.loads(response.body)
+
     assert response_data["json"] == data
 
 
