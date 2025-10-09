@@ -57,16 +57,14 @@ jobs:
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
 
-    - name: Setup vcpkg (Windows)
-      if: runner.os == 'Windows'
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgGitCommitId: 'c8696863d371ab7f46e213d8f5ca923c4aef2a00'
-
-    - name: Install nghttp2 via vcpkg (Windows)
+    - name: Install nghttp2 (Windows)
       if: runner.os == 'Windows'
       run: |
-        vcpkg install nghttp2:x64-windows
+        # Install nghttp2 via chocolatey (simpler than vcpkg)
+        # Note: This installs the shared library version
+        curl -L https://github.com/nghttp2/nghttp2/releases/download/v1.59.0/nghttp2-1.59.0-win64.zip -o nghttp2.zip
+        unzip nghttp2.zip -d C:/nghttp2
+        echo "NGHTTP2_ROOT=C:/nghttp2/nghttp2-1.59.0-win64" >> $GITHUB_ENV
       shell: bash
 
     - name: Cache vendor dependencies
