@@ -710,8 +710,13 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
         }
 
         /* Set socket to non-blocking for timeout support */
+#ifdef _WIN32
+        u_long mode = 1;
+        ioctlsocket(sockfd, FIONBIO, &mode);
+#else
         int flags = fcntl(sockfd, F_GETFL, 0);
         fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+#endif
 
         /* Attempt connection */
         ret = connect(sockfd, rp->ai_addr, rp->ai_addrlen);
@@ -751,8 +756,13 @@ static int tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
 
     if (sockfd != -1) {
         /* Set socket back to blocking mode */
+#ifdef _WIN32
+        u_long mode = 0;
+        ioctlsocket(sockfd, FIONBIO, &mode);
+#else
         int flags = fcntl(sockfd, F_GETFL, 0);
         fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+#endif
 
         /* Set performance options */
         int opt = 1;
@@ -1999,8 +2009,13 @@ httpmorph_response_t* httpmorph_request_execute(
 
                 /* Set socket to non-blocking for HTTP/2 */
                 if (sockfd != -1) {
+#ifdef _WIN32
+                    u_long mode = 1;
+                    ioctlsocket(sockfd, FIONBIO, &mode);
+#else
                     int flags = fcntl(sockfd, F_GETFL, 0);
                     fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+#endif
                 }
             } else if (alpn_len == 8 && memcmp(alpn_data, "http/1.1", 8) == 0) {
                 /* HTTP/1.1 negotiated */
