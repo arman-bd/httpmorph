@@ -7,8 +7,14 @@
 #include "browser_profiles.h"
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>  /* for strcasecmp */
 #include <time.h>
+
+/* Platform-specific headers */
+#ifdef _WIN32
+    #define strcasecmp _stricmp
+#else
+    #include <strings.h>  /* for strcasecmp */
+#endif
 
 /* Chrome 131 Profile */
 const browser_profile_t PROFILE_CHROME_131 = {

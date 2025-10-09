@@ -19,15 +19,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>  /* for strcasecmp */
 #include <time.h>
 #include <zlib.h>
 
-/* Platform-specific socket headers */
+/* Platform-specific headers */
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <windows.h>
+    #define strcasecmp _stricmp
+#else
+    #include <strings.h>  /* for strcasecmp */
     #define close closesocket
     #define ssize_t SSIZE_T
     #pragma comment(lib, "ws2_32.lib")
