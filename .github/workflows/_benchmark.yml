@@ -75,15 +75,14 @@ jobs:
         echo "CXX=ccache g++" >> $GITHUB_ENV
       shell: bash
 
-    - name: Cache vendor dependencies
+    - name: Restore vendor cache
       id: cache-vendor
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: vendor
         key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
         restore-keys: |
           vendor-${{ runner.os }}-
-        save-always: true
 
     - name: Setup vendor dependencies
       if: steps.cache-vendor.outputs.cache-hit != 'true'
@@ -91,8 +90,9 @@ jobs:
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
 
-    - name: Cache Python build artifacts
-      uses: actions/cache@v4
+    - name: Restore Python build cache
+      id: cache-python-build
+      uses: actions/cache/restore@v4
       with:
         path: |
           build/
@@ -100,7 +100,6 @@ jobs:
         key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
         restore-keys: |
           python-build-${{ runner.os }}-${{ inputs.primary-python }}-
-        save-always: true
 
     - name: Install package
       run: pip install -e ".[dev,benchmark]"
@@ -115,3 +114,20 @@ jobs:
         output-file-path: benchmark.json
         github-token: ${{ secrets.GITHUB_TOKEN }}
         auto-push: true
+
+    # Save caches even if benchmarks fail (using always())
+    - name: Save vendor cache
+      if: always() && steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
+
+    - name: Save Python build cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          build/
+          *.egg-info/
+        key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}

@@ -63,13 +63,14 @@ jobs:
           OS_MATRIX='[
             "windows-latest"
           ]'
+          # OS options: "windows-latest", "ubuntu-latest", "macos-latest"
 
           # Python versions to test
           # Comment out any version you want to skip during development
           PYTHON_MATRIX='[
             "3.11"
           ]'
-          # To add more versions: "3.9", "3.10", "3.12"
+          # Python versions: "3.9", "3.10", "3.11", "3.12"
 
           # Primary OS and Python for single-runner jobs
           PRIMARY_OS="ubuntu-latest"
@@ -78,7 +79,7 @@ jobs:
           # Enable/Disable Jobs
           # Set to "true" or "false"
           ENABLE_TESTS="true"
-          ENABLE_BENCHMARK="false"
+          ENABLE_BENCHMARK="true"
 
           # ============================================================
           # END CONFIGURATION
