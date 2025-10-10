@@ -40,59 +40,69 @@ echo "Detected OS: $OS"
 echo ""
 
 #
-# 1. BoringSSL / OpenSSL
+# 1. BoringSSL
 #
-echo "==> Setting up SSL library..."
+echo "==> Setting up BoringSSL..."
 
-# On Windows, use vcpkg's OpenSSL instead of building BoringSSL
-if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
-    echo "✓ Using vcpkg's OpenSSL (Windows)"
-    echo "  Location: $VCPKG_ROOT/installed/x64-windows"
+# Build BoringSSL on all platforms (including Windows)
+if [ ! -d "boringssl" ]; then
+    echo "Cloning BoringSSL..."
+    git clone --depth 1 https://boringssl.googlesource.com/boringssl
+fi
+
+cd boringssl
+
+# Check if already built (Windows uses .lib files instead of .a)
+if [ "$OS" = "Windows" ]; then
+    SSL_LIB_FILE="build/ssl/ssl.lib"
 else
-    # On Linux/macOS, build BoringSSL
-    if [ ! -d "boringssl" ]; then
-        echo "Cloning BoringSSL..."
-        git clone --depth 1 https://boringssl.googlesource.com/boringssl
+    SSL_LIB_FILE="build/ssl/libssl.a"
+fi
+
+if [ ! -f "$SSL_LIB_FILE" ]; then
+    echo "Building BoringSSL..."
+
+    # BoringSSL requires CMake and Go
+    if ! command -v cmake &> /dev/null; then
+        echo "ERROR: cmake not found. Please install cmake."
+        exit 1
     fi
 
-    cd boringssl
+    if ! command -v go &> /dev/null; then
+        echo "WARNING: go not found. BoringSSL will build without some tests."
+    fi
 
-    # Check if already built
-    if [ ! -f "build/ssl/libssl.a" ]; then
-        echo "Building BoringSSL..."
+    mkdir -p build
+    cd build
 
-        # BoringSSL requires CMake and Go
-        if ! command -v cmake &> /dev/null; then
-            echo "ERROR: cmake not found. Please install cmake."
-            exit 1
-        fi
-
-        if ! command -v go &> /dev/null; then
-            echo "WARNING: go not found. BoringSSL will build without some tests."
-        fi
-
-        mkdir -p build
-        cd build
-
+    # Platform-specific CMake configuration
+    if [ "$OS" = "Windows" ]; then
+        # Use Visual Studio generator on Windows for proper .lib output
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DBUILD_SHARED_LIBS=OFF \
+              ..
+        cmake --build . --config Release
+    else
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               ..
         make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-
-        echo "✓ BoringSSL built successfully"
-
-        # Clean up .git directory to save cache space
-        cd "$VENDOR_DIR/boringssl"
-        if [ -d ".git" ]; then
-            echo "Cleaning up .git directory to save cache space..."
-            rm -rf .git
-        fi
-    else
-        echo "✓ BoringSSL already built"
     fi
 
-    cd "$VENDOR_DIR"
+    echo "✓ BoringSSL built successfully"
+
+    # Clean up .git directory to save cache space
+    cd "$VENDOR_DIR/boringssl"
+    if [ -d ".git" ]; then
+        echo "Cleaning up .git directory to save cache space..."
+        rm -rf .git
+    fi
+else
+    echo "✓ BoringSSL already built"
 fi
+
+cd "$VENDOR_DIR"
 
 #
 # 2. liburing (Linux only)
@@ -203,11 +213,7 @@ echo "Vendor Setup Complete!"
 echo "================================"
 echo ""
 echo "Built libraries:"
-if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
-    echo "  ✓ OpenSSL:    $VCPKG_ROOT/installed/x64-windows (vcpkg)"
-else
-    echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
-fi
+echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
 if [ "$OS" = "Linux" ]; then
     echo "  ✓ liburing:   $VENDOR_DIR/liburing/install"
 fi

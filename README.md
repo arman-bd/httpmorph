@@ -20,9 +20,9 @@ pip install httpmorph
 
 ### Requirements
 
-- Python 3.7+
-- macOS or Linux (Windows support in progress)
-- OpenSSL/BoringSSL
+- Python 3.8+
+- Windows, macOS, or Linux
+- BoringSSL (built automatically from source)
 - libnghttp2 (for HTTP/2)
 
 ## Quick Start
@@ -142,17 +142,17 @@ httpmorph aims for high compatibility with Python's `requests` library:
 
 | Feature | Status |
 |---------|--------|
-| GET, POST, PUT, DELETE, HEAD, PATCH, OPTIONS |  Supported |
-| JSON request/response |  Supported |
-| Form data & file uploads |  Supported |
-| Custom headers |  Supported |
-| Authentication |  Supported |
-| Cookies & sessions |  Supported |
-| Redirects with history |  Supported |
-| Timeout control |  Supported |
-| SSL verification |  Supported |
-| Streaming responses |  Supported |
-| Exception hierarchy |  Supported |
+| GET, POST, PUT, DELETE, HEAD, PATCH, OPTIONS | Supported |
+| JSON request/response | Supported |
+| Form data & file uploads | Supported |
+| Custom headers | Supported |
+| Authentication | Supported |
+| Cookies & sessions | Supported |
+| Redirects with history | Supported |
+| Timeout control | Supported |
+| SSL verification | Supported |
+| Streaming responses | Supported |
+| Exception hierarchy | Supported |
 
 ## Response Object
 
@@ -218,54 +218,85 @@ Benchmarks show httpmorph matching or exceeding the performance of curl and othe
 
 | Platform | Status |
 |----------|--------|
-| macOS (Intel & Apple Silicon) | Fully supported |
-| Linux (x86_64, ARM64) | Fully supported |
-| Windows | In progress |
+| Windows | ✅ Fully supported |
+| macOS (Intel & Apple Silicon) | ✅ Fully supported |
+| Linux (x86_64, ARM64) | ✅ Fully supported |
 
-Windows support is actively being developed. Follow the [GitHub issues](https://github.com/anthropics/httpmorph/issues) for updates.
+All platforms use **BoringSSL** (Google's fork of OpenSSL) for consistent TLS behavior and advanced fingerprinting capabilities.
 
 ## Building from Source
 
-### macOS
+httpmorph uses **BoringSSL** (built from source) on all platforms for consistent TLS fingerprinting.
 
+### Prerequisites
+
+**Windows:**
+```bash
+# Install build tools
+choco install cmake golang nasm visualstudio2022buildtools -y
+
+# Or install manually:
+# - Visual Studio 2019+ (with C++ tools)
+# - CMake 3.15+
+# - Go 1.18+
+# - NASM (for BoringSSL assembly optimizations)
+```
+
+**macOS:**
 ```bash
 # Install dependencies
-brew install openssl@3 libnghttp2
-
-# Build and install
-python setup.py build_ext --inplace
-pip install -e .
+brew install cmake ninja libnghttp2
 ```
 
-### Linux
+**Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt-get install cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+# Fedora/RHEL
+sudo dnf install cmake ninja-build openssl-devel pkg-config autoconf automake libtool
+```
+
+### Build Steps
 
 ```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install libssl-dev libnghttp2-dev
+# 1. Clone the repository
+git clone https://github.com/yourusername/httpmorph.git
+cd httpmorph
 
-# Or (Fedora/RHEL)
-sudo dnf install openssl-devel libnghttp2-devel
+# 2. Build vendor dependencies (BoringSSL, nghttp2, zlib)
+./scripts/setup_vendors.sh  # On Windows: bash scripts/setup_vendors.sh
 
-# Build and install
+# 3. Build Python extensions
 python setup.py build_ext --inplace
-pip install -e .
+
+# 4. Install in development mode
+pip install -e ".[dev]"
 ```
+
+**Note:** The first build takes 5-10 minutes as it compiles BoringSSL from source. Subsequent builds are much faster (~30 seconds) as the vendor libraries are cached.
 
 ## Development
 
 ```bash
-# Clone repository
+# Clone and setup (includes building BoringSSL)
 git clone https://github.com/yourusername/httpmorph.git
 cd httpmorph
+./scripts/setup_vendors.sh
 
 # Install development dependencies
 pip install -e ".[dev]"
 
 # Run tests
-pytest tests/
+pytest tests/ -v
 
 # Run with coverage
 pytest tests/ --cov=httpmorph --cov-report=html
+
+# Run specific test markers
+pytest tests/ -m "not slow"           # Skip slow tests
+pytest tests/ -m integration          # Only integration tests
+pytest tests/ -m fingerprint          # Only fingerprinting tests
 ```
 
 ## Architecture
@@ -309,10 +340,6 @@ Run the test suite:
 ```bash
 pytest tests/ -v
 ```
-
-## License
-
-[License information to be added]
 
 ## Acknowledgments
 

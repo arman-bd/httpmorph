@@ -82,18 +82,15 @@
 #endif
 
 /* BoringSSL includes */
-#ifdef HAVE_BORINGSSL
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/bio.h>
-#include <openssl/md5.h>
-#else
-/* Fallback to OpenSSL */
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/bio.h>
-#include <openssl/md5.h>
+#ifdef _WIN32
+/* Include Windows compatibility layer for BoringSSL */
+#include "../include/boringssl_compat.h"
 #endif
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/md5.h>
 
 /* HTTP/2 support */
 #ifdef HAVE_NGHTTP2
@@ -266,7 +263,7 @@ static int configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) {
     for (int i = 0; i < profile->cipher_suite_count; i++) {
         uint16_t cs = profile->cipher_suites[i];
 
-        /* Map cipher suite code to OpenSSL name */
+        /* Map cipher suite code to BoringSSL name */
         const char *name = NULL;
         switch (cs) {
             case 0x1301: name = "TLS_AES_128_GCM_SHA256"; break;
@@ -360,7 +357,7 @@ int httpmorph_init(void) {
     }
 #endif
 
-    /* Initialize OpenSSL */
+    /* Initialize BoringSSL */
     SSL_library_init();
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();

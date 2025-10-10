@@ -32,7 +32,7 @@ jobs:
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
-      run: brew install cmake ninja openssl@3 libnghttp2
+      run: brew install cmake ninja libnghttp2
 
     - name: Cache vendor dependencies
       uses: actions/cache@v4
