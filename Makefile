@@ -1,4 +1,4 @@
-.PHONY: help setup build install test clean benchmark docs lint format sync
+.PHONY: help setup build install test clean benchmark docs lint format sync docker-build docker-test docker-shell
 
 help:
 	@echo "httpmorph - Development commands"
@@ -10,10 +10,16 @@ help:
 	@echo "  make install     - Install in development mode"
 	@echo ""
 	@echo "Development:"
-	@echo "  make test        - Run tests"
-	@echo "  make benchmark   - Run benchmarks"
-	@echo "  make lint        - Run linters (ruff, mypy)"
-	@echo "  make format      - Format code (ruff)"
+	@echo "  make test          - Run tests"
+	@echo "  make benchmark     - Run benchmarks"
+	@echo "  make lint          - Run linters (ruff, mypy)"
+	@echo "  make format        - Format code (ruff)"
+	@echo "  make check-windows - Quick Windows compatibility check (no Docker)"
+	@echo ""
+	@echo "Docker (CI Testing):"
+	@echo "  make docker-build          - Build Docker test container (mimics CI)"
+	@echo "  make docker-test           - Run tests in Docker"
+	@echo "  make docker-shell          - Open shell in Docker for debugging"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean       - Remove build artifacts"
@@ -81,3 +87,21 @@ rebuild: clean setup build
 # Check if everything is working
 check: lint test
 	@echo "All checks passed!"
+
+# Quick Windows compatibility check (no Docker needed)
+check-windows:
+	@echo "Running Windows compatibility check..."
+	@./scripts/check_windows_compat.sh
+
+# Docker targets for CI testing
+docker-build:
+	@echo "Building Docker test container (mimics GitHub Actions)..."
+	docker build -f docker/Dockerfile.test -t httpmorph-test .
+
+docker-test: docker-build
+	@echo "Running tests in Docker container..."
+	docker run --rm httpmorph-test pytest tests/ -v
+
+docker-shell:
+	@echo "Opening shell in Docker container for debugging..."
+	docker run --rm -it -v $(PWD):/workspace httpmorph-test bash

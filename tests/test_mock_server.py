@@ -42,9 +42,7 @@ class TestMockHTTPServer:
         with MockHTTPServer() as server:
             post_data = json.dumps({"test": "value", "number": 42}).encode()
             req = urllib.request.Request(
-                f"{server.url}/post",
-                data=post_data,
-                headers={'Content-Type': 'application/json'}
+                f"{server.url}/post", data=post_data, headers={"Content-Type": "application/json"}
             )
             response = urllib.request.urlopen(req)
             data = json.loads(response.read())
@@ -60,7 +58,7 @@ class TestMockHTTPServer:
             req = urllib.request.Request(
                 f"{server.url}/post/form",
                 data=post_data,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             response = urllib.request.urlopen(req)
             data = json.loads(response.read())
@@ -85,8 +83,7 @@ class TestMockHTTPServer:
         """Test headers endpoint returns request headers"""
         with MockHTTPServer() as server:
             req = urllib.request.Request(
-                f"{server.url}/headers",
-                headers={'X-Custom-Header': 'test-value'}
+                f"{server.url}/headers", headers={"X-Custom-Header": "test-value"}
             )
             response = urllib.request.urlopen(req)
             data = json.loads(response.read())
@@ -101,8 +98,8 @@ class TestMockHTTPServer:
             req = urllib.request.Request(
                 f"{server.url}/put",
                 data=put_data,
-                method='PUT',
-                headers={'Content-Type': 'application/json'}
+                method="PUT",
+                headers={"Content-Type": "application/json"},
             )
             response = urllib.request.urlopen(req)
             data = json.loads(response.read())
@@ -112,10 +109,7 @@ class TestMockHTTPServer:
     def test_delete_endpoint(self):
         """Test DELETE endpoint"""
         with MockHTTPServer() as server:
-            req = urllib.request.Request(
-                f"{server.url}/delete",
-                method='DELETE'
-            )
+            req = urllib.request.Request(f"{server.url}/delete", method="DELETE")
             response = urllib.request.urlopen(req)
             data = json.loads(response.read())
 
@@ -125,6 +119,7 @@ class TestMockHTTPServer:
         """Test gzip compressed response"""
         with MockHTTPServer() as server:
             import gzip
+
             response = urllib.request.urlopen(f"{server.url}/gzip")
             compressed_data = response.read()
             decompressed_data = gzip.decompress(compressed_data)
@@ -181,16 +176,14 @@ class TestHTTPSServer:
         """Test HTTPS GET request"""
         try:
             import ssl
+
             with MockHTTPServer(ssl_enabled=True) as server:
                 # Create SSL context that doesn't verify certificates
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
 
-                response = urllib.request.urlopen(
-                    f"{server.url}/get",
-                    context=ctx
-                )
+                response = urllib.request.urlopen(f"{server.url}/get", context=ctx)
                 data = json.loads(response.read())
                 assert data["method"] == "GET"
         except RuntimeError as e:

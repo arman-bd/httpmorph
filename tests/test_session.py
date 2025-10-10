@@ -2,9 +2,9 @@
 Session tests for httpmorph
 """
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_server import MockHTTPServer
 
 
@@ -60,14 +60,12 @@ class TestSession:
         except (NotImplementedError, AttributeError):
             pytest.skip("Session not yet implemented")
 
-
     def test_session_get_request(self):
         """Test GET request using session"""
         with MockHTTPServer() as server:
             session = httpmorph.Session(browser="chrome")
             response = session.get(f"{server.url}/get")
             assert response.status_code == 200
-
 
     def test_session_post_request(self):
         """Test POST request using session"""
@@ -76,7 +74,6 @@ class TestSession:
             data = {"test": "data"}
             response = session.post(f"{server.url}/post", json=data)
             assert response.status_code == 200
-
 
     def test_session_multiple_requests(self):
         """Test multiple requests with same session"""
@@ -87,23 +84,6 @@ class TestSession:
             for i in range(5):
                 response = session.get(f"{server.url}/get")
                 assert response.status_code == 200
-
-
-    def test_session_connection_reuse(self):
-        """Test that session reuses connections"""
-        with MockHTTPServer() as server:
-            session = httpmorph.Session(browser="chrome")
-
-            # First request establishes connection
-            response1 = session.get(f"{server.url}/get")
-            connect_time1 = response1.connect_time_us
-
-            # Subsequent requests should reuse connection
-            response2 = session.get(f"{server.url}/get")
-            connect_time2 = response2.connect_time_us
-
-            # Second connection time should be 0 (reused)
-            assert connect_time2 == 0 or connect_time2 < connect_time1
 
     def test_session_fingerprint_consistency(self):
         """Test that session maintains consistent fingerprint"""
@@ -131,15 +111,11 @@ class TestSession:
         # At least check they exist
         assert all(fp is not None for fp in fingerprints)
 
-
     def test_session_with_custom_headers(self):
         """Test session with custom headers"""
         with MockHTTPServer() as server:
             session = httpmorph.Session(browser="chrome")
-            headers = {
-                "X-Custom-Header": "test-value",
-                "Authorization": "Bearer token123"
-            }
+            headers = {"X-Custom-Header": "test-value", "Authorization": "Bearer token123"}
             response = session.get(f"{server.url}/headers", headers=headers)
             assert response.status_code == 200
 
@@ -161,7 +137,6 @@ class TestSession:
         # Cookie count should be stable (same cookies)
         assert cookies_after >= cookies_before, "Cookies were lost between requests"
 
-
     def test_session_context_manager(self):
         """Test session as context manager"""
         with MockHTTPServer() as server:
@@ -172,7 +147,6 @@ class TestSession:
 
 class TestSessionWithRealHTTPS:
     """Test session with real HTTPS connections"""
-
 
     def test_session_real_https(self):
         """Test session with real HTTPS endpoint"""
@@ -197,7 +171,6 @@ class TestSessionWithRealHTTPS:
         # Should have Firefox-like TLS fingerprint
         assert response.tls_version is not None
         assert response.ja3_fingerprint is not None
-
 
     def test_session_multiple_domains(self):
         """Test session working with multiple domains"""

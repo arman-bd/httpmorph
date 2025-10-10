@@ -28,7 +28,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = []
+dependencies = [
+    "python-dotenv>=1.0.1",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -37,6 +39,7 @@ dev = [
     "pytest-benchmark>=4.0",
     "pytest-cov>=4.0",
     "cryptography>=41.0",  # For test HTTPS server
+    "filelock>=3.12.0",  # For test fixtures
     "mypy>=1.0",
     "ruff>=0.7.0",
 ]

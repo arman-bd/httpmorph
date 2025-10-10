@@ -42,9 +42,9 @@ def load_proxy_config():
     """Load proxy configuration from .env file"""
     # Look for .env in current directory and examples directory
     env_paths = [
-        Path.cwd() / '.env',
-        Path(__file__).parent / '.env',
-        Path(__file__).parent.parent / '.env',
+        Path.cwd() / ".env",
+        Path(__file__).parent / ".env",
+        Path(__file__).parent.parent / ".env",
     ]
 
     env_file = None
@@ -60,18 +60,18 @@ def load_proxy_config():
         print("No .env file found. Create one with PROXY_URL, PROXY_USERNAME, PROXY_PASSWORD")
         print(f"Searched in: {[str(p) for p in env_paths]}")
 
-    proxy_url = os.getenv('PROXY_URL')
-    proxy_username = os.getenv('PROXY_USERNAME')
-    proxy_password = os.getenv('PROXY_PASSWORD')
+    proxy_url = os.getenv("PROXY_URL")
+    proxy_username = os.getenv("PROXY_USERNAME")
+    proxy_password = os.getenv("PROXY_PASSWORD")
 
     return proxy_url, proxy_username, proxy_password
 
 
 def test_direct_connection():
     """Test connection without proxy"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 1: Direct Connection (no proxy)")
-    print("="*60)
+    print("=" * 60)
 
     try:
         # Use example.com as it's more reliable than httpbin
@@ -97,23 +97,23 @@ def test_direct_connection():
 
 def test_proxy_http(proxy_url, username=None, password=None):
     """Test HTTP request through proxy"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 2: HTTP Request via Proxy")
-    print("="*60)
+    print("=" * 60)
     print(f"Proxy: {proxy_url}")
     if username:
         print(f"Auth: {username}:{'*' * len(password) if password else ''}")
 
     try:
-        kwargs = {'proxy': proxy_url, 'timeout': 10}
+        kwargs = {"proxy": proxy_url, "timeout": 10}
         if username and password:
-            kwargs['proxy_auth'] = (username, password)
+            kwargs["proxy_auth"] = (username, password)
 
         response = httpmorph.get("http://icanhazip.com", **kwargs)
 
         if response.status_code == 200:
             print(f"✓ Status: {response.status_code}")
-            ip = response.body.decode('utf-8').strip()
+            ip = response.body.decode("utf-8").strip()
             print(f"✓ Your IP via proxy: {ip}")
             return True
         elif response.status_code == 0:
@@ -131,23 +131,23 @@ def test_proxy_http(proxy_url, username=None, password=None):
 
 def test_proxy_https(proxy_url, username=None, password=None):
     """Test HTTPS request through proxy (uses CONNECT method)"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 3: HTTPS Request via Proxy (CONNECT tunnel)")
-    print("="*60)
+    print("=" * 60)
     print(f"Proxy: {proxy_url}")
     if username:
         print(f"Auth: {username}:{'*' * len(password) if password else ''}")
 
     try:
-        kwargs = {'proxy': proxy_url, 'timeout': 10}
+        kwargs = {"proxy": proxy_url, "timeout": 10}
         if username and password:
-            kwargs['proxy_auth'] = (username, password)
+            kwargs["proxy_auth"] = (username, password)
 
         response = httpmorph.get("https://icanhazip.com", **kwargs)
 
         if response.status_code == 200:
             print(f"✓ Status: {response.status_code}")
-            ip = response.body.decode('utf-8').strip()
+            ip = response.body.decode("utf-8").strip()
             print(f"✓ Your IP via proxy: {ip}")
             print(f"✓ TLS Version: {response.tls_version}")
             print(f"✓ TLS Cipher: {response.tls_cipher}")
@@ -167,26 +167,23 @@ def test_proxy_https(proxy_url, username=None, password=None):
 
 def test_proxy_dict_format(proxy_url, username=None, password=None):
     """Test proxy using requests-style dict format"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 4: Proxy Dict Format (requests-compatible)")
-    print("="*60)
+    print("=" * 60)
 
-    proxies = {
-        'http': proxy_url,
-        'https': proxy_url
-    }
+    proxies = {"http": proxy_url, "https": proxy_url}
     print(f"Proxies: {proxies}")
 
     try:
-        kwargs = {'proxies': proxies, 'timeout': 10}
+        kwargs = {"proxies": proxies, "timeout": 10}
         if username and password:
-            kwargs['proxy_auth'] = (username, password)
+            kwargs["proxy_auth"] = (username, password)
 
         response = httpmorph.get("https://icanhazip.com", **kwargs)
 
         if response.status_code == 200:
             print(f"✓ Status: {response.status_code}")
-            ip = response.body.decode('utf-8').strip()
+            ip = response.body.decode("utf-8").strip()
             print(f"✓ Your IP via proxy: {ip}")
             return True
         elif response.status_code == 0:
@@ -202,19 +199,15 @@ def test_proxy_dict_format(proxy_url, username=None, password=None):
 
 def test_multiple_requests(proxy_url, username=None, password=None):
     """Test multiple requests through same proxy"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 5: Multiple Requests via Proxy")
-    print("="*60)
+    print("=" * 60)
 
-    urls = [
-        "https://icanhazip.com",
-        "https://example.com",
-        "https://www.google.com"
-    ]
+    urls = ["https://icanhazip.com", "https://example.com", "https://www.google.com"]
 
-    kwargs = {'proxy': proxy_url, 'timeout': 10}
+    kwargs = {"proxy": proxy_url, "timeout": 10}
     if username and password:
-        kwargs['proxy_auth'] = (username, password)
+        kwargs["proxy_auth"] = (username, password)
 
     success_count = 0
     for url in urls:
@@ -234,14 +227,14 @@ def test_multiple_requests(proxy_url, username=None, password=None):
 
 def test_ip_comparison(proxy_url, username=None, password=None):
     """Test IP comparison with and without proxy for both HTTP and HTTPS"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 6: IP Comparison (Direct vs Proxy)")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        kwargs = {'proxy': proxy_url, 'timeout': 10}
+        kwargs = {"proxy": proxy_url, "timeout": 10}
         if username and password:
-            kwargs['proxy_auth'] = (username, password)
+            kwargs["proxy_auth"] = (username, password)
 
         # Test HTTPS
         print("\n[HTTPS Test]")
@@ -252,7 +245,7 @@ def test_ip_comparison(proxy_url, username=None, password=None):
             print("✗ Failed to get direct IP (HTTPS)")
             return False
 
-        direct_ip_https = direct_response_https.body.decode('utf-8').strip()
+        direct_ip_https = direct_response_https.body.decode("utf-8").strip()
         print(f"  Direct IP: {direct_ip_https}")
 
         print("Getting IP via proxy (HTTPS)...")
@@ -262,7 +255,7 @@ def test_ip_comparison(proxy_url, username=None, password=None):
             print("✗ Failed to get proxy IP (HTTPS)")
             return False
 
-        proxy_ip_https = proxy_response_https.body.decode('utf-8').strip()
+        proxy_ip_https = proxy_response_https.body.decode("utf-8").strip()
         print(f"  Proxy IP: {proxy_ip_https}")
 
         https_different = direct_ip_https != proxy_ip_https
@@ -280,7 +273,7 @@ def test_ip_comparison(proxy_url, username=None, password=None):
             print("✗ Failed to get direct IP (HTTP)")
             return False
 
-        direct_ip_http = direct_response_http.body.decode('utf-8').strip()
+        direct_ip_http = direct_response_http.body.decode("utf-8").strip()
         print(f"  Direct IP: {direct_ip_http}")
 
         print("Getting IP via proxy (HTTP)...")
@@ -290,7 +283,7 @@ def test_ip_comparison(proxy_url, username=None, password=None):
             print("✗ Failed to get proxy IP (HTTP)")
             return False
 
-        proxy_ip_http = proxy_response_http.body.decode('utf-8').strip()
+        proxy_ip_http = proxy_response_http.body.decode("utf-8").strip()
         print(f"  Proxy IP: {proxy_ip_http}")
 
         http_different = direct_ip_http != proxy_ip_http
@@ -319,25 +312,18 @@ def test_ip_comparison(proxy_url, username=None, password=None):
 
 def test_proxy_with_post(proxy_url, username=None, password=None):
     """Test POST request through proxy"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("TEST 7: POST Request via Proxy")
-    print("="*60)
+    print("=" * 60)
 
-    payload = {
-        "message": "Testing httpmorph proxy",
-        "timestamp": "2025-01-08"
-    }
+    payload = {"message": "Testing httpmorph proxy", "timestamp": "2025-01-08"}
 
-    kwargs = {'proxy': proxy_url, 'timeout': 10}
+    kwargs = {"proxy": proxy_url, "timeout": 10}
     if username and password:
-        kwargs['proxy_auth'] = (username, password)
+        kwargs["proxy_auth"] = (username, password)
 
     try:
-        response = httpmorph.post(
-            "https://httpbingo.org/post",
-            json=payload,
-            **kwargs
-        )
+        response = httpmorph.post("https://httpbingo.org/post", json=payload, **kwargs)
 
         if response.status_code == 200:
             print(f"✓ Status: {response.status_code}")
@@ -345,8 +331,9 @@ def test_proxy_with_post(proxy_url, username=None, password=None):
             # Try to parse and show response
             try:
                 import json
-                data = json.loads(response.body.decode('utf-8'))
-                if 'json' in data:
+
+                data = json.loads(response.body.decode("utf-8"))
+                if "json" in data:
                     print(f"✓ Server received: {data['json']}")
             except Exception:
                 pass
@@ -361,9 +348,9 @@ def test_proxy_with_post(proxy_url, username=None, password=None):
 
 def main():
     """Main test function"""
-    print("="*60)
+    print("=" * 60)
     print("httpmorph Proxy Example")
-    print("="*60)
+    print("=" * 60)
 
     # Load proxy configuration
     proxy_url, username, password = load_proxy_config()
@@ -408,9 +395,9 @@ def main():
         results.append(("POST via Proxy", test_proxy_with_post(proxy_url, username, password)))
 
     # Summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("SUMMARY")
-    print("="*60)
+    print("=" * 60)
 
     for test_name, success in results:
         status = "✓ PASS" if success else "✗ FAIL"

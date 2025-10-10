@@ -8,6 +8,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     int status_code;
     uint8_t *body;
@@ -25,5 +29,9 @@ http2_response_t *http2_get(const char *url);
  * Free response structure
  */
 void http2_response_free(http2_response_t *response);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* HTTP2_CLIENT_H */

@@ -2,9 +2,9 @@
 Error handling tests for httpmorph
 """
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_server import MockHTTPServer
 
 
@@ -12,47 +12,25 @@ class TestErrorHandling:
     """Test error handling"""
 
     def test_connection_refused(self):
-        """Test connection refused error
-
-        httpmorph returns error responses instead of raising exceptions.
-        """
-        response = httpmorph.get("http://localhost:9999")
-        assert response.status_code == 0
-        assert response.error != 0
-        assert response.error_message is not None
-        assert "connect" in response.error_message.lower()
+        """Test connection refused raises ConnectionError (requests-compatible)"""
+        with pytest.raises(httpmorph.ConnectionError):
+            httpmorph.get("http://localhost:9999")
 
     def test_invalid_url(self):
-        """Test invalid URL error
-
-        httpmorph returns error responses instead of raising exceptions.
-        """
-        response = httpmorph.get("not-a-valid-url")
-        assert response.status_code == 0
-        assert response.error != 0
-        assert response.error_message is not None
-        assert "url" in response.error_message.lower() or "parse" in response.error_message.lower()
+        """Test invalid URL raises RequestException (requests-compatible)"""
+        with pytest.raises(httpmorph.RequestException):
+            httpmorph.get("not-a-valid-url")
 
     def test_dns_resolution_failure(self):
-        """Test DNS resolution failure
-
-        httpmorph returns error responses instead of raising exceptions.
-        """
-        response = httpmorph.get("https://this-domain-does-not-exist-12345.com")
-        assert response.status_code == 0
-        assert response.error != 0
-        assert response.error_message is not None
-        # DNS failures show up as connection failures
-        assert "connect" in response.error_message.lower() or "fail" in response.error_message.lower()
+        """Test DNS resolution failure raises ConnectionError (requests-compatible)"""
+        with pytest.raises(httpmorph.ConnectionError):
+            httpmorph.get("https://this-domain-does-not-exist-12345.com")
 
     def test_timeout_error(self):
-        """Test request timeout"""
+        """Test request timeout raises Timeout exception (requests-compatible)"""
         with MockHTTPServer() as server:
-            response = httpmorph.get(f"{server.url}/delay/1", timeout=0.1)
-            # Should have an error indicating timeout
-            assert response.error is not None and response.error != 0
-            assert response.error_message is not None
-            assert "timeout" in response.error_message.lower() or "timed out" in response.error_message.lower()
+            with pytest.raises(httpmorph.Timeout):
+                httpmorph.get(f"{server.url}/delay/1", timeout=0.1)
 
     def test_tls_certificate_error(self):
         """Test TLS certificate verification error
@@ -89,6 +67,7 @@ class TestErrorHandling:
             response = httpmorph.get(f"{server.url}/status/200")
             # Response is not JSON, trying to parse should fail gracefully
             import json
+
             with pytest.raises(json.JSONDecodeError):
                 json.loads(response.body)
 
@@ -193,6 +172,7 @@ class TestThreadSafety:
         import concurrent.futures
 
         with MockHTTPServer() as server:
+
             def make_request():
                 session = httpmorph.Session(browser="chrome")
                 return session.get(f"{server.url}/get")
@@ -238,12 +218,10 @@ class TestInputValidation:
         import datetime
 
         from tests.test_server import MockHTTPServer
+
         with pytest.raises(TypeError):
             with MockHTTPServer() as server:
-                httpmorph.post(
-                    f"{server.url}/post",
-                    json={"date": datetime.datetime.now()}
-                )
+                httpmorph.post(f"{server.url}/post", json={"date": datetime.datetime.now()})
 
     def test_conflicting_body_parameters(self):
         """Test conflicting body parameters
@@ -252,12 +230,11 @@ class TestInputValidation:
         This test verifies the request succeeds (no exception).
         """
         from tests.test_server import MockHTTPServer
+
         # When both are specified, json takes precedence
         with MockHTTPServer() as server:
             response = httpmorph.post(
-                f"{server.url}/post",
-                json={"key": "value"},
-                data={"key": "other"}
+                f"{server.url}/post", json={"key": "value"}, data={"key": "other"}
             )
             # Request should succeed with json body
             assert response.status_code == 200
@@ -267,14 +244,9 @@ class TestEdgeCases:
     """Test edge cases"""
 
     def test_empty_url(self):
-        """Test empty URL
-
-        httpmorph returns error response for empty URLs.
-        """
-        response = httpmorph.get("")
-        assert response.status_code == 0
-        assert response.error != 0
-        assert "parse" in response.error_message.lower() or "url" in response.error_message.lower()
+        """Test empty URL raises RequestException (requests-compatible)"""
+        with pytest.raises(httpmorph.RequestException):
+            httpmorph.get("")
 
     def test_url_with_fragment(self):
         """Test URL with fragment
