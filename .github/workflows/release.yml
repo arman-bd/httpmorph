@@ -4,30 +4,40 @@ on:
   push:
     tags: ['v*']
 
-# Configuration - Edit this section
-env:
-  # Set to 'true' to run tests before building wheels, 'false' to skip tests
-  RUN_TESTS: 'false'
-
-  # Test matrix configuration (only used if RUN_TESTS is 'true')
-  TEST_OS_MATRIX: '["ubuntu-latest", "macos-latest", "windows-latest"]'
-  TEST_PYTHON_MATRIX: '["3.9", "3.10", "3.11", "3.12"]'
-
 jobs:
+  # Configuration - Edit this section to enable/disable tests
+  config:
+    name: Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      run-tests: ${{ steps.config.outputs.run-tests }}
+      os-matrix: ${{ steps.config.outputs.os-matrix }}
+      python-matrix: ${{ steps.config.outputs.python-matrix }}
+    steps:
+      - id: config
+        run: |
+          # Set to 'true' to run tests before building wheels, 'false' to skip tests
+          echo "run-tests=false" >> $GITHUB_OUTPUT
+
+          # Test matrix configuration (only used if run-tests is 'true')
+          echo 'os-matrix=["ubuntu-latest", "macos-latest", "windows-latest"]' >> $GITHUB_OUTPUT
+          echo 'python-matrix=["3.9", "3.10", "3.11", "3.12"]' >> $GITHUB_OUTPUT
+
   test:
     name: Run Tests
-    if: env.RUN_TESTS == 'true'
+    needs: config
+    if: needs.config.outputs.run-tests == 'true'
     uses: ./.github/workflows/_test.yml
     with:
-      os-matrix: ${{ env.TEST_OS_MATRIX }}
-      python-matrix: ${{ env.TEST_PYTHON_MATRIX }}
+      os-matrix: ${{ needs.config.outputs.os-matrix }}
+      python-matrix: ${{ needs.config.outputs.python-matrix }}
       primary-os: "ubuntu-latest"
       primary-python: "3.11"
     secrets: inherit
 
   build-wheels:
     name: Build Wheels (${{ matrix.os }})
-    needs: test
+    needs: [config, test]
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
