@@ -79,8 +79,8 @@ jobs:
       id: cache-vendor
       uses: actions/cache@v4
       with:
-        path: ${{ github.workspace }}/vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v6
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
         restore-keys: |
           vendor-${{ runner.os }}-
 

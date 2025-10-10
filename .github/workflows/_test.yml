@@ -157,8 +157,8 @@ jobs:
       id: cache-vendor
       uses: actions/cache@v4
       with:
-        path: ${{ github.workspace }}/vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v6
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
         restore-keys: |
           vendor-${{ runner.os }}-
 
@@ -167,6 +167,13 @@ jobs:
       run: |
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
+      shell: bash
+
+    - name: Verify vendor directory for caching
+      run: |
+        echo "Checking vendor directory contents..."
+        ls -lah vendor/ || echo "vendor directory not found"
+        du -sh vendor/ 2>/dev/null || echo "Cannot get vendor size"
       shell: bash
 
     - name: Cache Python build artifacts
