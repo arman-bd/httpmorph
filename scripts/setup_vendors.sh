@@ -163,12 +163,8 @@ fi
 echo ""
 echo "==> Setting up nghttp2..."
 
-# On macOS, use Homebrew's nghttp2 if available
-if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
-    echo "✓ Using Homebrew's libnghttp2"
-    echo "  Location: $(brew --prefix libnghttp2)"
 # On Windows with vcpkg, use vcpkg's nghttp2
-elif [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
     echo "✓ Using vcpkg's nghttp2"
     echo "  Location: $VCPKG_ROOT/installed/x64-windows"
 # On Windows with MSYS2, use the MSYS2 package
@@ -238,9 +234,7 @@ echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
 if [ "$OS" = "Linux" ]; then
     echo "  ✓ liburing:   $VENDOR_DIR/liburing/install"
 fi
-if [ "$OS" = "Darwin" ] && command -v brew &> /dev/null && brew list libnghttp2 &> /dev/null; then
-    echo "  ✓ nghttp2:    $(brew --prefix libnghttp2) (Homebrew)"
-elif [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
+if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
     echo "  ✓ nghttp2:    $VCPKG_ROOT/installed/x64-windows (vcpkg)"
 elif [ "$OS" = "Windows" ] && [ -d "/mingw64/include/nghttp2" ]; then
     echo "  ✓ nghttp2:    /mingw64 (MSYS2)"
