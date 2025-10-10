@@ -304,14 +304,22 @@ def get_library_paths():
                 nghttp2_include = "C:/Program Files/nghttp2/include"
                 nghttp2_lib = "C:/Program Files/nghttp2/lib"
 
-        # zlib paths
+        # zlib paths - prefer vendor, then vcpkg
         vendor_zlib = vendor_dir / "zlib"
+        vcpkg_root = os.environ.get("VCPKG_ROOT", "C:/vcpkg")
+        vcpkg_installed = Path(vcpkg_root) / "installed" / "x64-windows"
+
         if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
             print(f"Using vendor zlib from: {vendor_zlib}")
             # Need both source dir (for zlib.h) and build dir (for zconf.h)
             zlib_include = [str(vendor_zlib), str(vendor_zlib / "build")]
             zlib_lib = str(vendor_zlib / "build" / "Release")
+        elif vcpkg_installed.exists() and (vcpkg_installed / "lib" / "zlib.lib").exists():
+            print(f"Using vcpkg zlib from: {vcpkg_installed}")
+            zlib_include = str(vcpkg_installed / "include")
+            zlib_lib = str(vcpkg_installed / "lib")
         else:
+            print("WARNING: zlib not found. Install via vcpkg: vcpkg install zlib:x64-windows")
             zlib_include = None
             zlib_lib = None
 
@@ -358,8 +366,16 @@ if IS_WINDOWS:
         "/D_WIN32",
     ]
     # BoringSSL and nghttp2 library names on Windows (without .lib extension)
-    # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlibstatic.lib
-    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "zlibstatic"]
+    # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
+    # Detect which zlib we're using
+    import os
+    vendor_dir = Path("vendor").resolve()
+    vendor_zlib = vendor_dir / "zlib"
+    if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
+        zlib_lib_name = "zlibstatic"
+    else:
+        zlib_lib_name = "zlib"
+    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
 else:
     EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
     # Unix library names

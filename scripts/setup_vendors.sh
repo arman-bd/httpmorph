@@ -204,6 +204,13 @@ else
     cd "$VENDOR_DIR"
 fi
 
+# Clean up downloaded archives to save cache space
+echo ""
+echo "==> Cleaning up downloaded archives..."
+rm -f "$VENDOR_DIR/nghttp2.tar.gz"
+rm -f "$VENDOR_DIR/zlib.zip"
+echo "✓ Cleanup complete"
+
 #
 # Summary
 #

@@ -24,15 +24,42 @@ jobs:
         python-version: ${{ inputs.primary-python }}
         cache: 'pip'
 
+    - name: Cache apt packages (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/_benchmark.yml') }}
+        restore-keys: |
+          apt-${{ runner.os }}-
+
     - name: Install system dependencies (Linux)
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
 
+    - name: Cache Homebrew packages (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /usr/local/Cellar
+          /usr/local/opt
+        key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/_benchmark.yml') }}
+        restore-keys: |
+          brew-${{ runner.os }}-
+
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
       run: brew install cmake ninja libnghttp2
+
+    - name: Setup Go (for BoringSSL build)
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
 
     - name: Setup ccache (Unix)
       if: runner.os != 'Windows'
@@ -49,14 +76,16 @@ jobs:
       shell: bash
 
     - name: Cache vendor dependencies
+      id: cache-vendor
       uses: actions/cache@v4
       with:
-        path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v4
+        path: ${{ github.workspace }}/vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v6
         restore-keys: |
           vendor-${{ runner.os }}-
 
     - name: Setup vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
       run: |
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
@@ -65,10 +94,8 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          build
-          *.egg-info
-          **/*.so
-          **/*.pyd
+          build/
+          *.egg-info/
         key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
         restore-keys: |
           python-build-${{ runner.os }}-${{ inputs.primary-python }}-

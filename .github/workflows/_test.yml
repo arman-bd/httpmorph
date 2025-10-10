@@ -37,11 +37,32 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
 
+    - name: Cache apt packages (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/_test.yml') }}
+        restore-keys: |
+          apt-${{ runner.os }}-
+
     - name: Install system dependencies (Linux)
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+    - name: Cache Homebrew packages (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /usr/local/Cellar
+          /usr/local/opt
+        key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/_test.yml') }}
+        restore-keys: |
+          brew-${{ runner.os }}-
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
@@ -49,11 +70,29 @@ jobs:
 
     - name: Install system dependencies (Windows)
       if: runner.os == 'Windows'
-      run: choco install cmake ninja -y
+      run: |
+        # Check if already installed
+        if ! command -v cmake &> /dev/null; then
+          choco install cmake -y
+        else
+          echo "cmake already installed"
+        fi
+        if ! command -v ninja &> /dev/null; then
+          choco install ninja -y
+        else
+          echo "ninja already installed"
+        fi
+      shell: bash
 
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
+
+    - name: Setup Go (for BoringSSL build)
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
 
     - name: Setup ccache (Unix)
       if: runner.os != 'Windows'
@@ -69,8 +108,20 @@ jobs:
         echo "CXX=ccache g++" >> $GITHUB_ENV
       shell: bash
 
-    - name: Setup vcpkg (Windows)
+    - name: Cache vcpkg packages (Windows)
       if: runner.os == 'Windows'
+      id: cache-vcpkg
+      uses: actions/cache@v4
+      with:
+        path: |
+          C:/vcpkg/installed
+          C:/vcpkg/packages
+        key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
+        restore-keys: |
+          vcpkg-nghttp2-zlib-${{ runner.os }}-
+
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows' && steps.cache-vcpkg.outputs.cache-hit != 'true'
       run: |
         # Use pre-installed vcpkg on GitHub runners
         if [ -d "C:/vcpkg" ]; then
@@ -87,33 +138,32 @@ jobs:
         echo "$VCPKG_ROOT" >> $GITHUB_PATH
       shell: bash
 
-    - name: Cache vcpkg packages (Windows)
-      if: runner.os == 'Windows'
-      uses: actions/cache@v4
-      with:
-        path: |
-          C:/vcpkg/installed
-          C:/vcpkg/packages
-        key: vcpkg-nghttp2-${{ runner.os }}-v2
-        restore-keys: |
-          vcpkg-nghttp2-${{ runner.os }}-
-
     - name: Install dependencies via vcpkg (Windows)
+      if: runner.os == 'Windows' && steps.cache-vcpkg.outputs.cache-hit != 'true'
+      run: |
+        export VCPKG_ROOT="C:/vcpkg"
+        export PATH="$VCPKG_ROOT:$PATH"
+        vcpkg install nghttp2:x64-windows zlib:x64-windows --clean-after-build
+      shell: bash
+
+    - name: Set vcpkg environment (Windows)
       if: runner.os == 'Windows'
       run: |
-        vcpkg install nghttp2:x64-windows zlib:x64-windows --clean-after-build
+        echo "VCPKG_ROOT=C:/vcpkg" >> $GITHUB_ENV
+        echo "C:/vcpkg" >> $GITHUB_PATH
       shell: bash
 
     - name: Cache vendor dependencies
       id: cache-vendor
       uses: actions/cache@v4
       with:
-        path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v4
+        path: ${{ github.workspace }}/vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v6
         restore-keys: |
           vendor-${{ runner.os }}-
 
     - name: Setup vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
       run: |
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
@@ -123,10 +173,8 @@ jobs:
       uses: actions/cache@v4
       with:
         path: |
-          build
-          *.egg-info
-          **/*.so
-          **/*.pyd
+          build/
+          *.egg-info/
         key: python-build-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
         restore-keys: |
           python-build-${{ runner.os }}-${{ matrix.python-version }}-
