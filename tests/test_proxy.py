@@ -2,9 +2,9 @@
 Proxy support tests for httpmorph
 """
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_proxy_server import MockProxyServer
 from tests.test_server import MockHTTPServer
 
@@ -16,19 +16,13 @@ class TestProxyWithoutAuth:
         """Test HTTP request via proxy"""
         with MockProxyServer() as proxy:
             with MockHTTPServer() as server:
-                response = httpmorph.get(
-                    f"{server.url}/get",
-                    proxy=proxy.url
-                )
+                response = httpmorph.get(f"{server.url}/get", proxy=proxy.url)
                 assert response.status_code == 200
 
     def test_https_via_proxy_connect(self):
         """Test HTTPS request via proxy using CONNECT method"""
         with MockProxyServer() as proxy:
-            response = httpmorph.get(
-                "https://example.com",
-                proxy=proxy.url
-            )
+            response = httpmorph.get("https://example.com", proxy=proxy.url)
             assert response.status_code in [200, 301, 302]
 
     def test_proxy_parameter_string(self):
@@ -36,9 +30,7 @@ class TestProxyWithoutAuth:
         # Just test that the parameter is accepted
         try:
             response = httpmorph.get(
-                "http://example.com",
-                proxy="http://localhost:9999",
-                timeout=0.1
+                "http://example.com", proxy="http://localhost:9999", timeout=0.1
             )
             # Connection will fail but proxy parameter should be accepted
             assert response.status_code == 0  # Connection error
@@ -47,16 +39,9 @@ class TestProxyWithoutAuth:
 
     def test_proxy_parameter_dict(self):
         """Test proxy parameter as dict (requests-style)"""
-        proxies = {
-            'http': 'http://localhost:9999',
-            'https': 'http://localhost:9999'
-        }
+        proxies = {"http": "http://localhost:9999", "https": "http://localhost:9999"}
         try:
-            response = httpmorph.get(
-                "http://example.com",
-                proxies=proxies,
-                timeout=0.1
-            )
+            response = httpmorph.get("http://example.com", proxies=proxies, timeout=0.1)
             # Connection will fail but proxy parameter should be accepted
             assert response.status_code == 0
         except Exception:
@@ -73,11 +58,7 @@ class TestProxyWithoutAuth:
 
         for proxy_url in formats:
             try:
-                response = httpmorph.get(
-                    "http://example.com",
-                    proxy=proxy_url,
-                    timeout=0.1
-                )
+                response = httpmorph.get("http://example.com", proxy=proxy_url, timeout=0.1)
                 # Connection will fail but URL should be accepted
                 assert response.status_code >= 0
             except Exception:
@@ -92,9 +73,7 @@ class TestProxyWithAuth:
         with MockProxyServer(username="testuser", password="testpass") as proxy:
             with MockHTTPServer() as server:
                 response = httpmorph.get(
-                    f"{server.url}/get",
-                    proxy=proxy.url,
-                    proxy_auth=("testuser", "testpass")
+                    f"{server.url}/get", proxy=proxy.url, proxy_auth=("testuser", "testpass")
                 )
                 assert response.status_code == 200
 
@@ -102,9 +81,7 @@ class TestProxyWithAuth:
         """Test HTTPS via proxy with authentication"""
         with MockProxyServer(username="testuser", password="testpass") as proxy:
             response = httpmorph.get(
-                "https://example.com",
-                proxy=proxy.url,
-                proxy_auth=("testuser", "testpass")
+                "https://example.com", proxy=proxy.url, proxy_auth=("testuser", "testpass")
             )
             assert response.status_code in [200, 301, 302]
 
@@ -115,7 +92,7 @@ class TestProxyWithAuth:
                 "http://example.com",
                 proxy="http://localhost:9999",
                 proxy_auth=("user", "pass"),
-                timeout=0.1
+                timeout=0.1,
             )
             # Connection will fail but parameters should be accepted
             assert response.status_code >= 0
@@ -126,9 +103,7 @@ class TestProxyWithAuth:
         """Test proxy URL with embedded username:password"""
         try:
             response = httpmorph.get(
-                "http://example.com",
-                proxy="http://user:pass@localhost:9999",
-                timeout=0.1
+                "http://example.com", proxy="http://user:pass@localhost:9999", timeout=0.1
             )
             # Connection will fail but URL should be parsed
             assert response.status_code >= 0
@@ -140,9 +115,7 @@ class TestProxyWithAuth:
         with MockProxyServer(username="testuser", password="testpass") as proxy:
             with MockHTTPServer() as server:
                 response = httpmorph.get(
-                    f"{server.url}/get",
-                    proxy=proxy.url,
-                    proxy_auth=("wronguser", "wrongpass")
+                    f"{server.url}/get", proxy=proxy.url, proxy_auth=("wronguser", "wrongpass")
                 )
                 # Should fail with 407 Proxy Authentication Required or connection error
                 assert response.status_code in [0, 403, 407]
@@ -170,11 +143,7 @@ class TestProxyEdgeCases:
         """Test proxy with session"""
         session = httpmorph.Session(browser="chrome")
         try:
-            response = session.get(
-                "http://example.com",
-                proxy="http://localhost:9999",
-                timeout=0.1
-            )
+            response = session.get("http://example.com", proxy="http://localhost:9999", timeout=0.1)
             # Connection will fail but proxy should be accepted
             assert response.status_code >= 0
         except Exception:
@@ -190,9 +159,7 @@ class TestProxyEdgeCases:
         for method_name, method_func in methods:
             try:
                 response = method_func(
-                    "http://example.com",
-                    proxy="http://localhost:9999",
-                    timeout=0.1
+                    "http://example.com", proxy="http://localhost:9999", timeout=0.1
                 )
                 # Connection will fail but method should work with proxy
                 assert response.status_code >= 0
@@ -202,11 +169,7 @@ class TestProxyEdgeCases:
     def test_invalid_proxy_url(self):
         """Test with invalid proxy URL"""
         try:
-            response = httpmorph.get(
-                "http://example.com",
-                proxy="not-a-valid-url",
-                timeout=0.1
-            )
+            response = httpmorph.get("http://example.com", proxy="not-a-valid-url", timeout=0.1)
             # Should either fail with parse error or connection error
             assert response.status_code == 0
             assert response.error != 0
@@ -222,9 +185,7 @@ class TestProxyDocumentation:
         # Example from docs
         try:
             response = httpmorph.get(
-                "http://example.com",
-                proxy="http://proxy.example.com:8080",
-                timeout=0.1
+                "http://example.com", proxy="http://proxy.example.com:8080", timeout=0.1
             )
             assert response.status_code >= 0
         except Exception:
@@ -238,7 +199,7 @@ class TestProxyDocumentation:
                 "https://example.com",
                 proxy="http://proxy.example.com:8080",
                 proxy_auth=("username", "password"),
-                timeout=0.1
+                timeout=0.1,
             )
             assert response.status_code >= 0
         except Exception:
@@ -248,15 +209,11 @@ class TestProxyDocumentation:
         """Test proxies dict example (requests-style)"""
         # Example from docs
         proxies = {
-            'http': 'http://proxy.example.com:8080',
-            'https': 'http://proxy.example.com:8080'
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
         }
         try:
-            response = httpmorph.get(
-                "https://example.com",
-                proxies=proxies,
-                timeout=0.1
-            )
+            response = httpmorph.get("https://example.com", proxies=proxies, timeout=0.1)
             assert response.status_code >= 0
         except Exception:
             pass

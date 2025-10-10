@@ -2,10 +2,21 @@
  * browser_profiles.c - Browser TLS/HTTP fingerprint profiles implementation
  */
 
+#ifndef _WIN32
+    #define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "browser_profiles.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Platform-specific headers */
+#ifdef _WIN32
+    #define strcasecmp _stricmp
+#else
+    #include <strings.h>  /* for strcasecmp */
+#endif
 
 /* Chrome 131 Profile */
 const browser_profile_t PROFILE_CHROME_131 = {
@@ -86,7 +97,7 @@ const browser_profile_t PROFILE_CHROME_131 = {
         .window_update = 15663105,
     },
 
-    .ja3_hash = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0",
+    .ja3_hash = "cd08e31494f9531f560d64c695473da9",  /* MD5 of JA3 string */
 };
 
 /* Chrome 124 Profile (older version) */
@@ -223,7 +234,7 @@ const browser_profile_t* browser_profile_get(const char *name) {
 const browser_profile_t* browser_profile_random(void) {
     static bool seeded = false;
     if (!seeded) {
-        srand(time(NULL));
+        srand((unsigned int)time(NULL));
         seeded = true;
     }
 

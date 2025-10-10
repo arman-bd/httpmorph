@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================
+  # Load Configuration
+  # ============================================================
+  load-config:
+    uses: ./.github/workflows/_config.yml
+
+  # ============================================================
+  # Test Job
+  # ============================================================
+  test:
+    needs: load-config
+    if: needs.load-config.outputs.enable-tests == 'true'
+    uses: ./.github/workflows/_test.yml
+    with:
+      os-matrix: ${{ needs.load-config.outputs.os-matrix }}
+      python-matrix: ${{ needs.load-config.outputs.python-matrix }}
+      primary-os: ${{ needs.load-config.outputs.primary-os }}
+      primary-python: ${{ needs.load-config.outputs.primary-python }}
+
+  # ============================================================
+  # Benchmark Job
+  # ============================================================
+  benchmark:
+    needs: [load-config, test]
+    if: needs.load-config.outputs.enable-benchmark == 'true'
+    uses: ./.github/workflows/_benchmark.yml
+    with:
+      primary-os: ${{ needs.load-config.outputs.primary-os }}
+      primary-python: ${{ needs.load-config.outputs.primary-python }}
+
+  # ============================================================
+  # Summary
+  # ============================================================
+  summary:
+    name: CI Summary
+    needs: [load-config, test, benchmark]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check results
+      run: |
+        echo "==================================="
+        echo "CI Pipeline Summary"
+        echo "==================================="
+        echo ""
+
+        # Tests
+        if [ "${{ needs.load-config.outputs.enable-tests }}" == "true" ]; then
+          if [ "${{ needs.test.result }}" == "success" ]; then
+            echo "✅ Tests: PASSED"
+          else
+            echo "❌ Tests: FAILED"
+            EXIT_CODE=1
+          fi
+        else
+          echo "⊘ Tests: DISABLED"
+        fi
+
+        # Benchmark
+        if [ "${{ needs.load-config.outputs.enable-benchmark }}" == "true" ]; then
+          if [ "${{ needs.benchmark.result }}" == "success" ]; then
+            echo "✅ Benchmark: PASSED"
+          else
+            echo "❌ Benchmark: FAILED"
+            EXIT_CODE=1
+          fi
+        else
+          echo "⊘ Benchmark: DISABLED"
+        fi
+
+        echo ""
+        if [ "${EXIT_CODE:-0}" == "1" ]; then
+          echo "❌ CI Pipeline FAILED"
+          exit 1
+        else
+          echo "✅ CI Pipeline PASSED"
+        fi

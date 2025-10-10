@@ -2,8 +2,9 @@
 Browser profile tests for httpmorph
 """
 
-import httpmorph
 import pytest
+
+import httpmorph
 
 
 class TestBrowserProfiles:
@@ -125,11 +126,7 @@ class TestFingerprintMorphing:
         """Test that morphing generates variations"""
         fingerprints = []
         for _ in range(5):
-            response = httpmorph.get(
-                "https://example.com",
-                browser="chrome",
-                morph=True
-            )
+            response = httpmorph.get("https://example.com", browser="chrome", morph=True)
             fingerprints.append(response.ja3_fingerprint)
 
         # Should have some variation (though not all guaranteed to be unique)
@@ -138,11 +135,7 @@ class TestFingerprintMorphing:
     def test_morph_stays_realistic(self):
         """Test that morphed fingerprints are still realistic"""
         for _ in range(10):
-            response = httpmorph.get(
-                "https://example.com",
-                browser="chrome",
-                morph=True
-            )
+            response = httpmorph.get("https://example.com", browser="chrome", morph=True)
             # Should still successfully connect and get response
             assert response.status_code == 200
 
@@ -171,7 +164,7 @@ class TestJA3Fingerprinting:
     def test_ja3_fingerprint_generated(self):
         """Test that JA3 fingerprint is generated"""
         response = httpmorph.get("https://example.com")
-        assert hasattr(response, 'ja3_fingerprint')
+        assert hasattr(response, "ja3_fingerprint")
         assert response.ja3_fingerprint is not None
         assert len(response.ja3_fingerprint) == 32  # MD5 hash length
 
@@ -179,7 +172,7 @@ class TestJA3Fingerprinting:
         """Test JA3 fingerprint has correct format"""
         response = httpmorph.get("https://example.com")
         # JA3 should be hex string
-        assert all(c in '0123456789abcdef' for c in response.ja3_fingerprint.lower())
+        assert all(c in "0123456789abcdef" for c in response.ja3_fingerprint.lower())
 
     def test_custom_ja3_string(self):
         """Test using custom JA3 string
@@ -199,7 +192,7 @@ class TestJA3Fingerprinting:
         """
         response = httpmorph.get("https://example.com")
         # JA4 not implemented yet, check JA3 instead
-        assert hasattr(response, 'ja3_fingerprint')
+        assert hasattr(response, "ja3_fingerprint")
         assert response.ja3_fingerprint is not None
 
 

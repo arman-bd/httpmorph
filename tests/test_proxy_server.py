@@ -18,20 +18,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_CONNECT(self):
         """Handle CONNECT method for HTTPS proxying"""
         # Check for Proxy-Authorization if auth is required
-        if hasattr(self.server, 'username') and self.server.username:
-            auth_header = self.headers.get('Proxy-Authorization')
+        if hasattr(self.server, "username") and self.server.username:
+            auth_header = self.headers.get("Proxy-Authorization")
             if not auth_header:
                 self.send_response(407)
-                self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
+                self.send_header("Proxy-Authenticate", 'Basic realm="Proxy"')
                 self.end_headers()
                 return
 
             # Verify credentials
             try:
-                auth_type, credentials = auth_header.split(' ', 1)
-                if auth_type == 'Basic':
-                    decoded = base64.b64decode(credentials).decode('utf-8')
-                    username, password = decoded.split(':', 1)
+                auth_type, credentials = auth_header.split(" ", 1)
+                if auth_type == "Basic":
+                    decoded = base64.b64decode(credentials).decode("utf-8")
+                    username, password = decoded.split(":", 1)
                     if username != self.server.username or password != self.server.password:
                         self.send_response(403)
                         self.end_headers()
@@ -42,7 +42,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
 
         # Parse host and port
-        host, port = self.path.split(':')
+        host, port = self.path.split(":")
         port = int(port)
 
         try:
@@ -51,7 +51,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             target_sock.connect((host, port))
 
             # Send success response
-            self.send_response(200, 'Connection Established')
+            self.send_response(200, "Connection Established")
             self.end_headers()
 
             # Relay data between client and target
@@ -88,20 +88,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests (for HTTP proxying)"""
         # Check for Proxy-Authorization if auth is required
-        if hasattr(self.server, 'username') and self.server.username:
-            auth_header = self.headers.get('Proxy-Authorization')
+        if hasattr(self.server, "username") and self.server.username:
+            auth_header = self.headers.get("Proxy-Authorization")
             if not auth_header:
                 self.send_response(407)
-                self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
+                self.send_header("Proxy-Authenticate", 'Basic realm="Proxy"')
                 self.end_headers()
                 return
 
             # Verify credentials
             try:
-                auth_type, credentials = auth_header.split(' ', 1)
-                if auth_type == 'Basic':
-                    decoded = base64.b64decode(credentials).decode('utf-8')
-                    username, password = decoded.split(':', 1)
+                auth_type, credentials = auth_header.split(" ", 1)
+                if auth_type == "Basic":
+                    decoded = base64.b64decode(credentials).decode("utf-8")
+                    username, password = decoded.split(":", 1)
                     if username != self.server.username or password != self.server.password:
                         self.send_response(403)
                         self.end_headers()
@@ -113,10 +113,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # For testing, just return a simple response
         self.send_response(200)
-        self.send_header('Content-Type', 'text/plain')
-        self.send_header('X-Proxied', 'true')
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("X-Proxied", "true")
         self.end_headers()
-        self.wfile.write(b'Proxied response')
+        self.wfile.write(b"Proxied response")
 
 
 class MockProxyServer:
@@ -131,7 +131,7 @@ class MockProxyServer:
 
     def start(self):
         """Start the proxy server"""
-        self.server = HTTPServer(('127.0.0.1', self.port), ProxyHandler)
+        self.server = HTTPServer(("127.0.0.1", self.port), ProxyHandler)
 
         # Attach auth credentials to server
         if self.username:
@@ -148,6 +148,7 @@ class MockProxyServer:
 
         # Wait a bit for server to start
         import time
+
         time.sleep(0.1)
 
     def stop(self):

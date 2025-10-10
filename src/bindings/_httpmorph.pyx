@@ -266,10 +266,13 @@ cdef class Client:
                 'request_headers': request_headers,
             }
 
-            # Convert headers
+            # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('utf-8')
-                value = resp.header_values[i].decode('utf-8')
+                key = resp.header_keys[i].decode('latin-1')
+                try:
+                    value = resp.header_values[i].decode('latin-1')
+                except:
+                    value = resp.header_values[i].decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response
@@ -505,10 +508,13 @@ cdef class Session:
                 'request_headers': request_headers,
             }
 
-            # Convert headers
+            # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('utf-8')
-                value = resp.header_values[i].decode('utf-8')
+                key = resp.header_keys[i].decode('latin-1')
+                try:
+                    value = resp.header_values[i].decode('latin-1')
+                except:
+                    value = resp.header_values[i].decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response

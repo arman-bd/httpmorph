@@ -20,7 +20,7 @@ def demo_browser_profiles():
     print("1. Browser Profiles")
     print("=" * 60)
 
-    browsers = ['chrome', 'firefox', 'safari', 'edge']
+    browsers = ["chrome", "firefox", "safari", "edge"]
 
     for browser in browsers:
         session = httpmorph.Session(browser=browser)
@@ -55,12 +55,9 @@ def demo_session_management():
     print("3. Session Management")
     print("=" * 60)
 
-    with httpmorph.Session(browser='chrome') as session:
+    with httpmorph.Session(browser="chrome") as session:
         # Custom headers
-        headers = {
-            'X-Custom-Header': 'MyValue',
-            'Accept': 'application/json'
-        }
+        headers = {"X-Custom-Header": "MyValue", "Accept": "application/json"}
 
         response = session.get("https://api.github.com", headers=headers)
 
@@ -95,14 +92,10 @@ def demo_performance_metrics():
 
     import time
 
-    session = httpmorph.Session(browser='chrome')
+    session = httpmorph.Session(browser="chrome")
 
     # Multiple requests to same domain
-    urls = [
-        "https://example.com",
-        "https://www.google.com",
-        "https://api.github.com"
-    ]
+    urls = ["https://example.com", "https://www.google.com", "https://api.github.com"]
 
     print("\nSequential Requests:")
     for url in urls:
@@ -150,6 +143,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
 

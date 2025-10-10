@@ -1,0 +1,133 @@
+name: Benchmark
+
+on:
+  workflow_call:
+    inputs:
+      primary-os:
+        required: true
+        type: string
+      primary-python:
+        required: true
+        type: string
+
+jobs:
+  benchmark:
+    name: Benchmark
+    runs-on: ${{ inputs.primary-os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.primary-python }}
+        cache: 'pip'
+
+    - name: Cache apt packages (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/_benchmark.yml') }}
+        restore-keys: |
+          apt-${{ runner.os }}-
+
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+    - name: Cache Homebrew packages (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /usr/local/Cellar
+          /usr/local/opt
+        key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/_benchmark.yml') }}
+        restore-keys: |
+          brew-${{ runner.os }}-
+
+    - name: Install system dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: brew install cmake ninja libnghttp2
+
+    - name: Setup Go (for BoringSSL build)
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Setup ccache (Unix)
+      if: runner.os != 'Windows'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-${{ runner.os }}-${{ inputs.primary-python }}
+        max-size: 500M
+
+    - name: Configure ccache (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        echo "CC=ccache gcc" >> $GITHUB_ENV
+        echo "CXX=ccache g++" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
+        restore-keys: |
+          vendor-${{ runner.os }}-
+
+    - name: Setup vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      run: |
+        chmod +x scripts/setup_vendors.sh
+        ./scripts/setup_vendors.sh
+
+    - name: Restore Python build cache
+      id: cache-python-build
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          build/
+          *.egg-info/
+        key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
+        restore-keys: |
+          python-build-${{ runner.os }}-${{ inputs.primary-python }}-
+
+    - name: Install package
+      run: pip install -e ".[dev,benchmark]"
+
+    - name: Run benchmarks
+      run: pytest benchmarks/ --benchmark-only --benchmark-json=benchmark.json
+
+    - name: Store benchmark
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+
+    # Save caches even if benchmarks fail (using always())
+    - name: Save vendor cache
+      if: always() && steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
+
+    - name: Save Python build cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          build/
+          *.egg-info/
+        key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}

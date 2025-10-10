@@ -2,8 +2,14 @@
 Pytest configuration and fixtures for httpmorph tests
 """
 
-import httpmorph
+import subprocess
+import time
+from pathlib import Path
+
+import filelock
 import pytest
+
+import httpmorph
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -22,6 +28,7 @@ def initialize_httpmorph():
 def http_server():
     """Create a test HTTP server"""
     from tests.test_server import MockHTTPServer
+
     server = MockHTTPServer()
     server.start()
     yield server
@@ -32,6 +39,7 @@ def http_server():
 def https_server():
     """Create a test HTTPS server"""
     from tests.test_server import MockHTTPServer
+
     try:
         server = MockHTTPServer(ssl_enabled=True)
         server.start()
@@ -71,17 +79,35 @@ def safari_session():
         pytest.skip("Session not yet implemented")
 
 
+@pytest.fixture(scope="session")
+def httpbin_server():
+    """Use MockHTTPServer for httpbin-compatible testing"""
+    from tests.test_server import MockHTTPServer
+
+    server = MockHTTPServer()
+    server.start()
+    yield server.url
+    server.stop()
+
+
+@pytest.fixture(scope="session")
+def mock_httpbin_server():
+    """Use MockHTTPServer for tests where Docker httpbin fails"""
+    from tests.test_server import MockHTTPServer
+
+    server = MockHTTPServer()
+    server.start()
+    yield server.url
+    server.stop()
+
+
 def pytest_configure(config):
     """Configure pytest"""
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (requires network)"
     )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
-    config.addinivalue_line(
-        "markers", "ssl: mark test as requiring SSL support"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
+    config.addinivalue_line("markers", "ssl: mark test as requiring SSL support")
 
 
 def pytest_collection_modifyitems(config, items):

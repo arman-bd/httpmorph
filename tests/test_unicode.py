@@ -12,9 +12,9 @@ Tests handling of:
 
 import json
 
-import httpmorph
 import pytest
 
+import httpmorph
 from tests.test_server import MockHTTPServer
 
 
@@ -28,7 +28,7 @@ class TestUnicodeResponseBodies:
             assert response.status_code == 200
 
             # Parse JSON
-            data = json.loads(response.body.decode('utf-8'))
+            data = json.loads(response.body.decode("utf-8"))
 
             # Verify various unicode strings
             assert data["chinese"] == "你好世界"
@@ -46,7 +46,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "你好世界" in body
             assert "世界" in body
 
@@ -56,7 +56,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "こんにちは世界" in body
 
     def test_korean_characters(self):
@@ -65,7 +65,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "안녕하세요 세계" in body
 
     def test_arabic_characters(self):
@@ -74,7 +74,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "مرحبا بالعالم" in body
 
     def test_russian_cyrillic(self):
@@ -83,7 +83,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "Привет мир" in body
 
     def test_emoji_in_response(self):
@@ -92,7 +92,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "👋" in body
             assert "🌍" in body
             assert "🎉" in body
@@ -103,12 +103,12 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            data = json.loads(response.body.decode('utf-8'))
+            data = json.loads(response.body.decode("utf-8"))
             assert data["mixed"] == "Hello 世界 🌍"
             # Verify all three types present
             assert "Hello" in data["mixed"]  # ASCII
-            assert "世界" in data["mixed"]    # CJK
-            assert "🌍" in data["mixed"]     # Emoji
+            assert "世界" in data["mixed"]  # CJK
+            assert "🌍" in data["mixed"]  # Emoji
 
     def test_special_latin_characters(self):
         """Test special Latin characters with accents"""
@@ -116,7 +116,7 @@ class TestUnicodeResponseBodies:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            data = json.loads(response.body.decode('utf-8'))
+            data = json.loads(response.body.decode("utf-8"))
             assert "¡" in data["special"]
             assert "ñ" in data["special"]
             assert "Ñ" in data["special"]
@@ -148,10 +148,7 @@ class TestUnicodeHeaders:
         with MockHTTPServer() as server:
             # This may succeed or fail gracefully
             try:
-                response = httpmorph.get(
-                    f"{server.url}/headers",
-                    headers={"X-Unicode": "你好"}
-                )
+                response = httpmorph.get(f"{server.url}/headers", headers={"X-Unicode": "你好"})
                 # If it succeeds, verify it's handled
                 assert response.status_code >= 0
             except (ValueError, UnicodeEncodeError):
@@ -205,7 +202,7 @@ class TestEncodingEdgeCases:
             assert response.status_code == 200
 
             # Should be decodable as UTF-8
-            text = response.body.decode('utf-8')
+            text = response.body.decode("utf-8")
             assert "你好" in text
             assert "café" in text
             assert "résumé" in text
@@ -255,15 +252,8 @@ class TestPostWithUnicode:
     def test_post_unicode_json(self):
         """Test POST with unicode in JSON body"""
         with MockHTTPServer() as server:
-            payload = {
-                "message": "你好世界",
-                "emoji": "🎉",
-                "mixed": "Hello 世界"
-            }
-            response = httpmorph.post(
-                f"{server.url}/post",
-                json=payload
-            )
+            payload = {"message": "你好世界", "emoji": "🎉", "mixed": "Hello 世界"}
+            response = httpmorph.post(f"{server.url}/post", json=payload)
             assert response.status_code == 200
 
             # Verify server received unicode data
@@ -276,14 +266,11 @@ class TestPostWithUnicode:
         """Test POST with unicode in form data"""
         with MockHTTPServer() as server:
             form_data = "name=你好&message=世界"
-            response = httpmorph.post(
-                f"{server.url}/post",
-                data=form_data.encode('utf-8')
-            )
+            response = httpmorph.post(f"{server.url}/post", data=form_data.encode("utf-8"))
             assert response.status_code == 200
             # The server receives the data and includes it in the response
             # Unicode may be escaped in JSON representation
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             assert "name=" in body
             assert "message=" in body
             # Verify unicode data was received (may be escaped as \u4f60\u597d)
@@ -332,7 +319,7 @@ class TestRealWorldUnicode:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            data = json.loads(response.body.decode('utf-8'))
+            data = json.loads(response.body.decode("utf-8"))
 
             # Verify we can handle at least 5 different languages
             languages = ["chinese", "japanese", "korean", "arabic", "russian"]
@@ -346,7 +333,7 @@ class TestRealWorldUnicode:
             response = httpmorph.get(f"{server.url}/unicode")
             assert response.status_code == 200
 
-            body = response.body.decode('utf-8')
+            body = response.body.decode("utf-8")
             # Basic emoji should work
             assert "👋" in body
             assert "🌍" in body
@@ -360,10 +347,7 @@ class TestRealWorldUnicode:
         with MockHTTPServer() as server:
             # Post data with zero-width characters
             payload = {"text": "Hello\u200bWorld"}  # Zero-width space
-            response = httpmorph.post(
-                f"{server.url}/post",
-                json=payload
-            )
+            response = httpmorph.post(f"{server.url}/post", json=payload)
             assert response.status_code == 200
 
 

@@ -16,12 +16,22 @@ __license__ = "MIT"
 from httpmorph._client_c import (
     HAS_C_EXTENSION,
     Client,
+    ConnectionError,
+    HTTPError,
+    PreparedRequest,
+    Request,
+    RequestException,
     Response,
     Session,
+    Timeout,
+    TooManyRedirects,
     cleanup,
     delete,
     get,
+    head,
     init,
+    options,
+    patch,
     post,
     put,
     version,
@@ -30,6 +40,7 @@ from httpmorph._client_c import (
 # Try to import HTTP/2 C extension (optional)
 try:
     from httpmorph import _http2  # noqa: F401
+
     HAS_HTTP2 = True
 except ImportError:
     HAS_HTTP2 = False
@@ -51,10 +62,20 @@ __all__ = [
     "Client",
     "Session",
     "Response",
+    "Request",
+    "PreparedRequest",
+    "HTTPError",
+    "ConnectionError",
+    "Timeout",
+    "TooManyRedirects",
+    "RequestException",
     "get",
     "post",
     "put",
     "delete",
+    "head",
+    "patch",
+    "options",
     "init",
     "cleanup",
     "version",

@@ -2,8 +2,9 @@
 Basic tests for httpmorph
 """
 
-import httpmorph
 import pytest
+
+import httpmorph
 
 
 def test_import():
@@ -57,19 +58,21 @@ def test_simple_get():
     assert response.body is not None
 
 
-def test_post_with_json():
+def test_post_with_json(httpbin_server):
     """Test POST request with JSON data"""
-    import json
-
     data = {"key": "value", "number": 42}
-    response = httpmorph.post(
-        "https://postman-echo.com/post",
-        json=data,
-        headers={"Content-Type": "application/json"}
-    )
+    response = httpmorph.post(f"{httpbin_server}/post", json=data)
 
     assert response.status_code == 200
-    response_data = json.loads(response.body)
+
+    # Test compatibility: should work with both .body and .json()
+    if hasattr(response, "json"):
+        response_data = response.json()
+    else:
+        import json
+
+        response_data = json.loads(response.body)
+
     assert response_data["json"] == data
 
 
@@ -80,40 +83,6 @@ def test_fingerprint_rotation():
 
     # Sessions with different browsers should have different fingerprints
     # This will be testable once we implement fingerprint tracking
-
-
-def test_performance():
-    """Test performance compared to requests library"""
-    import time
-
-    from tests.test_server import MockHTTPServer
-
-    iterations = 50  # Reduced for local testing
-
-    with MockHTTPServer() as server:
-        url = f"{server.url}/get"
-
-        # Test httpmorph
-        start = time.time()
-        for _ in range(iterations):
-            httpmorph.get(url)
-        httpmorph_time = time.time() - start
-
-        # Test requests
-        import requests
-        start = time.time()
-        for _ in range(iterations):
-            requests.get(url)
-        requests_time = time.time() - start
-
-        print(f"httpmorph: {httpmorph_time:.2f}s")
-        print(f"requests: {requests_time:.2f}s")
-        if httpmorph_time > 0:
-            print(f"Speedup: {requests_time / httpmorph_time:.2f}x")
-
-        # Assert httpmorph completes successfully
-        assert httpmorph_time > 0
-    assert httpmorph_time < requests_time
 
 
 if __name__ == "__main__":

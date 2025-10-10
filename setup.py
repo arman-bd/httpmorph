@@ -46,10 +46,12 @@ if IS_WINDOWS:
     EXTRA_COMPILE_ARGS = [
         "/O2",  # Optimization
         "/W3",  # Warning level 3
-        "/std:c11",  # C11 standard
         "/D_WIN32",
         "/D_CRT_SECURE_NO_WARNINGS",
     ]
+    # Note: /std:c11 is only available in VS 2019 16.8+ (MSVC 19.28+)
+    # For older versions, MSVC uses C89 with C99/C11 extensions by default
+    # We rely on C99 features like loop variable declarations which are supported
     EXTRA_LINK_ARGS = ["ws2_32.lib"]  # Winsock library
 else:
     # GCC/Clang flags
@@ -109,11 +111,300 @@ if not VENDOR_EXISTS:
     print("  • nghttp2 (HTTP/2 library)")
     print("\n" + "=" * 70 + "\n")
 
-# Get OpenSSL and libnghttp2 paths from homebrew
-OPENSSL_PREFIX = "/opt/homebrew/opt/openssl@3"
-LIBNGHTTP2_PREFIX = "/opt/homebrew/opt/libnghttp2"
+
+# Get BoringSSL and nghttp2 paths based on platform
+def get_library_paths():
+    """Detect platform and return appropriate library paths."""
+    import subprocess
+
+    if IS_MACOS:
+        # Try Homebrew paths
+        try:
+            openssl_prefix = (
+                subprocess.check_output(
+                    ["brew", "--prefix", "openssl@3"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            openssl_prefix = "/opt/homebrew/opt/openssl@3"
+
+        try:
+            nghttp2_prefix = (
+                subprocess.check_output(
+                    ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+
+        return {
+            "openssl_include": f"{openssl_prefix}/include",
+            "openssl_lib": f"{openssl_prefix}/lib",
+            "nghttp2_include": f"{nghttp2_prefix}/include",
+            "nghttp2_lib": f"{nghttp2_prefix}/lib",
+        }
+
+    elif IS_LINUX:
+        # Use vendor dependencies if available, otherwise system paths
+        vendor_dir = Path("vendor").resolve()
+
+        # Check if vendor nghttp2 exists
+        vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
+        if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
+            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_lib = str(vendor_nghttp2 / "lib")
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+        else:
+            # Try pkg-config for nghttp2
+            nghttp2_include = None
+            nghttp2_lib = None
+            try:
+                import subprocess
+
+                include_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--cflags-only-I", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
+                )
+                if include_output:
+                    nghttp2_include = include_output.replace("-I", "").strip()
+
+                lib_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--libs-only-L", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
+                )
+                if lib_output:
+                    nghttp2_lib = lib_output.replace("-L", "").strip()
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+
+            # Fall back to common system paths if pkg-config didn't work
+            if not nghttp2_include:
+                nghttp2_include = "/usr/include"
+            if not nghttp2_lib:
+                nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
+                # Also check alternative paths
+                if not Path(nghttp2_lib).exists():
+                    for alt_path in ["/usr/lib64", "/usr/lib"]:
+                        if Path(alt_path).exists():
+                            nghttp2_lib = alt_path
+                            break
+
+        # Try pkg-config for BoringSSL/OpenSSL (system fallback on Linux)
+        openssl_include = None
+        openssl_lib = None
+        try:
+            import subprocess
+
+            include_output = (
+                subprocess.check_output(
+                    ["pkg-config", "--cflags-only-I", "openssl"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if include_output:
+                openssl_include = include_output.replace("-I", "").strip()
+
+            lib_output = (
+                subprocess.check_output(
+                    ["pkg-config", "--libs-only-L", "openssl"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if lib_output:
+                openssl_lib = lib_output.replace("-L", "").strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        # Use system SSL library on Linux if pkg-config didn't work
+        if not openssl_include:
+            openssl_include = "/usr/include"
+        if not openssl_lib:
+            openssl_lib = "/usr/lib/x86_64-linux-gnu"
+            if not Path(openssl_lib).exists():
+                for alt_path in ["/usr/lib64", "/usr/lib"]:
+                    if Path(alt_path).exists():
+                        openssl_lib = alt_path
+                        break
+
+        # Validate paths before returning
+        if not openssl_include or not openssl_include.strip():
+            openssl_include = "/usr/include"
+        if not openssl_lib or not openssl_lib.strip():
+            openssl_lib = "/usr/lib/x86_64-linux-gnu"
+        if not nghttp2_include or not nghttp2_include.strip():
+            nghttp2_include = "/usr/include"
+        if not nghttp2_lib or not nghttp2_lib.strip():
+            nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
+
+        return {
+            "openssl_include": openssl_include,
+            "openssl_lib": openssl_lib,
+            "nghttp2_include": nghttp2_include,
+            "nghttp2_lib": nghttp2_lib,
+        }
+
+    elif IS_WINDOWS:
+        # Windows - use vendor BoringSSL build, and vcpkg/MSYS2 for nghttp2
+        import os
+
+        vendor_dir = Path("vendor").resolve()
+        vendor_boringssl = vendor_dir / "boringssl"
+
+        # BoringSSL paths (always use vendor build)
+        # Windows builds output to build/Release/ directory
+        boringssl_include = str(vendor_boringssl / "include")
+        boringssl_lib = str(vendor_boringssl / "build" / "Release")
+
+        # Check if BoringSSL was built successfully
+        if not (vendor_boringssl / "build" / "Release" / "ssl.lib").exists():
+            print(f"WARNING: BoringSSL not found at {vendor_boringssl}")
+            print("Please run: make setup")
+
+        # nghttp2 paths - prefer vendor build, then vcpkg, then MSYS2
+        vendor_nghttp2 = vendor_dir / "nghttp2"
+
+        if (vendor_nghttp2 / "lib" / "includes").exists():
+            # Vendor build exists
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+            nghttp2_include = str(vendor_nghttp2 / "lib" / "includes")
+            nghttp2_lib = str(vendor_nghttp2 / "build" / "lib" / "Release")
+        elif (vendor_nghttp2 / "include" / "nghttp2").exists():
+            # Vendor build with install structure
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_lib = str(vendor_nghttp2 / "build" / "lib" / "Release")
+        else:
+            # Try vcpkg
+            vcpkg_root = os.environ.get("VCPKG_ROOT", "C:/vcpkg")
+            vcpkg_installed = Path(vcpkg_root) / "installed" / "x64-windows"
+
+            if vcpkg_installed.exists() and (vcpkg_installed / "include" / "nghttp2").exists():
+                print(f"Using vcpkg nghttp2 from: {vcpkg_installed}")
+                nghttp2_include = str(vcpkg_installed / "include")
+                nghttp2_lib = str(vcpkg_installed / "lib")
+            elif Path("/mingw64/include/nghttp2").exists():
+                print("Using MSYS2 nghttp2 from: /mingw64")
+                nghttp2_include = "/mingw64/include"
+                nghttp2_lib = "/mingw64/lib"
+            else:
+                # Fallback to default paths
+                print("WARNING: nghttp2 not found. Install via vcpkg or MSYS2")
+                nghttp2_include = "C:/Program Files/nghttp2/include"
+                nghttp2_lib = "C:/Program Files/nghttp2/lib"
+
+        # zlib paths - prefer vendor, then vcpkg
+        vendor_zlib = vendor_dir / "zlib"
+        vcpkg_root = os.environ.get("VCPKG_ROOT", "C:/vcpkg")
+        vcpkg_installed = Path(vcpkg_root) / "installed" / "x64-windows"
+
+        if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
+            print(f"Using vendor zlib from: {vendor_zlib}")
+            # Need both source dir (for zlib.h) and build dir (for zconf.h)
+            zlib_include = [str(vendor_zlib), str(vendor_zlib / "build")]
+            zlib_lib = str(vendor_zlib / "build" / "Release")
+        elif vcpkg_installed.exists() and (vcpkg_installed / "lib" / "zlib.lib").exists():
+            print(f"Using vcpkg zlib from: {vcpkg_installed}")
+            zlib_include = str(vcpkg_installed / "include")
+            zlib_lib = str(vcpkg_installed / "lib")
+        else:
+            print("WARNING: zlib not found. Install via vcpkg: vcpkg install zlib:x64-windows")
+            zlib_include = None
+            zlib_lib = None
+
+        return {
+            "openssl_include": boringssl_include,
+            "openssl_lib": boringssl_lib,
+            "nghttp2_include": nghttp2_include,
+            "nghttp2_lib": nghttp2_lib,
+            "zlib_include": zlib_include,
+            "zlib_lib": zlib_lib,
+        }
+    else:
+        # Other platforms - use default system paths
+        return {
+            "openssl_include": "/usr/include",
+            "openssl_lib": "/usr/lib",
+            "nghttp2_include": "/usr/include",
+            "nghttp2_lib": "/usr/lib",
+        }
+
+
+LIB_PATHS = get_library_paths()
+
+# Debug output
+print("\nLibrary paths detected:")
+print(f"  BoringSSL include: {LIB_PATHS['openssl_include']}")
+print(f"  BoringSSL lib: {LIB_PATHS['openssl_lib']}")
+print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
+print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
+print()
+
+# Platform-specific compile args and libraries for extensions
+if IS_WINDOWS:
+    # Use /TP to compile as C++ (required for BoringSSL compatibility on Windows)
+    # Define WIN32, _WINDOWS, and OPENSSL_WINDOWS for proper BoringSSL compilation
+    EXT_COMPILE_ARGS = [
+        "/TP",
+        "/O2",
+        "/DHAVE_NGHTTP2",
+        "/EHsc",
+        "/DWIN32",
+        "/D_WINDOWS",
+        "/DOPENSSL_WINDOWS",
+        "/D_WIN32",
+    ]
+    # BoringSSL and nghttp2 library names on Windows (without .lib extension)
+    # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
+    # Detect which zlib we're using
+    import os
+    vendor_dir = Path("vendor").resolve()
+    vendor_zlib = vendor_dir / "zlib"
+    if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
+        zlib_lib_name = "zlibstatic"
+    else:
+        zlib_lib_name = "zlib"
+    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
+else:
+    EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
+    # Unix library names
+    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
 # Define C extension modules
+# Build library directories list
+BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
+
+# Build include and library directory lists
+INCLUDE_DIRS = [
+    str(INCLUDE_DIR),
+    str(CORE_DIR),
+    str(TLS_DIR),
+    LIB_PATHS["openssl_include"],
+    LIB_PATHS["nghttp2_include"],
+]
+
+LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
+
+# Add zlib paths on Windows if available
+if IS_WINDOWS and LIB_PATHS.get("zlib_include"):
+    zlib_inc = LIB_PATHS["zlib_include"]
+    if isinstance(zlib_inc, list):
+        INCLUDE_DIRS.extend(zlib_inc)
+    else:
+        INCLUDE_DIRS.append(zlib_inc)
+    LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
+
 extensions = [
     # Main httpmorph C extension
     Extension(
@@ -124,20 +415,11 @@ extensions = [
             str(CORE_DIR / "io_engine.c"),
             str(TLS_DIR / "browser_profiles.c"),
         ],
-        include_dirs=[
-            str(INCLUDE_DIR),
-            str(CORE_DIR),
-            str(TLS_DIR),
-            f"{OPENSSL_PREFIX}/include",
-            f"{LIBNGHTTP2_PREFIX}/include",
-        ],
-        library_dirs=[
-            f"{OPENSSL_PREFIX}/lib",
-            f"{LIBNGHTTP2_PREFIX}/lib",
-        ],
-        libraries=["ssl", "crypto", "nghttp2", "z"],
-        extra_compile_args=["-std=c11", "-O2", "-DHAVE_NGHTTP2"],  # HTTP/2 enabled with EOF fix
-        language="c",
+        include_dirs=INCLUDE_DIRS,
+        library_dirs=LIBRARY_DIRS,
+        libraries=EXT_LIBRARIES,
+        extra_compile_args=EXT_COMPILE_ARGS,
+        language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
     ),
     # HTTP/2 client extension
     Extension(
@@ -146,19 +428,12 @@ extensions = [
             str(BINDINGS_DIR / "_http2.pyx"),
             str(CORE_DIR / "http2_client.c"),
         ],
-        include_dirs=[
-            str(CORE_DIR),
-            f"{OPENSSL_PREFIX}/include",
-            f"{LIBNGHTTP2_PREFIX}/include",
-        ],
-        library_dirs=[
-            f"{OPENSSL_PREFIX}/lib",
-            f"{LIBNGHTTP2_PREFIX}/lib",
-        ],
-        libraries=["ssl", "crypto", "nghttp2", "z"],
-        extra_compile_args=["-std=c11", "-O2"],
-        language="c",
-    )
+        include_dirs=[str(CORE_DIR)] + [LIB_PATHS["openssl_include"], LIB_PATHS["nghttp2_include"]],
+        library_dirs=LIBRARY_DIRS,
+        libraries=EXT_LIBRARIES,
+        extra_compile_args=EXT_COMPILE_ARGS if IS_WINDOWS else ["-std=c11", "-O2"],
+        language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+    ),
 ]
 
 # Cythonize extensions

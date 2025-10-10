@@ -1,0 +1,46 @@
+# Test Dockerfile for httpmorph CI environment
+# Mimics GitHub Actions ubuntu-latest environment
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies (matching CI workflow)
+RUN apt-get update && apt-get install -y \
+    cmake \
+    ninja-build \
+    libssl-dev \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    git \
+    curl \
+    build-essential \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy project files
+COPY . .
+
+# Setup vendor dependencies
+RUN chmod +x scripts/setup_vendors.sh && ./scripts/setup_vendors.sh
+
+# Install Python package in development mode
+RUN pip install -e ".[dev]"
+
+# Default command: run tests
+CMD ["pytest", "tests/", "-v"]
