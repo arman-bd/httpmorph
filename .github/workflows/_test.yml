@@ -192,6 +192,14 @@ jobs:
     - name: Install package
       run: pip install -e ".[dev]"
 
+    - name: Verify C extension was built
+      run: |
+        echo "Checking for built C extensions..."
+        find . -name "*.pyd" -o -name "*.so" 2>/dev/null || echo "No extensions found"
+        ls -R build/ 2>/dev/null || echo "No build directory"
+        python -c "import httpmorph._httpmorph; print('C extension loaded successfully')" || echo "Failed to import C extension"
+      shell: bash
+
     - name: Lint
       run: ruff check src/ tests/
 
