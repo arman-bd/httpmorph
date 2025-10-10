@@ -68,7 +68,7 @@ jobs:
           # Python versions to test
           # Comment out any version you want to skip during development
           PYTHON_MATRIX='[
-            "3.9", "3.10", "3.11", "3.12"
+            "3.11"
           ]'
           # Python versions: "3.9", "3.10", "3.11", "3.12"
 

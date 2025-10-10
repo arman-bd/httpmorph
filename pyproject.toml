@@ -115,3 +115,32 @@ markers = [
     "integration: marks tests that require network access",
     "ssl: marks tests that require SSL support",
 ]
+
+[tool.cibuildwheel]
+build = "cp39-* cp310-* cp311-* cp312-*"
+skip = "*-musllinux_*"
+build-verbosity = 1
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true",
+    "sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true",
+    "yum install -y cmake ninja-build openssl-devel libnghttp2-devel zlib-devel pkgconfig autoconf automake libtool golang",
+]
+before-build = "bash scripts/setup_vendors.sh"
+
+[tool.cibuildwheel.macos]
+before-all = [
+    "brew install cmake ninja openssl@3 libnghttp2 go",
+]
+before-build = "bash scripts/setup_vendors.sh"
+
+[tool.cibuildwheel.windows]
+before-all = [
+    "choco install cmake ninja golang -y",
+]
+before-build = [
+    "vcpkg install nghttp2:x64-windows zlib:x64-windows",
+    "bash scripts/setup_vendors.sh",
+]
+environment = { VCPKG_ROOT = "C:/vcpkg" }
