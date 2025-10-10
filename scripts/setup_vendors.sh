@@ -84,14 +84,22 @@ if [ ! -f "$SSL_LIB_FILE" ]; then
               ..
         cmake --build . --config Release
     else
-        # Disable maybe-uninitialized warning for BoringSSL (false positive in GCC)
-        export CFLAGS="${CFLAGS:-} -Wno-maybe-uninitialized"
-        export CXXFLAGS="${CXXFLAGS:-} -Wno-maybe-uninitialized"
+        # Detect compiler (GCC vs Clang)
+        # GCC needs -Wno-maybe-uninitialized, Clang doesn't recognize it
+        if [ "$OS" = "Darwin" ]; then
+            # macOS uses Clang - no special flags needed
+            CMAKE_C_FLAGS=""
+            CMAKE_CXX_FLAGS=""
+        else
+            # Linux typically uses GCC - disable false positive warning
+            CMAKE_C_FLAGS="-Wno-maybe-uninitialized"
+            CMAKE_CXX_FLAGS="-Wno-maybe-uninitialized"
+        fi
 
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-              -DCMAKE_C_FLAGS="-Wno-maybe-uninitialized" \
-              -DCMAKE_CXX_FLAGS="-Wno-maybe-uninitialized" \
+              -DCMAKE_C_FLAGS="$CMAKE_C_FLAGS" \
+              -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS" \
               ..
         make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
     fi
