@@ -203,9 +203,13 @@ jobs:
         echo "Checking for built C extensions..."
         find . -name "*.pyd" -o -name "*.so" 2>/dev/null || echo "No extensions found"
         ls -R build/ 2>/dev/null || echo "No build directory"
-        echo "Checking DLL dependencies..."
-        python -c "import sys; print('Python path:', sys.path)"
-        python -c "import httpmorph._httpmorph; print('SUCCESS: C extension loaded')" || python -c "import traceback; traceback.print_exc()"
+        echo ""
+        echo "Checking for DLL files..."
+        ls -la vendor/boringssl/build/Release/*.dll vendor/boringssl/build/Release/*.lib 2>/dev/null || echo "No DLLs in BoringSSL Release"
+        ls -la C:/vcpkg/installed/x64-windows/bin/*.dll 2>/dev/null | head -20 || echo "No DLLs in vcpkg"
+        echo ""
+        echo "Attempting to load C extension..."
+        python -c "import sys; sys.path.insert(0, 'src'); import httpmorph._httpmorph; print('SUCCESS: C extension loaded')" 2>&1 || echo "Failed to load extension"
       shell: bash
 
     - name: Lint
