@@ -38,7 +38,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool libnghttp2-dev
 
     - name: Cache Homebrew packages (macOS)
       if: runner.os == 'macOS'
