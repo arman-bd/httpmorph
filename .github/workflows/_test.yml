@@ -55,6 +55,20 @@ jobs:
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
 
+    - name: Setup ccache (Unix)
+      if: runner.os != 'Windows'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-${{ runner.os }}-${{ matrix.python-version }}
+        max-size: 500M
+
+    - name: Configure ccache (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        echo "CC=ccache gcc" >> $GITHUB_ENV
+        echo "CXX=ccache g++" >> $GITHUB_ENV
+      shell: bash
+
     - name: Setup vcpkg (Windows)
       if: runner.os == 'Windows'
       run: |
@@ -80,8 +94,7 @@ jobs:
         path: |
           C:/vcpkg/installed
           C:/vcpkg/packages
-          C:/vcpkg/buildtrees
-        key: vcpkg-nghttp2-${{ runner.os }}-v1
+        key: vcpkg-nghttp2-${{ runner.os }}-v2
         restore-keys: |
           vcpkg-nghttp2-${{ runner.os }}-
 
@@ -105,6 +118,18 @@ jobs:
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
       shell: bash
+
+    - name: Cache Python build artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          build
+          *.egg-info
+          **/*.so
+          **/*.pyd
+        key: python-build-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
+        restore-keys: |
+          python-build-${{ runner.os }}-${{ matrix.python-version }}-
 
     - name: Install package
       run: pip install -e ".[dev]"
