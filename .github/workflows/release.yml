@@ -266,8 +266,15 @@ jobs:
       env:
         CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
         CIBW_SKIP: "*-musllinux_*"
-        CIBW_BEFORE_ALL_LINUX: apt-get update && apt-get install -y cmake ninja-build libssl-dev
-        CIBW_BEFORE_ALL_MACOS: brew install cmake ninja
+        CIBW_BEFORE_ALL_LINUX: yum install -y cmake ninja-build openssl-devel libnghttp2-devel zlib-devel pkgconfig autoconf automake libtool golang
+        CIBW_BEFORE_ALL_MACOS: brew install cmake ninja openssl@3 libnghttp2 go
+        CIBW_BEFORE_ALL_WINDOWS: choco install cmake ninja golang -y
+        CIBW_ENVIRONMENT_WINDOWS: VCPKG_ROOT=C:/vcpkg
+        CIBW_BEFORE_BUILD_LINUX: bash scripts/setup_vendors.sh
+        CIBW_BEFORE_BUILD_MACOS: bash scripts/setup_vendors.sh
+        CIBW_BEFORE_BUILD_WINDOWS: >
+          vcpkg install nghttp2:x64-windows zlib:x64-windows &&
+          bash scripts/setup_vendors.sh
 
     - uses: actions/upload-artifact@v4
       with:
