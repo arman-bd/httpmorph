@@ -390,7 +390,17 @@ else:
 
 # Define C extension modules
 # Build library directories list
-BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
+# On macOS, BoringSSL builds libssl.a in build/ssl/ and libcrypto.a in build/crypto/
+if IS_MACOS:
+    # Add both ssl and crypto directories for BoringSSL
+    vendor_dir = Path("vendor").resolve()
+    vendor_boringssl = vendor_dir / "boringssl"
+    BORINGSSL_LIB_DIRS = [
+        str(vendor_boringssl / "build" / "ssl"),
+        str(vendor_boringssl / "build" / "crypto"),
+    ]
+else:
+    BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
 
 # Build include and library directory lists
 INCLUDE_DIRS = [
