@@ -118,34 +118,41 @@ def get_library_paths():
     import subprocess
 
     if IS_MACOS:
-        # Try Homebrew paths
-        try:
-            openssl_prefix = (
-                subprocess.check_output(
-                    ["brew", "--prefix", "openssl@3"], stderr=subprocess.DEVNULL
-                )
-                .decode()
-                .strip()
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            openssl_prefix = "/opt/homebrew/opt/openssl@3"
+        # Use vendor-built libraries for wheel compatibility
+        vendor_dir = Path("vendor").resolve()
 
-        try:
-            nghttp2_prefix = (
-                subprocess.check_output(
-                    ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+        # BoringSSL (always vendor-built)
+        vendor_boringssl = vendor_dir / "boringssl"
+        boringssl_include = str(vendor_boringssl / "include")
+        boringssl_lib = str(vendor_boringssl / "build" / "ssl")
+
+        # nghttp2 - prefer vendor build for wheel compatibility
+        vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
+        if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_lib = str(vendor_nghttp2 / "lib")
+        else:
+            # Fall back to Homebrew if vendor not available
+            try:
+                nghttp2_prefix = (
+                    subprocess.check_output(
+                        ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
                 )
-                .decode()
-                .strip()
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+                nghttp2_include = f"{nghttp2_prefix}/include"
+                nghttp2_lib = f"{nghttp2_prefix}/lib"
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                nghttp2_include = "/opt/homebrew/opt/libnghttp2/include"
+                nghttp2_lib = "/opt/homebrew/opt/libnghttp2/lib"
 
         return {
-            "openssl_include": f"{openssl_prefix}/include",
-            "openssl_lib": f"{openssl_prefix}/lib",
-            "nghttp2_include": f"{nghttp2_prefix}/include",
-            "nghttp2_lib": f"{nghttp2_prefix}/lib",
+            "openssl_include": boringssl_include,
+            "openssl_lib": boringssl_lib,
+            "nghttp2_include": nghttp2_include,
+            "nghttp2_lib": nghttp2_lib,
         }
 
     elif IS_LINUX:
