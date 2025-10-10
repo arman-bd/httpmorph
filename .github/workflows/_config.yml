@@ -79,7 +79,7 @@ jobs:
           # Enable/Disable Jobs
           # Set to "true" or "false"
           ENABLE_TESTS="true"
-          ENABLE_BENCHMARK="true"
+          ENABLE_BENCHMARK="false"
 
           # ============================================================
           # END CONFIGURATION
