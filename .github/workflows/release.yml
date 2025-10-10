@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - develop
     tags: ['v*']
 
 jobs:
@@ -60,6 +62,7 @@ jobs:
   publish:
     name: Publish Release
     needs: build-wheels
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
       name: PYPI_RELEASE

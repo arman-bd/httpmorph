@@ -195,6 +195,12 @@ else
     if [ ! -f "lib/.libs/libnghttp2.a" ]; then
         echo "Building nghttp2..."
 
+        # Clean up install directory if it exists as a file
+        if [ -e "$VENDOR_DIR/nghttp2/install" ] && [ ! -d "$VENDOR_DIR/nghttp2/install" ]; then
+            rm -f "$VENDOR_DIR/nghttp2/install"
+        fi
+        mkdir -p "$VENDOR_DIR/nghttp2/install"
+
         # Build with -fPIC for use in shared libraries
         CFLAGS="-fPIC" ./configure --prefix="$VENDOR_DIR/nghttp2/install" \
                     --enable-lib-only \
