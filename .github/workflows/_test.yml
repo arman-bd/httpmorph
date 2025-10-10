@@ -119,6 +119,7 @@ jobs:
         key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
         restore-keys: |
           vcpkg-nghttp2-zlib-${{ runner.os }}-
+        save-always: true
 
     - name: Setup vcpkg (Windows)
       if: runner.os == 'Windows' && steps.cache-vcpkg.outputs.cache-hit != 'true'
@@ -161,6 +162,7 @@ jobs:
         key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
         restore-keys: |
           vendor-${{ runner.os }}-
+        save-always: true
 
     - name: Setup vendor dependencies
       if: steps.cache-vendor.outputs.cache-hit != 'true'
@@ -185,6 +187,7 @@ jobs:
         key: python-build-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
         restore-keys: |
           python-build-${{ runner.os }}-${{ matrix.python-version }}-
+        save-always: true
 
     - name: Install package
       run: pip install -e ".[dev]"

@@ -83,6 +83,7 @@ jobs:
         key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
         restore-keys: |
           vendor-${{ runner.os }}-
+        save-always: true
 
     - name: Setup vendor dependencies
       if: steps.cache-vendor.outputs.cache-hit != 'true'
@@ -99,6 +100,7 @@ jobs:
         key: python-build-${{ runner.os }}-${{ inputs.primary-python }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
         restore-keys: |
           python-build-${{ runner.os }}-${{ inputs.primary-python }}-
+        save-always: true
 
     - name: Install package
       run: pip install -e ".[dev,benchmark]"
