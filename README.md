@@ -31,9 +31,9 @@ pip install httpmorph
 import httpmorph
 
 # Simple GET request
-response = httpmorph.get('https://api.github.com')
+response = httpmorph.get('https://icanhazip.com')
 print(response.status_code)
-print(response.json())
+print(response.text)
 
 # POST with JSON
 response = httpmorph.post(
@@ -204,15 +204,22 @@ except httpmorph.RequestException as e:
 
 ## Performance
 
-httpmorph is built for speed:
+httpmorph is built for speed with a native C implementation and BoringSSL for optimized TLS operations.
 
+**Benchmark vs requests library** (30-second test, macOS Apple Silicon):
+- **Throughput:** 49.4% faster on average (1,056 vs 707 req/s)
+- **GET requests:** 1,032 req/s vs 709 req/s (1.46x faster)
+- **POST requests:** 1,080 req/s vs 705 req/s (1.53x faster)
+- **Latency:** 33.1% lower on average (0.95ms vs 1.41ms)
+
+See [detailed benchmark results](benchmarks/results_requests_macos.md) for full metrics including performance charts.
+
+### Performance Features
 - Native C implementation with minimal Python overhead
 - BoringSSL for optimized TLS operations
 - Connection pooling reduces handshake overhead
 - HTTP/2 multiplexing for concurrent requests
 - Efficient memory management
-
-Benchmarks show httpmorph matching or exceeding the performance of curl and other native HTTP clients while providing a Pythonic interface.
 
 ## Platform Support
 
