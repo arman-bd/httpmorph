@@ -52,6 +52,20 @@ jobs:
       with:
         submodules: recursive
 
+    # Cache vendor dependencies (BoringSSL, nghttp2, liburing)
+    # This cache significantly speeds up builds by avoiding recompilation
+    # Cache key includes setup script hash to invalidate on script changes
+    - name: Cache vendor dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          vendor/boringssl/build
+          vendor/nghttp2/install
+          vendor/liburing/install
+        key: vendor-deps-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}
+        restore-keys: |
+          vendor-deps-${{ runner.os }}-
+
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.22.0
 

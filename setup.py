@@ -122,9 +122,12 @@ def get_library_paths():
         vendor_dir = Path("vendor").resolve()
 
         # BoringSSL (always vendor-built)
+        # BoringSSL builds libssl.a and libcrypto.a in separate subdirectories
         vendor_boringssl = vendor_dir / "boringssl"
         boringssl_include = str(vendor_boringssl / "include")
-        boringssl_lib = str(vendor_boringssl / "build" / "ssl")
+        # Return both ssl and crypto lib directories as a list
+        boringssl_lib_ssl = str(vendor_boringssl / "build" / "ssl")
+        boringssl_lib_crypto = str(vendor_boringssl / "build" / "crypto")
 
         # nghttp2 - prefer vendor build for wheel compatibility
         vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
@@ -150,7 +153,7 @@ def get_library_paths():
 
         return {
             "openssl_include": boringssl_include,
-            "openssl_lib": boringssl_lib,
+            "openssl_lib": [boringssl_lib_ssl, boringssl_lib_crypto],  # Return as list
             "nghttp2_include": nghttp2_include,
             "nghttp2_lib": nghttp2_lib,
         }
@@ -390,17 +393,12 @@ else:
 
 # Define C extension modules
 # Build library directories list
-# On macOS, BoringSSL builds libssl.a in build/ssl/ and libcrypto.a in build/crypto/
-if IS_MACOS:
-    # Add both ssl and crypto directories for BoringSSL
-    vendor_dir = Path("vendor").resolve()
-    vendor_boringssl = vendor_dir / "boringssl"
-    BORINGSSL_LIB_DIRS = [
-        str(vendor_boringssl / "build" / "ssl"),
-        str(vendor_boringssl / "build" / "crypto"),
-    ]
+# Handle openssl_lib being either a string or a list
+openssl_lib = LIB_PATHS["openssl_lib"]
+if isinstance(openssl_lib, list):
+    BORINGSSL_LIB_DIRS = openssl_lib
 else:
-    BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
+    BORINGSSL_LIB_DIRS = [openssl_lib]
 
 # Build include and library directory lists
 INCLUDE_DIRS = [
