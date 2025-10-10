@@ -84,8 +84,14 @@ if [ ! -f "$SSL_LIB_FILE" ]; then
               ..
         cmake --build . --config Release
     else
+        # Disable maybe-uninitialized warning for BoringSSL (false positive in GCC)
+        export CFLAGS="${CFLAGS:-} -Wno-maybe-uninitialized"
+        export CXXFLAGS="${CXXFLAGS:-} -Wno-maybe-uninitialized"
+
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DCMAKE_C_FLAGS="-Wno-maybe-uninitialized" \
+              -DCMAKE_CXX_FLAGS="-Wno-maybe-uninitialized" \
               ..
         make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
     fi
