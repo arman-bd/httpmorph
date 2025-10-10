@@ -5,17 +5,36 @@ C-based HTTP client implementation using Cython bindings
 import base64
 import io
 import json as _json
+import os
+import sys
 import uuid
 from datetime import timedelta
 from http.client import responses as http_responses
+from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+# On Windows, add DLL search paths for dependencies
+if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+    # Add vcpkg DLL directory
+    vcpkg_bin = Path("C:/vcpkg/installed/x64-windows/bin")
+    if vcpkg_bin.exists():
+        os.add_dll_directory(str(vcpkg_bin))
+
+    # Add vendor DLL directories if they exist
+    try:
+        # Get the project root (3 levels up from this file)
+        project_root = Path(__file__).parent.parent.parent
+        boringssl_dll = project_root / "vendor" / "boringssl" / "build" / "Release"
+        if boringssl_dll.exists():
+            os.add_dll_directory(str(boringssl_dll))
+    except Exception:
+        pass  # Silently ignore if we can't determine paths
 
 try:
     from httpmorph import _httpmorph
 
     HAS_C_EXTENSION = True
 except ImportError as e:
-    import sys
     print(f"WARNING: Failed to import _httpmorph: {e}", file=sys.stderr)
     import traceback
     traceback.print_exc()
