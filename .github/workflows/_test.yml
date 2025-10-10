@@ -205,13 +205,15 @@ jobs:
         ls -R build/ 2>/dev/null || echo "No build directory"
         echo "Checking DLL dependencies..."
         python -c "import sys; print('Python path:', sys.path)"
-        python -c "try:
+        python -c "
+try:
     import httpmorph._httpmorph
     print('SUCCESS: C extension loaded')
 except Exception as e:
     print(f'FAILED: {type(e).__name__}: {e}')
     import traceback
-    traceback.print_exc()"
+    traceback.print_exc()
+"
       shell: bash
 
     - name: Lint
