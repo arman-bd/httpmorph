@@ -14,7 +14,11 @@ try:
     from httpmorph import _httpmorph
 
     HAS_C_EXTENSION = True
-except ImportError:
+except ImportError as e:
+    import sys
+    print(f"WARNING: Failed to import _httpmorph: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
     HAS_C_EXTENSION = False
     _httpmorph = None
 
