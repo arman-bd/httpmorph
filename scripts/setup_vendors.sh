@@ -135,8 +135,9 @@ if [ "$OS" = "Linux" ]; then
     if [ ! -f "src/liburing.a" ]; then
         echo "Building liburing..."
 
+        # Build only the library, skip tests to avoid header conflicts
         ./configure --prefix="$VENDOR_DIR/liburing/install"
-        make -j$(nproc)
+        make -C src -j$(nproc)
         make install
 
         echo "✓ liburing built successfully"
