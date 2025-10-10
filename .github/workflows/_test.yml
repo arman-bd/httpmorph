@@ -203,8 +203,15 @@ jobs:
         echo "Checking for built C extensions..."
         find . -name "*.pyd" -o -name "*.so" 2>/dev/null || echo "No extensions found"
         ls -R build/ 2>/dev/null || echo "No build directory"
-        echo "PATH: $PATH"
-        python -c "import httpmorph._httpmorph; print('C extension loaded successfully')" || echo "Failed to import C extension"
+        echo "Checking DLL dependencies..."
+        python -c "import sys; print('Python path:', sys.path)"
+        python -c "try:
+    import httpmorph._httpmorph
+    print('SUCCESS: C extension loaded')
+except Exception as e:
+    print(f'FAILED: {type(e).__name__}: {e}')
+    import traceback
+    traceback.print_exc()"
       shell: bash
 
     - name: Lint
