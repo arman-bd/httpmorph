@@ -25,36 +25,220 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
 
+    - name: Cache apt packages (Linux)
+      if: runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/release.yml') }}
+        restore-keys: |
+          apt-${{ runner.os }}-
+
     - name: Install system dependencies (Linux)
       if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool
+
+    - name: Cache Homebrew packages (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/Homebrew
+          /usr/local/Cellar
+          /usr/local/opt
+        key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/release.yml') }}
+        restore-keys: |
+          brew-${{ runner.os }}-
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
-      run: brew install cmake ninja
+      run: brew install cmake ninja openssl@3 libnghttp2
 
     - name: Install system dependencies (Windows)
       if: runner.os == 'Windows'
-      run: choco install cmake -y
+      run: |
+        # Check if already installed
+        if ! command -v cmake &> /dev/null; then
+          choco install cmake -y
+        else
+          echo "cmake already installed"
+        fi
+        if ! command -v ninja &> /dev/null; then
+          choco install ninja -y
+        else
+          echo "ninja already installed"
+        fi
+      shell: bash
 
     - name: Setup MSVC (Windows)
       if: runner.os == 'Windows'
       uses: microsoft/setup-msbuild@v2
 
+    - name: Setup Go (for BoringSSL build)
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    - name: Setup ccache (Unix)
+      if: runner.os != 'Windows'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-release-${{ runner.os }}-${{ matrix.python-version }}
+        max-size: 500M
+
+    - name: Configure ccache (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        echo "CC=ccache gcc" >> $GITHUB_ENV
+        echo "CXX=ccache g++" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Restore vcpkg cache (Windows)
+      if: runner.os == 'Windows'
+      id: cache-vcpkg-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          C:/vcpkg/installed
+          C:/vcpkg/packages
+        key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
+        restore-keys: |
+          vcpkg-nghttp2-zlib-${{ runner.os }}-
+
+    - name: Setup vcpkg (Windows)
+      if: runner.os == 'Windows' && steps.cache-vcpkg-restore.outputs.cache-hit != 'true'
+      run: |
+        # Use pre-installed vcpkg on GitHub runners
+        if [ -d "C:/vcpkg" ]; then
+          echo "Using pre-installed vcpkg"
+          VCPKG_ROOT="C:/vcpkg"
+        else
+          echo "Installing vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
+          cd C:/vcpkg
+          ./bootstrap-vcpkg.bat
+          VCPKG_ROOT="C:/vcpkg"
+        fi
+        echo "VCPKG_ROOT=$VCPKG_ROOT" >> $GITHUB_ENV
+        echo "$VCPKG_ROOT" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Install dependencies via vcpkg (Windows)
+      if: runner.os == 'Windows' && steps.cache-vcpkg-restore.outputs.cache-hit != 'true'
+      run: |
+        export VCPKG_ROOT="C:/vcpkg"
+        export PATH="$VCPKG_ROOT:$PATH"
+        vcpkg install nghttp2:x64-windows zlib:x64-windows --clean-after-build
+      shell: bash
+
+    - name: Set vcpkg environment (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        echo "VCPKG_ROOT=C:/vcpkg" >> $GITHUB_ENV
+        echo "C:/vcpkg" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
+        restore-keys: |
+          vendor-${{ runner.os }}-
+
     - name: Setup vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
       run: |
         chmod +x scripts/setup_vendors.sh
         ./scripts/setup_vendors.sh
       shell: bash
 
+    - name: Verify vendor directory for caching
+      run: |
+        echo "Checking vendor directory contents..."
+        ls -lah vendor/ || echo "vendor directory not found"
+        du -sh vendor/ 2>/dev/null || echo "Cannot get vendor size"
+      shell: bash
+
+    - name: Restore Python build cache
+      id: cache-python-build
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          build/
+          *.egg-info/
+        key: python-build-release-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
+        restore-keys: |
+          python-build-release-${{ runner.os }}-${{ matrix.python-version }}-
+
     - name: Install package
       run: pip install -e ".[dev]"
+
+    - name: Add DLL paths to PATH (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        echo "Adding BoringSSL and vcpkg DLL paths to PATH..."
+        echo "${{ github.workspace }}/vendor/boringssl/build/Release" >> $GITHUB_PATH
+        echo "C:/vcpkg/installed/x64-windows/bin" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Verify C extension was built
+      run: |
+        echo "Checking for built C extensions..."
+        find . -name "*.pyd" -o -name "*.so" 2>/dev/null || echo "No extensions found"
+        ls -R build/ 2>/dev/null || echo "No build directory"
+        echo ""
+        echo "Checking for DLL files..."
+        ls -la vendor/boringssl/build/Release/*.dll vendor/boringssl/build/Release/*.lib 2>/dev/null || echo "No DLLs in BoringSSL Release"
+        ls -la C:/vcpkg/installed/x64-windows/bin/*.dll 2>/dev/null | head -20 || echo "No DLLs in vcpkg"
+        echo ""
+        echo "Attempting to load C extension..."
+        python -c "import sys; sys.path.insert(0, 'src'); import httpmorph._httpmorph; print('SUCCESS: C extension loaded')" 2>&1 || echo "Failed to load extension"
+      shell: bash
 
     - name: Lint
       run: ruff check src/ tests/
 
     - name: Run tests
       run: pytest tests/ -v --cov=httpmorph --cov-report=xml
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
+        flags: release,${{ matrix.os }},python-${{ matrix.python-version }}
+
+    # Save caches even if tests fail (using always())
+    - name: Save vcpkg cache (Windows)
+      if: always() && runner.os == 'Windows' && steps.cache-vcpkg-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          C:/vcpkg/installed
+          C:/vcpkg/packages
+        key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
+
+    - name: Save vendor cache
+      if: always() && steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v7
+
+    - name: Save Python build cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          build/
+          *.egg-info/
+        key: python-build-release-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('setup.py', 'pyproject.toml', 'src/**/*.c', 'src/**/*.cpp', 'src/**/*.h') }}
 
   build-wheels:
     name: Build Wheels (${{ matrix.os }})
@@ -86,6 +270,12 @@ jobs:
     name: Publish Release
     needs: build-wheels
     runs-on: ubuntu-latest
+    environment:
+      name: PYPI_RELEASE
+      url: https://pypi.org/project/httpmorph/
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
     - uses: actions/checkout@v4
@@ -110,10 +300,16 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Publish to PyPI
-      if: env.PYPI_API_TOKEN != ''
       env:
         TWINE_USERNAME: __token__
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       run: |
         pip install twine
-        twine upload wheels/*.whl --skip-existing
+        if [ -n "$TWINE_PASSWORD" ]; then
+          echo "Publishing to PyPI..."
+          twine upload wheels/*.whl --skip-existing --verbose
+        else
+          echo "⚠️  PYPI_API_TOKEN not set - skipping PyPI upload"
+          echo "To publish to PyPI, add PYPI_API_TOKEN to the PYPI_RELEASE environment secrets"
+        fi
+      shell: bash

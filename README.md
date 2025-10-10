@@ -1,5 +1,7 @@
 # httpmorph
 
+[![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph)
+
 A high-performance HTTP client for Python with advanced browser fingerprinting capabilities. Built with C for speed, designed for compatibility.
 
 ## Features
