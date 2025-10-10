@@ -106,6 +106,14 @@ jobs:
       run: |
         echo "CC=ccache gcc" >> $GITHUB_ENV
         echo "CXX=ccache g++" >> $GITHUB_ENV
+        # Don't wrap the assembler with ccache - CMake detects ccache and tries to use it for ASM
+        if [ "${{ runner.os }}" == "Linux" ]; then
+          echo "ASM=/usr/bin/as" >> $GITHUB_ENV
+          echo "CMAKE_ASM_COMPILER=/usr/bin/as" >> $GITHUB_ENV
+        elif [ "${{ runner.os }}" == "macOS" ]; then
+          echo "ASM=/usr/bin/as" >> $GITHUB_ENV
+          echo "CMAKE_ASM_COMPILER=/usr/bin/as" >> $GITHUB_ENV
+        fi
       shell: bash
 
     - name: Restore vcpkg cache (Windows)

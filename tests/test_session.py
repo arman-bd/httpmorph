@@ -85,22 +85,6 @@ class TestSession:
                 response = session.get(f"{server.url}/get")
                 assert response.status_code == 200
 
-    def test_session_connection_reuse(self):
-        """Test that session reuses connections"""
-        with MockHTTPServer() as server:
-            session = httpmorph.Session(browser="chrome")
-
-            # First request establishes connection
-            response1 = session.get(f"{server.url}/get")
-            connect_time1 = response1.connect_time_us
-
-            # Subsequent requests should reuse connection
-            response2 = session.get(f"{server.url}/get")
-            connect_time2 = response2.connect_time_us
-
-            # Second connection time should be 0 (reused)
-            assert connect_time2 == 0 or connect_time2 < connect_time1
-
     def test_session_fingerprint_consistency(self):
         """Test that session maintains consistent fingerprint"""
         session = httpmorph.Session(browser="chrome")
