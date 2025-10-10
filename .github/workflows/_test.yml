@@ -190,11 +190,20 @@ jobs:
     - name: Install package
       run: pip install -e ".[dev]"
 
+    - name: Add DLL paths to PATH (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        echo "Adding BoringSSL and vcpkg DLL paths to PATH..."
+        echo "${{ github.workspace }}/vendor/boringssl/build/Release" >> $GITHUB_PATH
+        echo "C:/vcpkg/installed/x64-windows/bin" >> $GITHUB_PATH
+      shell: bash
+
     - name: Verify C extension was built
       run: |
         echo "Checking for built C extensions..."
         find . -name "*.pyd" -o -name "*.so" 2>/dev/null || echo "No extensions found"
         ls -R build/ 2>/dev/null || echo "No build directory"
+        echo "PATH: $PATH"
         python -c "import httpmorph._httpmorph; print('C extension loaded successfully')" || echo "Failed to import C extension"
       shell: bash
 
