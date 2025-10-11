@@ -122,12 +122,43 @@ def get_library_paths():
         vendor_dir = Path("vendor").resolve()
 
         # BoringSSL (always vendor-built)
-        # BoringSSL builds libssl.a and libcrypto.a in separate subdirectories
         vendor_boringssl = vendor_dir / "boringssl"
         boringssl_include = str(vendor_boringssl / "include")
-        # Return both ssl and crypto lib directories as a list
-        boringssl_lib_ssl = str(vendor_boringssl / "build" / "ssl")
-        boringssl_lib_crypto = str(vendor_boringssl / "build" / "crypto")
+
+        # Check where BoringSSL actually built the libraries
+        # It could be in build/ssl/, build/crypto/, or just build/
+        build_dir = vendor_boringssl / "build"
+
+        # Debug: list what's actually in the build directory
+        import os
+        if build_dir.exists():
+            print(f"\n=== BoringSSL build directory contents ===")
+            for item in os.listdir(build_dir):
+                item_path = build_dir / item
+                if item_path.is_dir():
+                    print(f"  DIR:  {item}/")
+                    # Check for .a files in subdirectories
+                    try:
+                        for subitem in os.listdir(item_path):
+                            if subitem.endswith('.a'):
+                                print(f"    LIB: {subitem}")
+                    except PermissionError:
+                        pass
+                elif item.endswith('.a'):
+                    print(f"  LIB:  {item}")
+            print("=" * 43 + "\n")
+
+        # Determine library directory based on what exists
+        if (build_dir / "ssl" / "libssl.a").exists():
+            boringssl_lib = str(build_dir / "ssl")
+            print(f"Using BoringSSL from: {boringssl_lib}")
+        elif (build_dir / "libssl.a").exists():
+            boringssl_lib = str(build_dir)
+            print(f"Using BoringSSL from: {boringssl_lib}")
+        else:
+            # Fallback to build/ssl even if it doesn't exist yet
+            boringssl_lib = str(build_dir / "ssl")
+            print(f"WARNING: BoringSSL libraries not found, using default: {boringssl_lib}")
 
         # nghttp2 - prefer vendor build for wheel compatibility
         vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
@@ -153,7 +184,7 @@ def get_library_paths():
 
         return {
             "openssl_include": boringssl_include,
-            "openssl_lib": [boringssl_lib_ssl, boringssl_lib_crypto],  # Return as list
+            "openssl_lib": boringssl_lib,
             "nghttp2_include": nghttp2_include,
             "nghttp2_lib": nghttp2_lib,
         }
