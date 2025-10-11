@@ -9,8 +9,8 @@ This script:
 4. Validates browser profiles and fingerprinting
 """
 
-import sys
 import os
+import sys
 import traceback
 
 
@@ -140,8 +140,8 @@ def test_simple_request():
             return True
 
         # Try a simple GET request
-        print("Making GET request to https://httpbin.org/get...")
-        response = httpmorph.get("https://httpbin.org/get", timeout=10)
+        print("Making GET request to https://icanhazip.com/...")
+        response = httpmorph.get("https://icanhazip.com/", timeout=10)
 
         if hasattr(response, 'status_code'):
             print(f"[OK] Request successful, status code: {response.status_code}")

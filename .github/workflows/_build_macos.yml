@@ -112,7 +112,7 @@ jobs:
           fi
 
           # Install the wheel in a fresh environment
-          "$python_cmd" -m pip install --force-reinstall "$wheel"
+          "$python_cmd" -m pip install --force-reinstall --break-system-packages "$wheel"
 
           # Run the test script
           echo ""

@@ -108,7 +108,7 @@ jobs:
           echo "========================================"
 
           # Extract Python version from wheel filename (e.g., cp39, cp310)
-          python_tag=$(basename "$wheel" | grep -oP 'cp\d+' | head -1)
+          python_tag=$(basename "$wheel" | grep -oE 'cp[0-9]+' | head -1)
           python_version="${python_tag:2:1}.${python_tag:3}"
 
           echo "Setting up Python $python_version..."

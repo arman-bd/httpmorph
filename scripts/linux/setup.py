@@ -138,9 +138,22 @@ def get_link_args():
             "-lstdc++",  # BoringSSL is C++ so we need the C++ standard library
         ]
 
+        # Statically link liburing if available to avoid dynamic library dependency issues
         has_io_uring = check_io_uring_support()
         if has_io_uring:
-            link_args.append("-luring")
+            vendor_liburing = Path("vendor/liburing")
+            # Try install directory first
+            liburing_static = vendor_liburing / "install" / "lib" / "liburing.a"
+            if not liburing_static.exists():
+                # Fall back to src directory
+                liburing_static = vendor_liburing / "src" / "liburing.a"
+
+            if liburing_static.exists():
+                link_args.append(str(liburing_static))
+                print(f"Static linking liburing from: {liburing_static}")
+            else:
+                print("WARNING: liburing.a not found, falling back to dynamic linking")
+                link_args.append("-luring")
 
         print("Static linking BoringSSL libraries with --whole-archive")
         return link_args
