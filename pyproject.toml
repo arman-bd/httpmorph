@@ -125,7 +125,7 @@ build-verbosity = 1
 before-all = [
     "sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true",
     "sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true",
-    "yum install -y cmake openssl-devel libnghttp2-devel zlib-devel pkgconfig autoconf automake libtool golang || yum install -y cmake3 openssl-devel zlib-devel pkgconfig autoconf automake libtool golang",
+    "yum install -y cmake openssl-devel zlib-devel pkgconfig autoconf automake libtool golang || yum install -y openssl-devel zlib-devel pkgconfig autoconf automake libtool golang",
 ]
 before-build = "bash scripts/setup_vendors.sh"
 
