@@ -164,19 +164,45 @@ fi
 echo ""
 echo "==> Setting up nghttp2..."
 
-# On Windows with vcpkg, use vcpkg's nghttp2
-if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
-    echo "✓ Using vcpkg's nghttp2"
-    echo "  Location: $VCPKG_ROOT/installed/x64-windows"
-# On Windows with MSYS2, use the MSYS2 package
-elif [ "$OS" = "Windows" ] && [ -d "/mingw64/include/nghttp2" ]; then
-    echo "✓ Using MSYS2's nghttp2"
-    echo "  Location: /mingw64"
-# On Windows without vcpkg or MSYS2, skip
-elif [ "$OS" = "Windows" ]; then
-    echo "⊘ nghttp2 on Windows requires vcpkg or MSYS2"
-    echo "  vcpkg: vcpkg install nghttp2:x64-windows"
-    echo "  MSYS2: pacman -S mingw-w64-x86_64-nghttp2"
+if [ "$OS" = "Windows" ]; then
+    # Always build nghttp2 from source on Windows for compatibility
+    if [ ! -d "nghttp2" ]; then
+        echo "Downloading nghttp2..."
+
+        NGHTTP2_VERSION="1.59.0"
+        curl -L "https://github.com/nghttp2/nghttp2/releases/download/v${NGHTTP2_VERSION}/nghttp2-${NGHTTP2_VERSION}.tar.gz" \
+             -o nghttp2.tar.gz
+
+        tar xzf nghttp2.tar.gz
+        mv "nghttp2-${NGHTTP2_VERSION}" nghttp2
+        rm nghttp2.tar.gz
+    fi
+
+    cd nghttp2
+
+    # Check if already built (Windows uses .lib files)
+    if [ ! -f "build/lib/Release/nghttp2.lib" ]; then
+        echo "Building nghttp2 with CMake for Windows..."
+
+        mkdir -p build
+        cd build
+
+        # Use CMake for Windows build
+        cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_LIB_ONLY=ON \
+            -DENABLE_STATIC_LIB=ON
+
+        cmake --build . --config Release
+
+        echo "✓ nghttp2 built successfully"
+    else
+        echo "✓ nghttp2 already built"
+    fi
+
+    cd "$VENDOR_DIR"
 else
     # Build from source on Linux or if Homebrew version not available
     if [ ! -d "nghttp2" ]; then
@@ -221,6 +247,48 @@ else
     cd "$VENDOR_DIR"
 fi
 
+#
+# 4. zlib (Windows only - Linux/macOS have system zlib)
+#
+if [ "$OS" = "Windows" ]; then
+    echo ""
+    echo "==> Setting up zlib..."
+
+    if [ ! -d "zlib" ]; then
+        echo "Downloading zlib..."
+        ZLIB_VERSION="1.3.1"
+        curl -L "https://github.com/madler/zlib/archive/refs/tags/v${ZLIB_VERSION}.tar.gz" \
+             -o zlib.tar.gz
+
+        tar xzf zlib.tar.gz
+        mv "zlib-${ZLIB_VERSION}" zlib
+        rm zlib.tar.gz
+    fi
+
+    cd zlib
+
+    # Check if already built
+    if [ ! -f "build/Release/zlibstatic.lib" ]; then
+        echo "Building zlib with CMake for Windows..."
+
+        mkdir -p build
+        cd build
+
+        # Use CMake for Windows build
+        cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
+        cmake --build . --config Release
+
+        echo "✓ zlib built successfully"
+    else
+        echo "✓ zlib already built"
+    fi
+
+    cd "$VENDOR_DIR"
+fi
+
 # Clean up downloaded archives to save cache space
 echo ""
 echo "==> Cleaning up downloaded archives..."
@@ -241,12 +309,9 @@ echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
 if [ "$OS" = "Linux" ]; then
     echo "  ✓ liburing:   $VENDOR_DIR/liburing/install"
 fi
-if [ "$OS" = "Windows" ] && [ -n "$VCPKG_ROOT" ] && [ -d "$VCPKG_ROOT/installed/x64-windows" ]; then
-    echo "  ✓ nghttp2:    $VCPKG_ROOT/installed/x64-windows (vcpkg)"
-elif [ "$OS" = "Windows" ] && [ -d "/mingw64/include/nghttp2" ]; then
-    echo "  ✓ nghttp2:    /mingw64 (MSYS2)"
-elif [ "$OS" = "Windows" ]; then
-    echo "  ⊘ nghttp2:    Install via vcpkg or MSYS2"
+if [ "$OS" = "Windows" ]; then
+    echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/build"
+    echo "  ✓ zlib:       $VENDOR_DIR/zlib/build"
 else
     echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
 fi

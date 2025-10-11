@@ -294,18 +294,24 @@ def get_library_paths():
         # nghttp2 paths - prefer vendor build, then vcpkg, then MSYS2
         vendor_nghttp2 = vendor_dir / "nghttp2"
 
-        if (vendor_nghttp2 / "lib" / "includes").exists():
-            # Vendor build exists
+        # Check vendor build locations in order of preference
+        if (vendor_nghttp2 / "build" / "lib" / "Release" / "nghttp2.lib").exists():
+            # CMake build with Visual Studio generator
             print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
             nghttp2_include = str(vendor_nghttp2 / "lib" / "includes")
             nghttp2_lib = str(vendor_nghttp2 / "build" / "lib" / "Release")
-        elif (vendor_nghttp2 / "include" / "nghttp2").exists():
-            # Vendor build with install structure
+        elif (vendor_nghttp2 / "build" / "Release" / "nghttp2.lib").exists():
+            # CMake build with single-config generator
             print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
-            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_include = str(vendor_nghttp2 / "lib" / "includes")
+            nghttp2_lib = str(vendor_nghttp2 / "build" / "Release")
+        elif (vendor_nghttp2 / "lib" / "includes").exists():
+            # Vendor build exists (old structure)
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+            nghttp2_include = str(vendor_nghttp2 / "lib" / "includes")
             nghttp2_lib = str(vendor_nghttp2 / "build" / "lib" / "Release")
         else:
-            # Try vcpkg
+            # Try vcpkg as fallback
             vcpkg_root = os.environ.get("VCPKG_ROOT", "C:/vcpkg")
             vcpkg_installed = Path(vcpkg_root) / "installed" / "x64-windows"
 
@@ -318,10 +324,10 @@ def get_library_paths():
                 nghttp2_include = "/mingw64/include"
                 nghttp2_lib = "/mingw64/lib"
             else:
-                # Fallback to default paths
-                print("WARNING: nghttp2 not found. Install via vcpkg or MSYS2")
-                nghttp2_include = "C:/Program Files/nghttp2/include"
-                nghttp2_lib = "C:/Program Files/nghttp2/lib"
+                # Fallback to default paths - will fail but show clear error
+                print("WARNING: nghttp2 not found. Run: bash scripts/setup_vendors.sh")
+                nghttp2_include = str(vendor_nghttp2 / "lib" / "includes")
+                nghttp2_lib = str(vendor_nghttp2 / "build" / "lib" / "Release")
 
         # zlib paths - prefer vendor, then vcpkg
         vendor_zlib = vendor_dir / "zlib"

@@ -118,7 +118,7 @@ markers = [
 
 [tool.cibuildwheel]
 build = "cp39-* cp310-* cp311-* cp312-*"
-skip = "*-musllinux_*"
+skip = "*-musllinux_* *-win32"
 build-verbosity = 1
 
 [tool.cibuildwheel.linux]
@@ -141,7 +141,6 @@ before-all = [
     "choco install cmake ninja golang -y",
 ]
 before-build = [
-    "vcpkg install nghttp2:x64-windows zlib:x64-windows",
     "bash scripts/setup_vendors.sh",
 ]
 environment = { VCPKG_ROOT = "C:/vcpkg" }
