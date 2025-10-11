@@ -196,7 +196,8 @@ def get_library_paths():
         # BoringSSL (always use vendor-built)
         vendor_boringssl = vendor_dir / "boringssl"
         boringssl_include = str(vendor_boringssl / "include")
-        boringssl_lib = str(vendor_boringssl / "build" / "ssl")
+        # Return full path to build directory for static library files
+        boringssl_lib = str(vendor_boringssl / "build")
 
         print(f"Using vendor BoringSSL from: {vendor_boringssl}")
 
@@ -396,7 +397,7 @@ if IS_WINDOWS:
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
 else:
     EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
-    # Unix library names
+    # Unix library names - we'll override these for Linux to force static linking
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
 # Define C extension modules
@@ -407,6 +408,29 @@ if isinstance(openssl_lib, list):
     BORINGSSL_LIB_DIRS = openssl_lib
 else:
     BORINGSSL_LIB_DIRS = [openssl_lib]
+
+# On Linux, force static linking of BoringSSL by using extra_objects
+# This prevents linking against system OpenSSL which has different symbols
+EXTRA_OBJECTS = []
+EXTRA_LINK_ARGS_EXT = []
+if IS_LINUX:
+    vendor_boringssl_build = Path("vendor/boringssl/build")
+    if (vendor_boringssl_build / "libssl.a").exists():
+        # Use -Wl,--whole-archive to force inclusion of all symbols from static libs
+        # This is necessary because BoringSSL symbols need to be fully resolved
+        EXTRA_LINK_ARGS_EXT = [
+            "-Wl,--whole-archive",
+            str(vendor_boringssl_build / "libssl.a"),
+            str(vendor_boringssl_build / "libcrypto.a"),
+            "-Wl,--no-whole-archive",
+            "-lpthread",  # BoringSSL requires pthread
+            "-lstdc++",  # BoringSSL is C++ so we need the C++ standard library
+        ]
+        # Remove ssl and crypto from libraries since we're statically linking them
+        EXT_LIBRARIES = ["nghttp2", "z"]
+        print("Static linking BoringSSL libraries with --whole-archive")
+    else:
+        print(f"WARNING: BoringSSL static libraries not found in {vendor_boringssl_build}")
 
 # Build include and library directory lists
 INCLUDE_DIRS = [
@@ -441,6 +465,8 @@ extensions = [
         include_dirs=INCLUDE_DIRS,
         library_dirs=LIBRARY_DIRS,
         libraries=EXT_LIBRARIES,
+        extra_objects=EXTRA_OBJECTS,  # Static link BoringSSL on Linux
+        extra_link_args=EXTRA_LINK_ARGS_EXT,  # Force whole-archive linking on Linux
         extra_compile_args=EXT_COMPILE_ARGS,
         language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
     ),
@@ -454,6 +480,8 @@ extensions = [
         include_dirs=[str(CORE_DIR)] + [LIB_PATHS["openssl_include"], LIB_PATHS["nghttp2_include"]],
         library_dirs=LIBRARY_DIRS,
         libraries=EXT_LIBRARIES,
+        extra_objects=EXTRA_OBJECTS,  # Static link BoringSSL on Linux
+        extra_link_args=EXTRA_LINK_ARGS_EXT,  # Force whole-archive linking on Linux
         extra_compile_args=EXT_COMPILE_ARGS if IS_WINDOWS else ["-std=c11", "-O2"],
         language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
     ),
