@@ -52,20 +52,66 @@ jobs:
       with:
         submodules: recursive
 
+    # Install build tools
+    - name: Install build dependencies (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        choco install cmake ninja golang -y
+      shell: bash
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
     # Cache vendor dependencies to speed up builds
-    - name: Cache vendor dependencies
-      uses: actions/cache@v4
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
       with:
         path: vendor
         key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
         restore-keys: |
           vendor-${{ runner.os }}-
 
+    # Build vendor dependencies if not cached
+    - name: Build vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      run: |
+        bash scripts/setup_vendors.sh
+      shell: bash
+
+    # Save vendor cache for next time
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+
+    # List vendor directory to verify build
+    - name: Verify vendor build
+      run: |
+        echo "=== Vendor directory contents ==="
+        ls -la vendor/ || true
+        echo ""
+        echo "=== BoringSSL build ==="
+        ls -la vendor/boringssl/build/ || true
+        echo ""
+        echo "=== nghttp2 build ==="
+        ls -la vendor/nghttp2/build/ || true
+        echo ""
+        echo "=== zlib build ==="
+        ls -la vendor/zlib/build/ || true
+      shell: bash
+
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.22.0
       env:
-        # Enable cibuildwheel's internal caching
-        CIBW_BUILD_FRONTEND: "build"
+        # Skip before-build in pyproject.toml since we already built vendors
+        CIBW_BEFORE_BUILD: ""
 
     - uses: actions/upload-artifact@v4
       with:
