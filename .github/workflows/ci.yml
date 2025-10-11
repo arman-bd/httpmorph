@@ -28,22 +28,11 @@ jobs:
       primary-python: ${{ needs.load-config.outputs.primary-python }}
 
   # ============================================================
-  # Benchmark Job
-  # ============================================================
-  benchmark:
-    needs: [load-config, test]
-    if: needs.load-config.outputs.enable-benchmark == 'true'
-    uses: ./.github/workflows/_benchmark.yml
-    with:
-      primary-os: ${{ needs.load-config.outputs.primary-os }}
-      primary-python: ${{ needs.load-config.outputs.primary-python }}
-
-  # ============================================================
   # Summary
   # ============================================================
   summary:
     name: CI Summary
-    needs: [load-config, test, benchmark]
+    needs: [load-config, test]
     if: always()
     runs-on: ubuntu-latest
 
@@ -65,18 +54,6 @@ jobs:
           fi
         else
           echo "⊘ Tests: DISABLED"
-        fi
-
-        # Benchmark
-        if [ "${{ needs.load-config.outputs.enable-benchmark }}" == "true" ]; then
-          if [ "${{ needs.benchmark.result }}" == "success" ]; then
-            echo "✅ Benchmark: PASSED"
-          else
-            echo "❌ Benchmark: FAILED"
-            EXIT_CODE=1
-          fi
-        else
-          echo "⊘ Benchmark: DISABLED"
         fi
 
         echo ""

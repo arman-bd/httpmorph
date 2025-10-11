@@ -9,7 +9,7 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 echo "================================"
 echo "Local Linux Build Test"
@@ -165,9 +165,9 @@ echo ""
 echo "🔨 Building vendor dependencies..."
 echo "  This may take several minutes (BoringSSL, nghttp2)..."
 if [[ "$VERBOSE" == "true" ]]; then
-    bash scripts/setup_vendors.sh
+    bash scripts/linux/setup_vendors.sh
 else
-    bash scripts/setup_vendors.sh 2>&1 | grep -E "(===|✓|✅|⊘|ERROR|WARNING)" || true
+    bash scripts/linux/setup_vendors.sh 2>&1 | grep -E "(===|✓|✅|⊘|ERROR|WARNING)" || true
 fi
 echo ""
 

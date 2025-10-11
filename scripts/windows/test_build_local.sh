@@ -28,7 +28,7 @@ echo "========================================"
 echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 # Step 1: Setup vendors
 echo "==> Step 1: Setting up vendor dependencies..."
@@ -62,11 +62,11 @@ if [ ! -f "/c/vcpkg/vcpkg.exe" ]; then
 fi
 echo "    [OK] vcpkg found"
 
-# Build BoringSSL
+# Build vendors
 echo ""
-echo "    Building BoringSSL..."
+echo "    Building vendor dependencies..."
 cd "$PROJECT_ROOT"
-bash scripts/setup_vendors.sh
+bash scripts/windows/setup_vendors.sh
 echo "    [OK] Vendors built successfully"
 
 # Step 2: Build wheel
