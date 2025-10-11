@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - develop
-    tags: ['v*']
+    # tags: ['v*']
 
 jobs:
   # Configuration - Edit this section to enable/disable tests
@@ -44,100 +44,100 @@ jobs:
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     uses: ./.github/workflows/_build_windows.yml
 
-  build-linux:
-    name: Build Linux Wheels
-    needs: [config, test]
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
-    uses: ./.github/workflows/_build_linux.yml
+  # build-linux:
+  #   name: Build Linux Wheels
+  #   needs: [config, test]
+  #   if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+  #   uses: ./.github/workflows/_build_linux.yml
 
-  build-macos:
-    name: Build macOS Wheels
-    needs: [config, test]
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
-    uses: ./.github/workflows/_build_macos.yml
+  # build-macos:
+  #   name: Build macOS Wheels
+  #   needs: [config, test]
+  #   if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+  #   uses: ./.github/workflows/_build_macos.yml
 
-  publish:
-    name: Publish Release
-    needs: [build-windows, build-linux, build-macos]
-    if: always() && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    environment:
-      name: PYPI_RELEASE
-      url: https://pypi.org/project/httpmorph/
-    permissions:
-      contents: write
-      id-token: write
+  # publish:
+  #   name: Publish Release
+  #   needs: [build-windows, build-linux, build-macos]
+  #   if: always() && startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: PYPI_RELEASE
+  #     url: https://pypi.org/project/httpmorph/
+  #   permissions:
+  #     contents: write
+  #     id-token: write
 
-    steps:
-    - uses: actions/checkout@v4
+  #   steps:
+  #   - uses: actions/checkout@v4
 
-    - name: Download wheels
-      uses: actions/download-artifact@v4
-      with:
-        path: dist/
-        pattern: wheels-*
-        merge-multiple: false
-      continue-on-error: true
+  #   - name: Download wheels
+  #     uses: actions/download-artifact@v4
+  #     with:
+  #       path: dist/
+  #       pattern: wheels-*
+  #       merge-multiple: false
+  #     continue-on-error: true
 
-    - name: Flatten wheels and report build status
-      run: |
-        mkdir -p wheels
+  #   - name: Flatten wheels and report build status
+  #     run: |
+  #       mkdir -p wheels
 
-        # Check which platforms built successfully
-        echo "===================="
-        echo "Build Status Report"
-        echo "===================="
+  #       # Check which platforms built successfully
+  #       echo "===================="
+  #       echo "Build Status Report"
+  #       echo "===================="
 
-        for platform in windows linux macos; do
-          if [ -d "dist/wheels-$platform" ]; then
-            wheel_count=$(find "dist/wheels-$platform" -name "*.whl" 2>/dev/null | wc -l)
-            if [ "$wheel_count" -gt 0 ]; then
-              echo "✅ $platform: $wheel_count wheels built"
-            else
-              echo "❌ $platform: No wheels found"
-            fi
-          else
-            echo "❌ $platform: Build failed or artifacts missing"
-          fi
-        done
+  #       for platform in windows linux macos; do
+  #         if [ -d "dist/wheels-$platform" ]; then
+  #           wheel_count=$(find "dist/wheels-$platform" -name "*.whl" 2>/dev/null | wc -l)
+  #           if [ "$wheel_count" -gt 0 ]; then
+  #             echo "✅ $platform: $wheel_count wheels built"
+  #           else
+  #             echo "❌ $platform: No wheels found"
+  #           fi
+  #         else
+  #           echo "❌ $platform: Build failed or artifacts missing"
+  #         fi
+  #       done
 
-        echo "===================="
+  #       echo "===================="
 
-        # Flatten all available wheels
-        find dist/ -name "*.whl" -exec cp {} wheels/ \; 2>/dev/null || true
+  #       # Flatten all available wheels
+  #       find dist/ -name "*.whl" -exec cp {} wheels/ \; 2>/dev/null || true
 
-        # List wheels
-        if [ -n "$(ls -A wheels/)" ]; then
-          echo ""
-          echo "Available wheels:"
-          ls -lh wheels/
-          echo ""
-          echo "Total: $(ls wheels/*.whl 2>/dev/null | wc -l) wheels"
-        else
-          echo ""
-          echo "⚠️  No wheels available for release"
-          exit 1
-        fi
+  #       # List wheels
+  #       if [ -n "$(ls -A wheels/)" ]; then
+  #         echo ""
+  #         echo "Available wheels:"
+  #         ls -lh wheels/
+  #         echo ""
+  #         echo "Total: $(ls wheels/*.whl 2>/dev/null | wc -l) wheels"
+  #       else
+  #         echo ""
+  #         echo "⚠️  No wheels available for release"
+  #         exit 1
+  #       fi
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: wheels/*.whl
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #   - name: Create GitHub Release
+  #     uses: softprops/action-gh-release@v1
+  #     with:
+  #       files: wheels/*.whl
+  #       generate_release_notes: true
+  #     env:
+  #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        pip install twine
-        if [ -n "$TWINE_PASSWORD" ]; then
-          echo "Publishing to PyPI..."
-          twine upload wheels/*.whl --skip-existing --verbose
-        else
-          echo "⚠️  PYPI_API_TOKEN not set - skipping PyPI upload"
-          echo "To publish to PyPI, add PYPI_API_TOKEN to the PYPI_RELEASE environment secrets"
-        fi
-      shell: bash
+  #   - name: Publish to PyPI
+  #     env:
+  #       TWINE_USERNAME: __token__
+  #       TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+  #     run: |
+  #       pip install twine
+  #       if [ -n "$TWINE_PASSWORD" ]; then
+  #         echo "Publishing to PyPI..."
+  #         twine upload wheels/*.whl --skip-existing --verbose
+  #       else
+  #         echo "⚠️  PYPI_API_TOKEN not set - skipping PyPI upload"
+  #         echo "To publish to PyPI, add PYPI_API_TOKEN to the PYPI_RELEASE environment secrets"
+  #       fi
+  #     shell: bash

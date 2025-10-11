@@ -380,10 +380,12 @@ print()
 if IS_WINDOWS:
     # Use /TP to compile as C++ (required for BoringSSL compatibility on Windows)
     # Define WIN32, _WINDOWS, and OPENSSL_WINDOWS for proper BoringSSL compilation
+    # Define NGHTTP2_STATICLIB to link against static nghttp2 library
     EXT_COMPILE_ARGS = [
         "/TP",
         "/O2",
         "/DHAVE_NGHTTP2",
+        "/DNGHTTP2_STATICLIB",
         "/EHsc",
         "/DWIN32",
         "/D_WINDOWS",

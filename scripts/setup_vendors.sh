@@ -188,11 +188,12 @@ if [ "$OS" = "Windows" ]; then
         cd build
 
         # Use CMake for Windows build
+        # Disable shared library and enable only static library
         cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_LIB_ONLY=ON \
+            -DENABLE_SHARED_LIB=OFF \
             -DENABLE_STATIC_LIB=ON
 
         cmake --build . --config Release
