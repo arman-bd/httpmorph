@@ -262,14 +262,33 @@ def get_library_paths():
         vendor_boringssl = vendor_dir / "boringssl"
 
         # BoringSSL paths (always use vendor build)
-        # Windows builds output to build/Release/ directory
+        # Windows CMake with Visual Studio generator builds to build/ssl/Release/ and build/crypto/Release/
         boringssl_include = str(vendor_boringssl / "include")
-        boringssl_lib = str(vendor_boringssl / "build" / "Release")
 
-        # Check if BoringSSL was built successfully
-        if not (vendor_boringssl / "build" / "Release" / "ssl.lib").exists():
-            print(f"WARNING: BoringSSL not found at {vendor_boringssl}")
-            print("Please run: make setup")
+        # Check for different possible build locations
+        if (vendor_boringssl / "build" / "ssl" / "Release" / "ssl.lib").exists():
+            # Visual Studio multi-config generator: build/ssl/Release/
+            boringssl_lib = [
+                str(vendor_boringssl / "build" / "ssl" / "Release"),
+                str(vendor_boringssl / "build" / "crypto" / "Release"),
+            ]
+            print(f"Using BoringSSL from: {vendor_boringssl / 'build'} (Visual Studio layout)")
+        elif (vendor_boringssl / "build" / "Release" / "ssl.lib").exists():
+            # Single-config generator with Release: build/Release/
+            boringssl_lib = str(vendor_boringssl / "build" / "Release")
+            print(f"Using BoringSSL from: {boringssl_lib}")
+        elif (vendor_boringssl / "build" / "ssl.lib").exists():
+            # Single-config generator: build/
+            boringssl_lib = str(vendor_boringssl / "build")
+            print(f"Using BoringSSL from: {boringssl_lib}")
+        else:
+            # Fallback - assume Visual Studio layout
+            boringssl_lib = [
+                str(vendor_boringssl / "build" / "ssl" / "Release"),
+                str(vendor_boringssl / "build" / "crypto" / "Release"),
+            ]
+            print(f"WARNING: BoringSSL not found, using default: {vendor_boringssl / 'build'}")
+            print("Please run: bash scripts/setup_vendors.sh")
 
         # nghttp2 paths - prefer vendor build, then vcpkg, then MSYS2
         vendor_nghttp2 = vendor_dir / "nghttp2"
