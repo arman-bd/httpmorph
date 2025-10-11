@@ -52,8 +52,20 @@ jobs:
       with:
         submodules: recursive
 
+    # Cache vendor dependencies to speed up builds
+    - name: Cache vendor dependencies
+      uses: actions/cache@v4
+      with:
+        path: vendor
+        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+        restore-keys: |
+          vendor-${{ runner.os }}-
+
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Enable cibuildwheel's internal caching
+        CIBW_BUILD_FRONTEND: "build"
 
     - uses: actions/upload-artifact@v4
       with:
