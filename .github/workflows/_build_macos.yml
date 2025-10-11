@@ -111,8 +111,16 @@ jobs:
             python_cmd="python3"
           fi
 
+          # Upgrade pip to ensure we have the latest features
+          "$python_cmd" -m pip install --upgrade pip || true
+
           # Install the wheel in a fresh environment
-          "$python_cmd" -m pip install --force-reinstall --break-system-packages "$wheel"
+          # Use --break-system-packages if supported (pip >= 22.1)
+          if "$python_cmd" -m pip install --help | grep -q "break-system-packages"; then
+            "$python_cmd" -m pip install --force-reinstall --break-system-packages "$wheel"
+          else
+            "$python_cmd" -m pip install --force-reinstall "$wheel"
+          fi
 
           # Run the test script
           echo ""
