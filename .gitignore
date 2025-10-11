@@ -69,3 +69,6 @@ benchmarks/results/
 # Environment variables
 .env
 examples/.env
+
+# Planning documents (internal)
+plan/
