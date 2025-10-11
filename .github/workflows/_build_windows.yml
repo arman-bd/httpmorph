@@ -7,7 +7,7 @@ on:
         description: 'Python versions to build for'
         required: false
         type: string
-        default: '["3.9", "3.10", "3.11", "3.12"]'
+        default: '["3.10", "3.11", "3.12"]'
 
 jobs:
   build-windows:
@@ -96,7 +96,16 @@ jobs:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
         # Build for specified Python versions
-        CIBW_BUILD: cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64
+        CIBW_BUILD: cp310-win_amd64 cp311-win_amd64 cp312-win_amd64
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.10
+          3.11
+          3.12
 
     # Test the built wheels
     - name: Test wheels
@@ -113,13 +122,29 @@ jobs:
 
           echo "Setting up Python $python_version..."
 
+          # On Windows, use py launcher with minor version only
+          # Extract minor version (e.g., "3.10" -> "10")
+          minor_version="${python_version#*.}"
+
+          # Try py launcher first, then fall back to python
+          if py -3.$minor_version --version &> /dev/null; then
+            python_cmd="py -3.$minor_version"
+          elif python --version 2>&1 | grep -q "Python $python_version"; then
+            python_cmd="python"
+          else
+            echo "WARNING: Python $python_version not found, using default python"
+            python_cmd="python"
+          fi
+
+          echo "Using Python: $($python_cmd --version)"
+
           # Install the wheel in a fresh environment
-          python -m pip install --force-reinstall "$wheel"
+          $python_cmd -m pip install --force-reinstall "$wheel"
 
           # Run the test script
           echo ""
           echo "Running tests..."
-          python scripts/test_local_build.py
+          $python_cmd scripts/test_local_build.py
 
           # Check exit code
           if [ $? -eq 0 ]; then

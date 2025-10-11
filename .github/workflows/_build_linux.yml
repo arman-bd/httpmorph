@@ -7,7 +7,7 @@ on:
         description: 'Python versions to build for'
         required: false
         type: string
-        default: '["3.9", "3.10", "3.11", "3.12"]'
+        default: '["3.10", "3.11", "3.12"]'
 
 jobs:
   build-linux:
@@ -43,7 +43,7 @@ jobs:
       uses: pypa/cibuildwheel@v2.22.0
       env:
         # Build for specified Python versions
-        CIBW_BUILD: cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64
+        CIBW_BUILD: cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
 
     # Save vendor cache after build
@@ -53,6 +53,15 @@ jobs:
       with:
         path: vendor
         key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v9
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.10
+          3.11
+          3.12
 
     # Test the built wheels
     - name: Test wheels
@@ -69,11 +78,26 @@ jobs:
 
           echo "Setting up Python $python_version..."
 
-          # Use the appropriate Python version
-          python_cmd="python${python_version}"
-          if ! command -v "$python_cmd" &> /dev/null; then
+          # Try to find the matching Python version
+          python_cmd=""
+          for cmd in "python${python_version}" "python3.${python_version#*.}" "python3"; do
+            if command -v "$cmd" &> /dev/null; then
+              # Verify this is the right version
+              version_check=$($cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+              if [ "$version_check" = "$python_version" ]; then
+                python_cmd="$cmd"
+                break
+              fi
+            fi
+          done
+
+          # Fall back to python3 if we couldn't find exact match
+          if [ -z "$python_cmd" ]; then
+            echo "WARNING: Python $python_version not found, using python3"
             python_cmd="python3"
           fi
+
+          echo "Using Python: $($python_cmd --version)"
 
           # Install the wheel in a fresh environment
           "$python_cmd" -m pip install --force-reinstall "$wheel"
