@@ -25,7 +25,7 @@ def check_io_uring_support():
 
 
 def get_library_paths():
-    """Get Linux-specific library paths for BoringSSL and nghttp2."""
+    """Get Linux-specific library paths for BoringSSL, nghttp2, and liburing."""
     # Always use vendor-built BoringSSL for wheel compatibility
     vendor_dir = Path("vendor").resolve()
 
@@ -82,11 +82,23 @@ def get_library_paths():
                         nghttp2_lib = alt_path
                         break
 
+    # liburing - use vendor build if io_uring is supported
+    liburing_include = None
+    liburing_lib = None
+    if check_io_uring_support():
+        vendor_liburing = vendor_dir / "liburing" / "install"
+        if vendor_liburing.exists() and (vendor_liburing / "include").exists():
+            liburing_include = str(vendor_liburing / "include")
+            liburing_lib = str(vendor_liburing / "lib")
+            print(f"Using vendor liburing from: {vendor_liburing}")
+
     return {
         "openssl_include": boringssl_include,
         "openssl_lib": boringssl_lib,
         "nghttp2_include": nghttp2_include,
         "nghttp2_lib": nghttp2_lib,
+        "liburing_include": liburing_include,
+        "liburing_lib": liburing_lib,
     }
 
 

@@ -98,6 +98,47 @@ jobs:
         # Build for specified Python versions
         CIBW_BUILD: cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64
 
+    # Test the built wheels
+    - name: Test wheels
+      run: |
+        # Test each wheel that was built
+        for wheel in ./wheelhouse/*.whl; do
+          echo "========================================"
+          echo "Testing wheel: $(basename "$wheel")"
+          echo "========================================"
+
+          # Extract Python version from wheel filename (e.g., cp39, cp310)
+          python_tag=$(basename "$wheel" | grep -oP 'cp\d+' | head -1)
+          python_version="${python_tag:2:1}.${python_tag:3}"
+
+          echo "Setting up Python $python_version..."
+
+          # Install the wheel in a fresh environment
+          python -m pip install --force-reinstall "$wheel"
+
+          # Run the test script
+          echo ""
+          echo "Running tests..."
+          python scripts/test_local_build.py
+
+          # Check exit code
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "[OK] Wheel test PASSED: $(basename "$wheel")"
+          else
+            echo ""
+            echo "[FAIL] Wheel test FAILED: $(basename "$wheel")"
+            exit 1
+          fi
+
+          echo ""
+        done
+
+        echo "========================================"
+        echo "All wheel tests PASSED"
+        echo "========================================"
+      shell: bash
+
     # Upload wheels as artifacts
     - uses: actions/upload-artifact@v4
       with:

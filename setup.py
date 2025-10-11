@@ -59,6 +59,9 @@ print(f"  BoringSSL include: {LIB_PATHS['openssl_include']}")
 print(f"  BoringSSL lib: {LIB_PATHS['openssl_lib']}")
 print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
 print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
+if LIB_PATHS.get("liburing_include"):
+    print(f"  liburing include: {LIB_PATHS['liburing_include']}")
+    print(f"  liburing lib: {LIB_PATHS['liburing_lib']}")
 print()
 
 # Build include and library directory lists
@@ -77,6 +80,11 @@ INCLUDE_DIRS = [
 ]
 
 LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
+
+# Add liburing paths on Linux if available
+if IS_LINUX and LIB_PATHS.get("liburing_include"):
+    INCLUDE_DIRS.append(LIB_PATHS["liburing_include"])
+    LIBRARY_DIRS.append(LIB_PATHS["liburing_lib"])
 
 # Add zlib paths on Windows if available
 if IS_WINDOWS and LIB_PATHS.get("zlib_include"):
