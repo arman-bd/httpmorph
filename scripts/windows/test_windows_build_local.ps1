@@ -12,7 +12,7 @@ Write-Host "httpmorph - Windows Wheel Builder" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$ProjectRoot = Split-Path $PSScriptRoot -Parent
+$ProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
 # Step 1: Setup vendors (BoringSSL, nghttp2, zlib)
 Write-Host "==> Step 1: Setting up vendor dependencies..." -ForegroundColor Yellow
