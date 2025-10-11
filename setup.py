@@ -190,10 +190,17 @@ def get_library_paths():
         }
 
     elif IS_LINUX:
-        # Use vendor dependencies if available, otherwise system paths
+        # Always use vendor-built BoringSSL for wheel compatibility
         vendor_dir = Path("vendor").resolve()
 
-        # Check if vendor nghttp2 exists
+        # BoringSSL (always use vendor-built)
+        vendor_boringssl = vendor_dir / "boringssl"
+        boringssl_include = str(vendor_boringssl / "include")
+        boringssl_lib = str(vendor_boringssl / "build" / "ssl")
+
+        print(f"Using vendor BoringSSL from: {vendor_boringssl}")
+
+        # nghttp2 - prefer vendor build for wheel compatibility
         vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
         if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
             nghttp2_include = str(vendor_nghttp2 / "include")
@@ -240,58 +247,9 @@ def get_library_paths():
                             nghttp2_lib = alt_path
                             break
 
-        # Try pkg-config for BoringSSL/OpenSSL (system fallback on Linux)
-        openssl_include = None
-        openssl_lib = None
-        try:
-            import subprocess
-
-            include_output = (
-                subprocess.check_output(
-                    ["pkg-config", "--cflags-only-I", "openssl"], stderr=subprocess.DEVNULL
-                )
-                .decode()
-                .strip()
-            )
-            if include_output:
-                openssl_include = include_output.replace("-I", "").strip()
-
-            lib_output = (
-                subprocess.check_output(
-                    ["pkg-config", "--libs-only-L", "openssl"], stderr=subprocess.DEVNULL
-                )
-                .decode()
-                .strip()
-            )
-            if lib_output:
-                openssl_lib = lib_output.replace("-L", "").strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-
-        # Use system SSL library on Linux if pkg-config didn't work
-        if not openssl_include:
-            openssl_include = "/usr/include"
-        if not openssl_lib:
-            openssl_lib = "/usr/lib/x86_64-linux-gnu"
-            if not Path(openssl_lib).exists():
-                for alt_path in ["/usr/lib64", "/usr/lib"]:
-                    if Path(alt_path).exists():
-                        openssl_lib = alt_path
-                        break
-
-        # Validate paths before returning
-        if not openssl_include or not openssl_include.strip():
-            openssl_include = "/usr/include"
-        if not openssl_lib or not openssl_lib.strip():
-            openssl_lib = "/usr/lib/x86_64-linux-gnu"
-        if not nghttp2_include or not nghttp2_include.strip():
-            nghttp2_include = "/usr/include"
-        if not nghttp2_lib or not nghttp2_lib.strip():
-            nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
-
         return {
-            "openssl_include": openssl_include,
-            "openssl_lib": openssl_lib,
+            "openssl_include": boringssl_include,
+            "openssl_lib": boringssl_lib,
             "nghttp2_include": nghttp2_include,
             "nghttp2_lib": nghttp2_lib,
         }
