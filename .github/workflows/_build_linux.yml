@@ -1,0 +1,61 @@
+name: Build Linux Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.9", "3.10", "3.11", "3.12"]'
+
+jobs:
+  build-linux:
+    name: Build Linux Wheels
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-linux-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+        restore-keys: |
+          vendor-linux-
+
+    # Build wheels with cibuildwheel (handles manylinux containers)
+    # Vendor dependencies are built inside the manylinux container
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Build for specified Python versions
+        CIBW_BUILD: cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64
+        # Vendor build happens inside manylinux container via before-build
+
+    # Save vendor cache after build
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-linux-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-linux
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error

@@ -1,0 +1,106 @@
+name: Build Windows Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.9", "3.10", "3.11", "3.12"]'
+
+jobs:
+  build-windows:
+    name: Build Windows Wheels
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Install build tools
+    - name: Install build dependencies
+      run: |
+        choco install cmake ninja golang -y
+      shell: bash
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+        restore-keys: |
+          vendor-windows-
+
+    # Build vendor dependencies if not cached
+    - name: Build vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      run: |
+        bash scripts/setup_vendors.sh
+      shell: bash
+
+    # Save vendor cache for next time
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+
+    # Verify vendor build
+    - name: Verify vendor build
+      run: |
+        echo "=== Vendor directory contents ==="
+        ls -la vendor/ || true
+        echo ""
+        echo "=== BoringSSL build ==="
+        ls -la vendor/boringssl/build/ || true
+        if [ -d "vendor/boringssl/build/ssl/Release" ]; then
+          echo "  ssl/Release:"
+          ls -la vendor/boringssl/build/ssl/Release/ || true
+        fi
+        if [ -d "vendor/boringssl/build/crypto/Release" ]; then
+          echo "  crypto/Release:"
+          ls -la vendor/boringssl/build/crypto/Release/ || true
+        fi
+        echo ""
+        echo "=== nghttp2 build ==="
+        ls -la vendor/nghttp2/build/ || true
+        if [ -d "vendor/nghttp2/build/lib/Release" ]; then
+          echo "  lib/Release:"
+          ls -la vendor/nghttp2/build/lib/Release/ || true
+        fi
+        echo ""
+        echo "=== zlib build ==="
+        ls -la vendor/zlib/build/ || true
+        if [ -d "vendor/zlib/build/Release" ]; then
+          echo "  Release:"
+          ls -la vendor/zlib/build/Release/ || true
+        fi
+      shell: bash
+
+    # Build wheels for all Python versions
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Skip before-build since we already built vendors
+        CIBW_BEFORE_BUILD: ""
+        # Build for specified Python versions
+        CIBW_BUILD: cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-windows
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error

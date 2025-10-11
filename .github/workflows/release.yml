@@ -37,90 +37,28 @@ jobs:
       primary-python: "3.11"
     secrets: inherit
 
-  build-wheels:
-    name: Build Wheels (${{ matrix.os }})
+  # Build wheels for each platform in parallel
+  build-windows:
+    name: Build Windows Wheels
     needs: [config, test]
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
+    uses: ./.github/workflows/_build_windows.yml
 
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: recursive
+  build-linux:
+    name: Build Linux Wheels
+    needs: [config, test]
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    uses: ./.github/workflows/_build_linux.yml
 
-    # Install build tools
-    - name: Install build dependencies (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        choco install cmake ninja golang -y
-      shell: bash
-
-    # Setup Go for BoringSSL build
-    - name: Setup Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.21'
-        cache: true
-
-    # Cache vendor dependencies to speed up builds
-    - name: Restore vendor cache
-      id: cache-vendor
-      uses: actions/cache/restore@v4
-      with:
-        path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
-        restore-keys: |
-          vendor-${{ runner.os }}-
-
-    # Build vendor dependencies if not cached
-    - name: Build vendor dependencies
-      if: steps.cache-vendor.outputs.cache-hit != 'true'
-      run: |
-        bash scripts/setup_vendors.sh
-      shell: bash
-
-    # Save vendor cache for next time
-    - name: Save vendor cache
-      if: steps.cache-vendor.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
-
-    # List vendor directory to verify build
-    - name: Verify vendor build
-      run: |
-        echo "=== Vendor directory contents ==="
-        ls -la vendor/ || true
-        echo ""
-        echo "=== BoringSSL build ==="
-        ls -la vendor/boringssl/build/ || true
-        echo ""
-        echo "=== nghttp2 build ==="
-        ls -la vendor/nghttp2/build/ || true
-        echo ""
-        echo "=== zlib build ==="
-        ls -la vendor/zlib/build/ || true
-      shell: bash
-
-    - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22.0
-      env:
-        # Skip before-build in pyproject.toml since we already built vendors
-        CIBW_BEFORE_BUILD: ""
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: wheels-${{ matrix.os }}
-        path: ./wheelhouse/*.whl
+  build-macos:
+    name: Build macOS Wheels
+    needs: [config, test]
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    uses: ./.github/workflows/_build_macos.yml
 
   publish:
     name: Publish Release
-    needs: build-wheels
+    needs: [build-windows, build-linux, build-macos]
     if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
@@ -150,16 +88,16 @@ jobs:
         echo "Build Status Report"
         echo "===================="
 
-        for os in ubuntu-latest macos-latest windows-latest; do
-          if [ -d "dist/wheels-$os" ]; then
-            wheel_count=$(find "dist/wheels-$os" -name "*.whl" 2>/dev/null | wc -l)
+        for platform in windows linux macos; do
+          if [ -d "dist/wheels-$platform" ]; then
+            wheel_count=$(find "dist/wheels-$platform" -name "*.whl" 2>/dev/null | wc -l)
             if [ "$wheel_count" -gt 0 ]; then
-              echo "✅ $os: $wheel_count wheels built"
+              echo "✅ $platform: $wheel_count wheels built"
             else
-              echo "❌ $os: No wheels found"
+              echo "❌ $platform: No wheels found"
             fi
           else
-            echo "❌ $os: Build failed or artifacts missing"
+            echo "❌ $platform: Build failed or artifacts missing"
           fi
         done
 

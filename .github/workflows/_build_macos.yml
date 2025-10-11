@@ -1,0 +1,98 @@
+name: Build macOS Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.9", "3.10", "3.11", "3.12"]'
+
+jobs:
+  build-macos:
+    name: Build macOS Wheels
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Install build tools
+    - name: Install build dependencies
+      run: |
+        brew install cmake ninja go
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-macos-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+        restore-keys: |
+          vendor-macos-
+
+    # Build vendor dependencies if not cached
+    - name: Build vendor dependencies
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      run: |
+        bash scripts/setup_vendors.sh
+
+    # Save vendor cache for next time
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-macos-${{ hashFiles('scripts/setup_vendors.sh') }}-v8
+
+    # Verify vendor build
+    - name: Verify vendor build
+      run: |
+        echo "=== Vendor directory contents ==="
+        ls -la vendor/ || true
+        echo ""
+        echo "=== BoringSSL build ==="
+        ls -la vendor/boringssl/build/ || true
+        if [ -d "vendor/boringssl/build/ssl" ]; then
+          echo "  ssl:"
+          ls -la vendor/boringssl/build/ssl/ || true
+        fi
+        if [ -d "vendor/boringssl/build/crypto" ]; then
+          echo "  crypto:"
+          ls -la vendor/boringssl/build/crypto/ || true
+        fi
+        echo ""
+        echo "=== nghttp2 install ==="
+        ls -la vendor/nghttp2/install/ || true
+        if [ -d "vendor/nghttp2/install/lib" ]; then
+          echo "  lib:"
+          ls -la vendor/nghttp2/install/lib/ || true
+        fi
+
+    # Build wheels for all Python versions
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Skip before-build since we already built vendors
+        CIBW_BEFORE_BUILD: ""
+        # Build for specified Python versions (universal2 for both Intel and Apple Silicon)
+        CIBW_BUILD: cp39-macosx_* cp310-macosx_* cp311-macosx_* cp312-macosx_*
+        # Use delocate to bundle dependencies
+        CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} {wheel} --ignore-missing-dependencies"
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-macos
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error
