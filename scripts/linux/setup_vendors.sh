@@ -72,6 +72,12 @@ if [ ! -f "build/libssl.a" ]; then
     unset CMAKE_OSX_ARCHITECTURES
     unset CMAKE_OSX_DEPLOYMENT_TARGET
     unset CMAKE_OSX_SYSROOT
+    unset APPLE
+
+    # Workaround: Remove Apple-specific assembly files that shouldn't be built on Linux
+    # BoringSSL's CMake sometimes incorrectly tries to build these on Linux
+    echo "Removing Apple-specific assembly files..."
+    find ../gen/bcm -name "*-apple.S" -delete || true
 
     cmake -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
