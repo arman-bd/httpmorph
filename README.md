@@ -1,6 +1,6 @@
 # httpmorph
 
-[![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph)
+![Build](https://github.com/arman-bd/httpmorph/workflows/CI/badge.svg) [![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph) [![PyPI version](https://badge.fury.io/py/httpmorph.svg)](https://pypi.org/project/httpmorph/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Python HTTP client focused on mimicking browser fingerprints.
 
