@@ -1,18 +1,27 @@
 # httpmorph
 
-[![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph)
+![Build](https://github.com/arman-bd/httpmorph/workflows/CI/badge.svg) [![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph) [![PyPI version](https://badge.fury.io/py/httpmorph.svg)](https://pypi.org/project/httpmorph/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A high-performance HTTP client for Python with advanced browser fingerprinting capabilities. Built with C for speed, designed for compatibility.
+A Python HTTP client focused on mimicking browser fingerprints.
 
-## Features
+**⚠️ Work in Progress** - This library is in early development. Features and API may change.
 
-- **Requests-compatible API** - Drop-in replacement for most Python `requests` use cases
-- **High Performance** - Native C implementation with BoringSSL for blazing-fast HTTP/HTTPS
-- **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2
-- **Browser Fingerprinting** - Realistic browser profiles (Chrome, Firefox, Safari, Edge)
-- **TLS Fingerprinting** - JA3 fingerprint generation and customization
-- **Connection Pooling** - Automatic connection reuse for better performance
-- **Session Management** - Persistent cookies and headers across requests
+## What is httpmorph?
+
+httpmorph is a drop-in replacement for Python's `requests` library that uses a custom C implementation with BoringSSL instead of Python's standard HTTP stack. The primary goal is **mimicking real browser TLS/HTTP fingerprints**, not performance.
+
+If you need raw speed, use `httpx` or `aiohttp`. If you need your Python script to look like Chrome, Firefox, or Safari from a fingerprinting perspective, use httpmorph.
+
+## Why httpmorph?
+
+Many websites use TLS/HTTP fingerprinting to detect automated clients. Python's `requests` library has a distinctive fingerprint:
+
+- Uses OpenSSL with Python's default configuration
+- Specific cipher suite ordering that doesn't match browsers
+- Missing browser-specific TLS extensions (like GREASE)
+- Different HTTP/2 settings than real browsers
+
+httpmorph addresses this by using BoringSSL (same as Chrome) and implementing exact TLS/HTTP parameters from real browsers.
 
 ## Installation
 
@@ -20,58 +29,109 @@ A high-performance HTTP client for Python with advanced browser fingerprinting c
 pip install httpmorph
 ```
 
-### Requirements
-
+**Requirements:**
 - Python 3.8+
-- Windows, macOS, or Linux
-- BoringSSL (built automatically from source)
-- libnghttp2 (for HTTP/2)
+- Supported platforms: Linux, macOS, Windows
 
 ## Quick Start
 
 ```python
 import httpmorph
 
-# Simple GET request
-response = httpmorph.get('https://icanhazip.com')
-print(response.status_code)
+# Simple GET request (uses Chrome fingerprint by default)
+response = httpmorph.get('https://httpbin.org/get')
 print(response.text)
 
-# POST with JSON
-response = httpmorph.post(
-    'https://httpbin.org/post',
-    json={'key': 'value'}
-)
+# Create a session with a specific browser profile
+session = httpmorph.Session(browser='firefox')
+response = session.get('https://httpbin.org/headers')
+print(response.json())
 
-# Using sessions
+# Session automatically handles cookies
+response = session.post('https://httpbin.org/post', json={'key': 'value'})
+```
+
+## API Compatibility
+
+httpmorph provides a `requests`-compatible API:
+
+```python
+# Module-level convenience functions
+httpmorph.get(url, **kwargs)
+httpmorph.post(url, data=None, json=None, **kwargs)
+httpmorph.put(url, data=None, **kwargs)
+httpmorph.delete(url, **kwargs)
+httpmorph.head(url, **kwargs)
+httpmorph.patch(url, data=None, **kwargs)
+httpmorph.options(url, **kwargs)
+
+# Session object
 session = httpmorph.Session(browser='chrome')
-response = session.get('https://example.com')
+session.get(url)
+session.post(url, json={...})
+
+# Response object
+response.status_code
+response.headers
+response.text
+response.content  # bytes
+response.json()
+response.raise_for_status()
+response.elapsed  # timedelta
 ```
 
 ## Browser Profiles
 
-Mimic real browser behavior with pre-configured profiles:
+Available browser profiles:
+
+- `chrome` - Chrome 131 (default)
+- `firefox` - Firefox 122
+- `safari` - Safari 17
+- `edge` - Edge 122
+
+Each profile includes:
+- Accurate User-Agent header
+- TLS cipher suites in correct order
+- TLS extensions (including GREASE for Chrome/Edge)
+- Elliptic curves
+- Signature algorithms
+- HTTP/2 SETTINGS frame parameters
+- JA3 fingerprint characteristics
 
 ```python
-# Use Chrome fingerprint
-response = httpmorph.get('https://example.com', browser='chrome')
-
-# Use Firefox fingerprint
+# Use a specific browser profile
 session = httpmorph.Session(browser='firefox')
 response = session.get('https://example.com')
 
-# Available browsers: chrome, firefox, safari, edge
+# View TLS information
+print(f"TLS Version: {response.tls_version}")
+print(f"Cipher: {response.tls_cipher}")
+print(f"JA3: {response.ja3_fingerprint}")
 ```
 
-## Advanced Usage
+## Response Timing
+
+Responses include detailed timing information:
+
+```python
+response = httpmorph.get('https://example.com')
+
+# Timing in microseconds
+print(f"Connect: {response.connect_time_us / 1000:.2f}ms")
+print(f"TLS handshake: {response.tls_time_us / 1000:.2f}ms")
+print(f"First byte: {response.first_byte_time_us / 1000:.2f}ms")
+print(f"Total: {response.total_time_us / 1000:.2f}ms")
+
+# requests-compatible
+print(f"Elapsed: {response.elapsed.total_seconds():.3f}s")
+```
+
+## Common Use Cases
 
 ### Custom Headers
 
 ```python
-headers = {
-    'User-Agent': 'MyApp/1.0',
-    'Authorization': 'Bearer token123'
-}
+headers = {'Authorization': 'Bearer token123'}
 response = httpmorph.get('https://api.example.com', headers=headers)
 ```
 
@@ -85,18 +145,11 @@ response = httpmorph.post('https://httpbin.org/post', files=files)
 ### Timeout Control
 
 ```python
-# Single timeout value
+# Single timeout value (seconds)
 response = httpmorph.get('https://example.com', timeout=5)
 
-# Separate connect and read timeouts
+# Tuple: (connect_timeout, read_timeout)
 response = httpmorph.get('https://example.com', timeout=(3, 10))
-```
-
-### SSL Verification
-
-```python
-# Disable SSL verification (not recommended for production)
-response = httpmorph.get('https://example.com', verify_ssl=False)
 ```
 
 ### Authentication
@@ -107,22 +160,6 @@ response = httpmorph.get(
     'https://api.example.com',
     auth=('username', 'password')
 )
-```
-
-### Redirects
-
-```python
-# Follow redirects (default behavior)
-response = httpmorph.get('https://example.com/redirect')
-
-# Don't follow redirects
-response = httpmorph.get(
-    'https://example.com/redirect',
-    allow_redirects=False
-)
-
-# Check redirect history
-print(len(response.history))  # Number of redirects
 ```
 
 ### Sessions with Cookies
@@ -138,247 +175,88 @@ session.post('https://example.com/form', data={'key': 'value'})
 print(session.cookies)
 ```
 
-## API Compatibility
-
-httpmorph aims for high compatibility with Python's `requests` library:
-
-| Feature | Status |
-|---------|--------|
-| GET, POST, PUT, DELETE, HEAD, PATCH, OPTIONS | Supported |
-| JSON request/response | Supported |
-| Form data & file uploads | Supported |
-| Custom headers | Supported |
-| Authentication | Supported |
-| Cookies & sessions | Supported |
-| Redirects with history | Supported |
-| Timeout control | Supported |
-| SSL verification | Supported |
-| Streaming responses | Supported |
-| Exception hierarchy | Supported |
-
-## Response Object
+### Error Handling
 
 ```python
-response = httpmorph.get('https://httpbin.org/get')
-
-# Status and headers
-print(response.status_code)      # 200
-print(response.ok)                # True
-print(response.reason)            # 'OK'
-print(response.headers)           # {'Content-Type': 'application/json', ...}
-
-# Response body
-print(response.text)              # Response as string
-print(response.body)              # Response as bytes
-print(response.json())            # Parse JSON response
-
-# Request info
-print(response.url)               # Final URL after redirects
-print(response.history)           # List of redirect responses
-
-# Timing
-print(response.elapsed)           # Response time
-print(response.total_time_us)     # Total time in microseconds
-
-# TLS info
-print(response.tls_version)       # TLS version used
-print(response.tls_cipher)        # Cipher suite
-print(response.ja3_fingerprint)   # JA3 fingerprint
-```
-
-## Exception Handling
-
-```python
-import httpmorph
-
 try:
     response = httpmorph.get('https://example.com', timeout=5)
-    response.raise_for_status()  # Raise exception for 4xx/5xx
+    response.raise_for_status()
 except httpmorph.Timeout:
     print("Request timed out")
 except httpmorph.ConnectionError:
     print("Failed to connect")
 except httpmorph.HTTPError as e:
     print(f"HTTP error: {e.response.status_code}")
-except httpmorph.RequestException as e:
-    print(f"Request failed: {e}")
 ```
 
-## Performance
+## Current Limitations
 
-httpmorph is built for speed with a native C implementation and BoringSSL for optimized TLS operations.
+This library is a work in progress. Known limitations:
 
-**Benchmark vs requests library** (30-second test, macOS Apple Silicon):
-- **Throughput:** 49.4% faster on average (1,056 vs 707 req/s)
-- **GET requests:** 1,032 req/s vs 709 req/s (1.46x faster)
-- **POST requests:** 1,080 req/s vs 705 req/s (1.53x faster)
-- **Latency:** 33.1% lower on average (0.95ms vs 1.41ms)
+- No proxy support
+- No SSL verification configuration
+- No connection pooling
+- No streaming requests/responses
+- Limited cookie handling (basic support)
+- No custom auth handlers
+- HTTP/2 support is partial
 
-See [detailed benchmark results](benchmarks/results_requests_macos.md) for full metrics including performance charts.
-
-### Performance Features
-- Native C implementation with minimal Python overhead
-- BoringSSL for optimized TLS operations
-- Connection pooling reduces handshake overhead
-- HTTP/2 multiplexing for concurrent requests
-- Efficient memory management
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| Windows | ✅ Fully supported |
-| macOS (Intel & Apple Silicon) | ✅ Fully supported |
-| Linux (x86_64, ARM64) | ✅ Fully supported |
-
-All platforms use **BoringSSL** (Google's fork of OpenSSL) for consistent TLS behavior and advanced fingerprinting capabilities.
+These may be addressed in future releases.
 
 ## Building from Source
 
-httpmorph uses **BoringSSL** (built from source) on all platforms for consistent TLS fingerprinting.
-
-### Prerequisites
-
-**Windows:**
 ```bash
-# Install build tools
-choco install cmake golang nasm visualstudio2022buildtools -y
+# 1. Clone the repository
+git clone https://github.com/arman-bd/httpmorph
+cd httpmorph
 
-# Or install manually:
-# - Visual Studio 2019+ (with C++ tools)
-# - CMake 3.15+
-# - Go 1.18+
-# - NASM (for BoringSSL assembly optimizations)
+# 2. Build vendor dependencies (BoringSSL, nghttp2)
+#    This takes 5-10 minutes on first build
+bash scripts/setup_vendors.sh
+
+# 3. Install in development mode
+pip install -e ".[dev]"
+
+# 4. Run tests
+pytest tests/ -v
 ```
+
+### Platform-Specific Prerequisites
 
 **macOS:**
 ```bash
-# Install dependencies
-brew install cmake ninja libnghttp2
+brew install cmake ninja go
 ```
 
-**Linux:**
+**Linux (Ubuntu/Debian):**
 ```bash
-# Ubuntu/Debian
-sudo apt-get install cmake ninja-build libssl-dev pkg-config autoconf automake libtool
-
-# Fedora/RHEL
-sudo dnf install cmake ninja-build openssl-devel pkg-config autoconf automake libtool
+sudo apt-get install cmake ninja-build golang pkg-config autoconf automake libtool
 ```
 
-### Build Steps
-
+**Windows:**
 ```bash
-# 1. Clone the repository
-git clone https://github.com/yourusername/httpmorph.git
-cd httpmorph
-
-# 2. Build vendor dependencies (BoringSSL, nghttp2, zlib)
-./scripts/setup_vendors.sh  # On Windows: bash scripts/setup_vendors.sh
-
-# 3. Build Python extensions
-python setup.py build_ext --inplace
-
-# 4. Install in development mode
-pip install -e ".[dev]"
-```
-
-**Note:** The first build takes 5-10 minutes as it compiles BoringSSL from source. Subsequent builds are much faster (~30 seconds) as the vendor libraries are cached.
-
-## Development
-
-```bash
-# Clone and setup (includes building BoringSSL)
-git clone https://github.com/yourusername/httpmorph.git
-cd httpmorph
-./scripts/setup_vendors.sh
-
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=httpmorph --cov-report=html
-
-# Run specific test markers
-pytest tests/ -m "not slow"           # Skip slow tests
-pytest tests/ -m integration          # Only integration tests
-pytest tests/ -m fingerprint          # Only fingerprinting tests
+choco install cmake golang -y
+# Also requires Visual Studio 2019+ with C++ tools
 ```
 
 ## Architecture
 
-httpmorph combines the best of both worlds:
+httpmorph has three layers:
 
-- **C Core**: Low-level HTTP/TLS implementation for maximum performance
-- **Python Wrapper**: Clean, Pythonic API with requests compatibility
-- **BoringSSL**: Google's fork of OpenSSL, optimized and battle-tested
-- **nghttp2**: Standard-compliant HTTP/2 implementation
+1. **C Core** (`src/core/`) - Socket handling, TLS with BoringSSL, HTTP parsing
+2. **Cython Bindings** (`src/bindings/`) - Python interface to C code
+3. **Python Wrapper** (`src/httpmorph/`) - `requests`-compatible API
 
-The library uses Cython to bridge Python and C, providing near-native performance with the ease of Python.
+Browser TLS profiles are defined in `src/tls/browser_profiles.c`.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-Contributions are welcome! Areas where help is especially appreciated:
+This project is in early development. Contributions welcome, but please note the API is still evolving.
 
-- Windows compatibility
-- Additional browser profiles
-- Performance optimizations
-- Documentation improvements
-- Bug reports and fixes
+## Disclaimer
 
-Please open an issue or pull request on GitHub.
-
-## Testing
-
-httpmorph has a comprehensive test suite with 270+ tests covering:
-
-- All HTTP methods and parameters
-- Redirect handling and history
-- Cookie and session management
-- Authentication and SSL
-- Error handling and timeouts
-- Unicode and encoding edge cases
-- Thread safety and memory management
-- Real-world integration tests
-
-Run the test suite:
-
-```bash
-pytest tests/ -v
-```
-
-## Acknowledgments
-
-- Built on BoringSSL (Google)
-- HTTP/2 support via nghttp2
-- Inspired by Python's requests library
-- Browser fingerprints based on real browser implementations
-
-## FAQ
-
-**Q: Why another HTTP client?**
-A: httpmorph combines the performance of native C with browser fingerprinting capabilities, making it ideal for applications that need both speed and realistic browser behavior.
-
-**Q: Is it production-ready?**
-A: No, httpmorph is still in active development and not yet recommended for production use.
-
-**Q: What about Windows?**
-A: Windows support is in active development. The core functionality works, but some platform-specific features are still being refined.
-
-**Q: Can I use this as a drop-in replacement for requests?**
-A: For most common use cases, yes! We've implemented the most widely-used requests API. Some advanced features may have slight differences.
-
-**Q: How do I report a bug?**
-A: Please open an issue on GitHub with a minimal reproduction example and your environment details (OS, Python version, httpmorph version).
-
-## Support
-
-- GitHub Issues: [Report bugs and feature requests](https://github.com/yourusername/httpmorph/issues)
-- Documentation: [Full API documentation](https://httpmorph.readthedocs.io) (coming soon)
-
----
-
-**httpmorph** - Fast, compatible, and powerful HTTP for Python.
+This tool is for legitimate testing and development purposes only. Users are responsible for complying with website terms of service and applicable laws.

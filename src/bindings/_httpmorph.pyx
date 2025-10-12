@@ -225,7 +225,7 @@ cdef class Client:
 
             # Add default headers that will be added by C code if not present
             if 'User-Agent' not in request_headers:
-                request_headers['User-Agent'] = 'httpmorph/0.1.0'
+                request_headers['User-Agent'] = 'httpmorph/0.1.0-alpha.1'
             if 'Accept' not in request_headers:
                 request_headers['Accept'] = '*/*'
             if 'Connection' not in request_headers:
@@ -464,7 +464,7 @@ cdef class Session:
                 'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
                 'edge': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
             }
-            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.0')
+            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.0-alpha.1')
 
             # Add browser-specific User-Agent header if not already set
             has_user_agent = False
