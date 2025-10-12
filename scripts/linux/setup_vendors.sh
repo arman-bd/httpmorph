@@ -56,8 +56,10 @@ if [ ! -f "build/libssl.a" ]; then
     CMAKE_C_FLAGS="-Wno-maybe-uninitialized"
     CMAKE_CXX_FLAGS="-Wno-maybe-uninitialized"
 
+    # Explicitly set system name to Linux to prevent cross-platform confusion
     cmake -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_SYSTEM_NAME=Linux \
           -DCMAKE_C_FLAGS="$CMAKE_C_FLAGS" \
           -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS" \
           ..

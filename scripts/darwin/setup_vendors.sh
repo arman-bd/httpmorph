@@ -51,10 +51,22 @@ if [ ! -f "build/ssl/libssl.a" ] && [ ! -f "build/libssl.a" ]; then
     mkdir -p build
     cd build
 
-    # macOS uses Clang - no special flags needed
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-          ..
+    # Detect architecture
+    ARCH=$(uname -m)
+
+    # macOS uses Clang
+    # On ARM64, we need to explicitly set the architecture to avoid x86_64 assembly issues
+    if [ "$ARCH" = "arm64" ]; then
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DCMAKE_OSX_ARCHITECTURES=arm64 \
+              ..
+    else
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              ..
+    fi
+
     make -j$(sysctl -n hw.ncpu)
 
     echo "✓ BoringSSL built successfully"
