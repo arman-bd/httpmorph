@@ -28,6 +28,15 @@ cd "$VENDOR_DIR"
 #
 echo "==> Setting up BoringSSL..."
 
+# Always ensure clean BoringSSL clone to avoid platform detection issues
+if [ -d "boringssl" ]; then
+    # Check if build exists, if not, remove and re-clone
+    if [ ! -f "boringssl/build/libssl.a" ]; then
+        echo "Removing incomplete BoringSSL clone..."
+        rm -rf boringssl
+    fi
+fi
+
 if [ ! -d "boringssl" ]; then
     echo "Cloning BoringSSL..."
     git clone --depth 1 https://boringssl.googlesource.com/boringssl
@@ -49,6 +58,12 @@ if [ ! -f "build/libssl.a" ]; then
         echo "WARNING: go not found. BoringSSL will build without some tests."
     fi
 
+    # Clean build directory if it exists (in case of previous failed build)
+    if [ -d "build" ]; then
+        echo "Cleaning previous build..."
+        rm -rf build
+    fi
+
     mkdir -p build
     cd build
 
@@ -56,10 +71,14 @@ if [ ! -f "build/libssl.a" ]; then
     CMAKE_C_FLAGS="-Wno-maybe-uninitialized"
     CMAKE_CXX_FLAGS="-Wno-maybe-uninitialized"
 
-    # Explicitly set system name to Linux to prevent cross-platform confusion
+    # Force CMake to regenerate all platform detection
+    # Unset any environment variables that might confuse platform detection
+    unset CMAKE_OSX_ARCHITECTURES
+    unset CMAKE_OSX_DEPLOYMENT_TARGET
+    unset CMAKE_OSX_SYSROOT
+
     cmake -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-          -DCMAKE_SYSTEM_NAME=Linux \
           -DCMAKE_C_FLAGS="$CMAKE_C_FLAGS" \
           -DCMAKE_CXX_FLAGS="$CMAKE_CXX_FLAGS" \
           ..

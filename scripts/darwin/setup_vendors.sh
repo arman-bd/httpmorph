@@ -55,13 +55,17 @@ if [ ! -f "build/ssl/libssl.a" ] && [ ! -f "build/libssl.a" ]; then
     ARCH=$(uname -m)
 
     # macOS uses Clang
-    # On ARM64, we need to explicitly set the architecture to avoid x86_64 assembly issues
+    # On ARM64, we need to disable assembly optimizations since BoringSSL's pre-generated
+    # x86_64 assembly files cause issues
     if [ "$ARCH" = "arm64" ]; then
+        echo "Detected ARM64 architecture, disabling assembly optimizations..."
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               -DCMAKE_OSX_ARCHITECTURES=arm64 \
+              -DOPENSSL_NO_ASM=1 \
               ..
     else
+        echo "Detected x86_64 architecture, using assembly optimizations..."
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               ..
