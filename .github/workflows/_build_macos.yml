@@ -37,13 +37,12 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v9
+        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
         restore-keys: |
-          vendor-macos-
+          vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
 
-    # Build vendor dependencies if not cached
+    # Build vendor dependencies (always build to ensure clean state)
     - name: Build vendor dependencies
-      if: steps.cache-vendor.outputs.cache-hit != 'true'
       run: |
         bash scripts/darwin/setup_vendors.sh
 
@@ -53,7 +52,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v9
+        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
 
     # Verify vendor build
     - name: Verify vendor build
