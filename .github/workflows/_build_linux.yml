@@ -27,24 +27,25 @@ jobs:
         cache: true
 
     # Cache vendor dependencies to speed up builds
-    # Note: For Linux, vendors are built inside manylinux container, so we cache the vendor directory
     - name: Restore vendor cache
       id: cache-vendor
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v10
+        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
         restore-keys: |
-          vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v10
+          vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
 
     # Build wheels with cibuildwheel (handles manylinux containers)
-    # The vendor directory is mounted into the container automatically
+    # The vendor directory is mounted into the container and shared across Python versions
+    # The setup script will skip rebuilding if libraries already exist
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.22.0
       env:
         # Build for specified Python versions
         CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
+        # The script will detect cached libraries and skip rebuilding
 
     # Save vendor cache after build
     - name: Save vendor cache
@@ -52,7 +53,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v10
+        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
 
     # Setup Python versions for testing
     - name: Setup Python versions

@@ -28,20 +28,20 @@ cd "$VENDOR_DIR"
 #
 echo "==> Setting up BoringSSL..."
 
-# Always remove and re-clone BoringSSL to ensure clean state
-# This prevents platform cross-contamination (e.g., macOS files on Linux runners)
-if [ -d "boringssl" ]; then
-    echo "Removing existing BoringSSL directory to ensure clean build..."
-    rm -rf boringssl
-fi
+# Check if BoringSSL is already built with valid libraries
+if [ -d "boringssl/build" ] && [ -f "boringssl/build/libssl.a" ] && [ -f "boringssl/build/libcrypto.a" ]; then
+    echo "✓ BoringSSL already built (using cached build)"
+else
+    # Remove any incomplete or contaminated BoringSSL directory
+    if [ -d "boringssl" ]; then
+        echo "Removing existing BoringSSL directory to ensure clean build..."
+        rm -rf boringssl
+    fi
 
-echo "Cloning BoringSSL..."
-git clone --depth 1 https://boringssl.googlesource.com/boringssl
+    echo "Cloning BoringSSL..."
+    git clone --depth 1 https://boringssl.googlesource.com/boringssl
 
-cd boringssl
-
-# Check if already built
-if [ ! -f "build/libssl.a" ]; then
+    cd boringssl
     echo "Building BoringSSL..."
 
     # Check for required tools
@@ -52,12 +52,6 @@ if [ ! -f "build/libssl.a" ]; then
 
     if ! command -v go &> /dev/null; then
         echo "WARNING: go not found. BoringSSL will build without some tests."
-    fi
-
-    # Clean build directory if it exists (in case of previous failed build)
-    if [ -d "build" ]; then
-        echo "Cleaning previous build..."
-        rm -rf build
     fi
 
     mkdir -p build
@@ -78,6 +72,7 @@ if [ ! -f "build/libssl.a" ]; then
     # BoringSSL's CMake is incorrectly trying to use Apple assembly files on Linux
     # Using -DOPENSSL_NO_ASM=1 forces pure C implementations instead
     echo "Building BoringSSL with assembly disabled to avoid platform detection issues..."
+    echo "(This may take 5-10 minutes on first build, but will be cached for subsequent builds)"
 
     cmake -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -95,8 +90,6 @@ if [ ! -f "build/libssl.a" ]; then
         echo "Cleaning up .git directory to save cache space..."
         rm -rf .git
     fi
-else
-    echo "✓ BoringSSL already built"
 fi
 
 cd "$VENDOR_DIR"
