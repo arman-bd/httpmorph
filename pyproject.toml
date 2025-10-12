@@ -23,6 +23,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: C",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -65,6 +67,8 @@ Issues = "https://github.com/arman-bd/httpmorph/issues"
 [tool.setuptools]
 packages = ["httpmorph"]
 package-dir = {"" = "src"}
+# Don't automatically include LICENSE file (causes PyPI upload issues)
+license-files = []
 
 [tool.setuptools.package-data]
 httpmorph = ["*.pyx", "*.pxd", "*.c", "*.h"]
@@ -115,3 +119,32 @@ markers = [
     "integration: marks tests that require network access",
     "ssl: marks tests that require SSL support",
 ]
+
+[tool.cibuildwheel]
+build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_* *-win32"
+build-verbosity = 1
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true",
+    "sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true",
+    "yum install -y cmake openssl-devel zlib-devel pkgconfig autoconf automake libtool golang || yum install -y openssl-devel zlib-devel pkgconfig autoconf automake libtool golang",
+]
+before-build = "bash scripts/setup_vendors.sh"
+
+[tool.cibuildwheel.macos]
+before-all = [
+    "brew install cmake ninja go",
+]
+before-build = "bash scripts/setup_vendors.sh"
+repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} {wheel} --ignore-missing-dependencies"
+
+[tool.cibuildwheel.windows]
+before-all = [
+    "choco install cmake ninja golang -y",
+]
+before-build = [
+    "bash scripts/setup_vendors.sh",
+]
+environment = { VCPKG_ROOT = "C:/vcpkg" }

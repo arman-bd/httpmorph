@@ -1,0 +1,138 @@
+name: Build Linux Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
+
+jobs:
+  build-linux:
+    name: Build Linux Wheels
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
+        restore-keys: |
+          vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
+
+    # Build wheels with cibuildwheel (handles manylinux containers)
+    # The vendor directory is mounted into the container and shared across Python versions
+    # The setup script will skip rebuilding if libraries already exist
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Build for specified Python versions
+        CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
+        # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
+        # The script will detect cached libraries and skip rebuilding
+
+    # Save vendor cache after build
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.8
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+          3.14
+        allow-prereleases: true
+
+    # Test the built wheels
+    - name: Test wheels
+      run: |
+        # Test each wheel that was built
+        for wheel in ./wheelhouse/*.whl; do
+          echo "========================================"
+          echo "Testing wheel: $(basename "$wheel")"
+          echo "========================================"
+
+          # Extract Python version from wheel filename (e.g., cp39, cp310)
+          python_tag=$(basename "$wheel" | grep -oE 'cp[0-9]+' | head -1)
+          python_version="${python_tag:2:1}.${python_tag:3}"
+
+          echo "Setting up Python $python_version..."
+
+          # Try to find the matching Python version
+          python_cmd=""
+          for cmd in "python${python_version}" "python3.${python_version#*.}" "python3"; do
+            if command -v "$cmd" &> /dev/null; then
+              # Verify this is the right version
+              version_check=$($cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+              if [ "$version_check" = "$python_version" ]; then
+                python_cmd="$cmd"
+                break
+              fi
+            fi
+          done
+
+          # Fall back to python3 if we couldn't find exact match
+          if [ -z "$python_cmd" ]; then
+            echo "WARNING: Python $python_version not found, using python3"
+            python_cmd="python3"
+          fi
+
+          echo "Using Python: $($python_cmd --version)"
+
+          # Install the wheel in a fresh environment
+          "$python_cmd" -m pip install --force-reinstall "$wheel"
+
+          # Run the test script
+          echo ""
+          echo "Running tests..."
+          "$python_cmd" scripts/test_local_build.py
+
+          # Check exit code
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "[OK] Wheel test PASSED: $(basename "$wheel")"
+          else
+            echo ""
+            echo "[FAIL] Wheel test FAILED: $(basename "$wheel")"
+            exit 1
+          fi
+
+          echo ""
+        done
+
+        echo "========================================"
+        echo "All wheel tests PASSED"
+        echo "========================================"
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-linux
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error

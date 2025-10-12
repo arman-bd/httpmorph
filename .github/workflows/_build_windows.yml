@@ -1,0 +1,176 @@
+name: Build Windows Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
+
+jobs:
+  build-windows:
+    name: Build Windows Wheels
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Install build tools
+    - name: Install build dependencies
+      run: |
+        choco install cmake ninja golang -y
+      shell: bash
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+        restore-keys: |
+          vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+
+    # Build vendor dependencies (always build to ensure clean state)
+    - name: Build vendor dependencies
+      run: |
+        bash scripts/windows/setup_vendors.sh
+      shell: bash
+
+    # Save vendor cache for next time
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+
+    # Verify vendor build
+    - name: Verify vendor build
+      run: |
+        echo "=== Vendor directory contents ==="
+        ls -la vendor/ || true
+        echo ""
+        echo "=== BoringSSL build ==="
+        ls -la vendor/boringssl/build/ || true
+        if [ -d "vendor/boringssl/build/ssl/Release" ]; then
+          echo "  ssl/Release:"
+          ls -la vendor/boringssl/build/ssl/Release/ || true
+        fi
+        if [ -d "vendor/boringssl/build/crypto/Release" ]; then
+          echo "  crypto/Release:"
+          ls -la vendor/boringssl/build/crypto/Release/ || true
+        fi
+        echo ""
+        echo "=== nghttp2 build ==="
+        ls -la vendor/nghttp2/build/ || true
+        if [ -d "vendor/nghttp2/build/lib/Release" ]; then
+          echo "  lib/Release:"
+          ls -la vendor/nghttp2/build/lib/Release/ || true
+        fi
+        echo ""
+        echo "=== zlib build ==="
+        ls -la vendor/zlib/build/ || true
+        if [ -d "vendor/zlib/build/Release" ]; then
+          echo "  Release:"
+          ls -la vendor/zlib/build/Release/ || true
+        fi
+      shell: bash
+
+    # Build wheels for all Python versions
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Skip before-build since we already built vendors
+        CIBW_BEFORE_BUILD: ""
+        # Build for specified Python versions
+        CIBW_BUILD: cp38-win_amd64 cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64 cp314-win_amd64
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.8
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+          3.14
+        allow-prereleases: true
+
+    # Test the built wheels
+    - name: Test wheels
+      run: |
+        # Test each wheel that was built
+        for wheel in ./wheelhouse/*.whl; do
+          echo "========================================"
+          echo "Testing wheel: $(basename "$wheel")"
+          echo "========================================"
+
+          # Extract Python version from wheel filename (e.g., cp39, cp310)
+          python_tag=$(basename "$wheel" | grep -oE 'cp[0-9]+' | head -1)
+          python_version="${python_tag:2:1}.${python_tag:3}"
+
+          echo "Setting up Python $python_version..."
+
+          # On Windows, use py launcher with minor version only
+          # Extract minor version (e.g., "3.10" -> "10")
+          minor_version="${python_version#*.}"
+
+          # Try py launcher first, then fall back to python
+          if py -3.$minor_version --version &> /dev/null; then
+            python_cmd="py -3.$minor_version"
+          elif python --version 2>&1 | grep -q "Python $python_version"; then
+            python_cmd="python"
+          else
+            echo "WARNING: Python $python_version not found, using default python"
+            python_cmd="python"
+          fi
+
+          echo "Using Python: $($python_cmd --version)"
+
+          # Install the wheel in a fresh environment
+          $python_cmd -m pip install --force-reinstall "$wheel"
+
+          # Run the test script
+          echo ""
+          echo "Running tests..."
+          $python_cmd scripts/test_local_build.py
+
+          # Check exit code
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "[OK] Wheel test PASSED: $(basename "$wheel")"
+          else
+            echo ""
+            echo "[FAIL] Wheel test FAILED: $(basename "$wheel")"
+            exit 1
+          fi
+
+          echo ""
+        done
+
+        echo "========================================"
+        echo "All wheel tests PASSED"
+        echo "========================================"
+      shell: bash
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-windows
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error
