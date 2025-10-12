@@ -67,6 +67,8 @@ Issues = "https://github.com/arman-bd/httpmorph/issues"
 [tool.setuptools]
 packages = ["httpmorph"]
 package-dir = {"" = "src"}
+# Don't automatically include LICENSE file (causes PyPI upload issues)
+license-files = []
 
 [tool.setuptools.package-data]
 httpmorph = ["*.pyx", "*.pxd", "*.c", "*.h"]
