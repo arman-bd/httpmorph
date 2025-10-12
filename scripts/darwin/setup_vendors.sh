@@ -27,10 +27,15 @@ cd "$VENDOR_DIR"
 #
 echo "==> Setting up BoringSSL..."
 
-if [ ! -d "boringssl" ]; then
-    echo "Cloning BoringSSL..."
-    git clone --depth 1 https://boringssl.googlesource.com/boringssl
+# Always remove and re-clone BoringSSL to ensure clean state
+# This prevents platform cross-contamination (e.g., Linux files on macOS runners)
+if [ -d "boringssl" ]; then
+    echo "Removing existing BoringSSL directory to ensure clean build..."
+    rm -rf boringssl
 fi
+
+echo "Cloning BoringSSL..."
+git clone --depth 1 https://boringssl.googlesource.com/boringssl
 
 cd boringssl
 
@@ -46,6 +51,12 @@ if [ ! -f "build/ssl/libssl.a" ] && [ ! -f "build/libssl.a" ]; then
 
     if ! command -v go &> /dev/null; then
         echo "WARNING: go not found. BoringSSL will build without some tests."
+    fi
+
+    # Clean build directory if it exists
+    if [ -d "build" ]; then
+        echo "Cleaning previous build..."
+        rm -rf build
     fi
 
     mkdir -p build
