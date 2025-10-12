@@ -22,7 +22,7 @@ on:
         description: "Python versions to test"
         value: ${{ jobs.config.outputs.python-matrix }}
 
-      # Primary OS/Python for single-runner jobs (benchmark, coverage, etc.)
+      # Primary OS/Python for single-runner jobs (coverage, etc.)
       primary-os:
         description: "Primary OS for single-runner jobs"
         value: ${{ jobs.config.outputs.primary-os }}
@@ -36,10 +36,6 @@ on:
         description: "Enable test job"
         value: ${{ jobs.config.outputs.enable-tests }}
 
-      enable-benchmark:
-        description: "Enable benchmark job"
-        value: ${{ jobs.config.outputs.enable-benchmark }}
-
 jobs:
   config:
     runs-on: ubuntu-latest
@@ -49,7 +45,6 @@ jobs:
       primary-os: ${{ steps.set-config.outputs.primary-os }}
       primary-python: ${{ steps.set-config.outputs.primary-python }}
       enable-tests: ${{ steps.set-config.outputs.enable-tests }}
-      enable-benchmark: ${{ steps.set-config.outputs.enable-benchmark }}
 
     steps:
       - id: set-config
@@ -66,11 +61,10 @@ jobs:
           # OS options: "windows-latest", "ubuntu-latest", "macos-latest"
 
           # Python versions to test
-          # Comment out any version you want to skip during development
           PYTHON_MATRIX='[
-            "3.9", "3.10", "3.11", "3.12"
+            "3.8", "3.11", "3.14"
           ]'
-          # Python versions: "3.9", "3.10", "3.11", "3.12"
+          # Python versions: "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"
 
           # Primary OS and Python for single-runner jobs
           PRIMARY_OS="ubuntu-latest"
@@ -79,7 +73,6 @@ jobs:
           # Enable/Disable Jobs
           # Set to "true" or "false"
           ENABLE_TESTS="true"
-          ENABLE_BENCHMARK="false"
 
           # ============================================================
           # END CONFIGURATION
@@ -94,11 +87,9 @@ jobs:
           echo "primary-os=$PRIMARY_OS" >> $GITHUB_OUTPUT
           echo "primary-python=$PRIMARY_PYTHON" >> $GITHUB_OUTPUT
           echo "enable-tests=$ENABLE_TESTS" >> $GITHUB_OUTPUT
-          echo "enable-benchmark=$ENABLE_BENCHMARK" >> $GITHUB_OUTPUT
 
           echo "✓ Configuration loaded:"
           echo "  OS: $OS_MATRIX_COMPACT"
           echo "  Python: $PYTHON_MATRIX_COMPACT"
           echo "  Primary: $PRIMARY_OS / $PRIMARY_PYTHON"
           echo "  Tests: $ENABLE_TESTS"
-          echo "  Benchmark: $ENABLE_BENCHMARK"

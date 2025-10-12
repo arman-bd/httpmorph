@@ -313,7 +313,8 @@ static int configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) {
         }
 
         if (nid_count > 0) {
-            SSL_CTX_set1_curves(ctx, nids, nid_count);
+            /* BoringSSL uses SSL_CTX_set1_groups (curves are now called groups) */
+            SSL_CTX_set1_groups(ctx, nids, nid_count);
         }
     }
 
@@ -357,10 +358,8 @@ int httpmorph_init(void) {
     }
 #endif
 
-    /* Initialize BoringSSL */
-    SSL_library_init();
-    SSL_load_error_strings();
-    OpenSSL_add_all_algorithms();
+    /* Initialize BoringSSL - no explicit initialization needed */
+    /* BoringSSL initializes automatically, unlike old OpenSSL versions */
 
     /* Create default I/O engine */
     default_io_engine = io_engine_create(256);

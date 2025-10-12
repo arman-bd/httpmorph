@@ -1,0 +1,165 @@
+name: Build macOS Wheels
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: 'Python versions to build for'
+        required: false
+        type: string
+        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
+
+jobs:
+  build-macos:
+    name: Build macOS Wheels
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Install build tools
+    - name: Install build dependencies
+      run: |
+        brew install cmake ninja go
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Cache vendor dependencies to speed up builds
+    - name: Restore vendor cache
+      id: cache-vendor
+      uses: actions/cache/restore@v4
+      with:
+        path: vendor
+        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+        restore-keys: |
+          vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+
+    # Build vendor dependencies (always build to ensure clean state)
+    - name: Build vendor dependencies
+      run: |
+        bash scripts/darwin/setup_vendors.sh
+
+    # Save vendor cache for next time
+    - name: Save vendor cache
+      if: steps.cache-vendor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: vendor
+        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+
+    # Verify vendor build
+    - name: Verify vendor build
+      run: |
+        echo "=== Vendor directory contents ==="
+        ls -la vendor/ || true
+        echo ""
+        echo "=== BoringSSL build ==="
+        ls -la vendor/boringssl/build/ || true
+        if [ -d "vendor/boringssl/build/ssl" ]; then
+          echo "  ssl:"
+          ls -la vendor/boringssl/build/ssl/ || true
+        fi
+        if [ -d "vendor/boringssl/build/crypto" ]; then
+          echo "  crypto:"
+          ls -la vendor/boringssl/build/crypto/ || true
+        fi
+        echo ""
+        echo "=== nghttp2 install ==="
+        ls -la vendor/nghttp2/install/ || true
+        if [ -d "vendor/nghttp2/install/lib" ]; then
+          echo "  lib:"
+          ls -la vendor/nghttp2/install/lib/ || true
+        fi
+
+    # Build wheels for all Python versions
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.22.0
+      env:
+        # Skip before-build since we already built vendors
+        CIBW_BEFORE_BUILD: ""
+        # Build for specified Python versions (universal2 for both Intel and Apple Silicon)
+        CIBW_BUILD: cp38-macosx_* cp39-macosx_* cp310-macosx_* cp311-macosx_* cp312-macosx_* cp313-macosx_* cp314-macosx_*
+        # Use delocate to bundle dependencies
+        CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} {wheel} --ignore-missing-dependencies"
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.8
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+          3.14
+        allow-prereleases: true
+
+    # Test the built wheels
+    - name: Test wheels
+      run: |
+        # Test each wheel that was built
+        for wheel in ./wheelhouse/*.whl; do
+          echo "========================================"
+          echo "Testing wheel: $(basename "$wheel")"
+          echo "========================================"
+
+          # Extract Python version from wheel filename (e.g., cp39, cp310)
+          python_tag=$(basename "$wheel" | grep -oE 'cp[0-9]+' | head -1)
+          python_version="${python_tag:2:1}.${python_tag:3}"
+
+          echo "Setting up Python $python_version..."
+
+          # Use the appropriate Python version
+          python_cmd="python${python_version}"
+          if ! command -v "$python_cmd" &> /dev/null; then
+            python_cmd="python3"
+          fi
+
+          # Upgrade pip to ensure we have the latest features
+          "$python_cmd" -m pip install --upgrade pip || true
+
+          # Install the wheel in a fresh environment
+          # Use --break-system-packages if supported (pip >= 22.1)
+          if "$python_cmd" -m pip install --help | grep -q "break-system-packages"; then
+            "$python_cmd" -m pip install --force-reinstall --break-system-packages "$wheel"
+          else
+            "$python_cmd" -m pip install --force-reinstall "$wheel"
+          fi
+
+          # Run the test script
+          echo ""
+          echo "Running tests..."
+          "$python_cmd" scripts/test_local_build.py
+
+          # Check exit code
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "[OK] Wheel test PASSED: $(basename "$wheel")"
+          else
+            echo ""
+            echo "[FAIL] Wheel test FAILED: $(basename "$wheel")"
+            exit 1
+          fi
+
+          echo ""
+        done
+
+        echo "========================================"
+        echo "All wheel tests PASSED"
+        echo "========================================"
+
+    # Upload wheels as artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: wheels-macos
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error
