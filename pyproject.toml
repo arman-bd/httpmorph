@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "httpmorph"
 version = "0.1.0"
-description = "Morph into any browser - High-performance HTTP client with dynamic fingerprinting using C, io_uring, and BoringSSL"
+description = "A Python HTTP client focused on mimicking browser fingerprints."
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Arman", email = "arman@bytetunnels.com"}
+    {name = "Arman Hossain", email = "arman@bytetunnels.com"}
 ]
 keywords = ["http", "https", "client", "performance", "anti-fingerprint", "tls", "ja3", "http2"]
 classifiers = [
@@ -44,13 +44,6 @@ dev = [
     "filelock>=3.12.0",  # For test fixtures
     "mypy>=1.0",
     "ruff>=0.7.0",
-]
-benchmark = [
-    "requests>=2.31.0",
-    "httpx>=0.25.0",
-    "aiohttp>=3.9.0",
-    "pycurl>=7.45.0",
-    "matplotlib>=3.7.0",
 ]
 build = [
     "setuptools>=68.0",
