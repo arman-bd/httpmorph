@@ -1170,7 +1170,7 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
     /* Add default headers if missing */
     if (!has_user_agent) {
         /* Use request's user agent if set, otherwise use generic */
-        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.0";
+        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.0-alpha.1";
         p += snprintf(p, SNPRINTF_SIZE(end - p), "User-Agent: %s\r\n", user_agent);
     }
     if (!has_accept) {
