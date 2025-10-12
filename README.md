@@ -175,6 +175,30 @@ session.post('https://example.com/form', data={'key': 'value'})
 print(session.cookies)
 ```
 
+### Proxy Support
+
+```python
+# HTTP proxy
+response = httpmorph.get(
+    'https://example.com',
+    proxy='http://proxy.example.com:8080'
+)
+
+# Proxy with authentication
+response = httpmorph.get(
+    'https://example.com',
+    proxy='http://proxy.example.com:8080',
+    proxy_auth=('username', 'password')
+)
+
+# requests-compatible dict format
+proxies = {
+    'http': 'http://proxy.example.com:8080',
+    'https': 'http://proxy.example.com:8080'
+}
+response = httpmorph.get('https://example.com', proxies=proxies)
+```
+
 ### Error Handling
 
 ```python
@@ -193,7 +217,6 @@ except httpmorph.HTTPError as e:
 
 This library is a work in progress. Known limitations:
 
-- No proxy support
 - No SSL verification configuration
 - No connection pooling
 - No streaming requests/responses
