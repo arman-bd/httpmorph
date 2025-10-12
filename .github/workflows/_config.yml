@@ -61,11 +61,10 @@ jobs:
           # OS options: "windows-latest", "ubuntu-latest", "macos-latest"
 
           # Python versions to test
-          # Comment out any version you want to skip during development
           PYTHON_MATRIX='[
-            "3.11"
+            "3.8", "3.11", "3.14"
           ]'
-          # Python versions: "3.9", "3.10", "3.11", "3.12"
+          # Python versions: "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"
 
           # Primary OS and Python for single-runner jobs
           PRIMARY_OS="ubuntu-latest"

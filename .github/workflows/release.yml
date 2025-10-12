@@ -2,9 +2,7 @@ name: Release
 
 on:
   push:
-    branches:
-      - develop
-    # tags: ['v*']
+    tags: ['v*']
 
 jobs:
   # Configuration - Edit this section to enable/disable tests
