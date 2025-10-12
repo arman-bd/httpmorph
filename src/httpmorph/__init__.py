@@ -8,8 +8,8 @@ Built from scratch in C with BoringSSL. No fallback implementations.
 
 import sys
 
-__version__ = "0.1.0"
-__author__ = "Arman"
+__version__ = "0.1.0-alpha.1"
+__author__ = "Arman Hossain"
 __license__ = "MIT"
 
 # Import C implementation (required - no fallback!)
