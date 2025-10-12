@@ -7,7 +7,7 @@ on:
         description: 'Python versions to build for'
         required: false
         type: string
-        default: '["3.10", "3.11", "3.12"]'
+        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
 
 jobs:
   build-windows:
@@ -96,16 +96,21 @@ jobs:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
         # Build for specified Python versions
-        CIBW_BUILD: cp310-win_amd64 cp311-win_amd64 cp312-win_amd64
+        CIBW_BUILD: cp38-win_amd64 cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64 cp314-win_amd64
 
     # Setup Python versions for testing
     - name: Setup Python versions
       uses: actions/setup-python@v5
       with:
         python-version: |
+          3.8
+          3.9
           3.10
           3.11
           3.12
+          3.13
+          3.14
+        allow-prereleases: true
 
     # Test the built wheels
     - name: Test wheels

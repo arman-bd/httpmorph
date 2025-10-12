@@ -7,7 +7,7 @@ name = "httpmorph"
 version = "0.1.0"
 description = "Morph into any browser - High-performance HTTP client with dynamic fingerprinting using C, io_uring, and BoringSSL"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
     {name = "Arman", email = "arman@bytetunnels.com"}
@@ -18,9 +18,13 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: C",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -69,7 +73,7 @@ httpmorph = ["*.pyx", "*.pxd", "*.c", "*.h"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py38"
 fix = true
 
 [tool.ruff.lint]
@@ -95,7 +99,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -115,7 +119,7 @@ markers = [
 ]
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-*"
+build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_* *-win32"
 build-verbosity = 1
 
