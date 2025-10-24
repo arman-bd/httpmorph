@@ -881,4 +881,4 @@ def version():
     """Get library version"""
     if HAS_C_EXTENSION:
         return _httpmorph.version()
-    return "0.1.0-alpha.1"
+    return "0.1.2"
