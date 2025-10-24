@@ -28,9 +28,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = [
-    "python-dotenv>=1.0.1",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
