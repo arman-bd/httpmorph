@@ -13,6 +13,13 @@ from http.client import responses as http_responses
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
+# Try to import orjson for faster JSON encoding (2-3x faster than stdlib)
+try:
+    import orjson
+    HAS_ORJSON = True
+except ImportError:
+    HAS_ORJSON = False
+
 # On Windows, add DLL search paths for dependencies
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
     # Add vcpkg DLL directory
@@ -137,7 +144,11 @@ class PreparedRequest:
         self.headers = headers or {}
 
         if json is not None:
-            self.body = _json.dumps(json).encode("utf-8")
+            # Use orjson if available (2-3x faster than stdlib json)
+            if HAS_ORJSON:
+                self.body = orjson.dumps(json)  # orjson.dumps returns bytes directly
+            else:
+                self.body = _json.dumps(json).encode("utf-8")
             self.headers["Content-Type"] = "application/json"
         elif data is not None:
             self.body = data if isinstance(data, bytes) else str(data).encode("utf-8")
@@ -152,7 +163,10 @@ class Response:
         self.status_code = c_response_dict["status_code"]
         self.headers = c_response_dict["headers"]
         self.body = c_response_dict["body"]
-        self.http_version = self._format_http_version(c_response_dict["http_version"])
+
+        # Store raw http_version enum for lazy formatting
+        self._http_version_enum = c_response_dict["http_version"]
+        self._http_version = None
 
         # Timing information (in microseconds)
         self.connect_time_us = c_response_dict["connect_time_us"]
@@ -165,12 +179,9 @@ class Response:
         self.tls_cipher = c_response_dict["tls_cipher"]
         self.ja3_fingerprint = c_response_dict["ja3_fingerprint"]
 
-        # Decode body as text
+        # Lazy text decoding (decode only when accessed)
+        self._text = None
         self._encoding = None
-        try:
-            self.text = self.body.decode("utf-8")
-        except (UnicodeDecodeError, AttributeError):
-            self.text = self.body.decode("latin-1", errors="replace")
 
         # Error information
         self.error = c_response_dict["error"]
@@ -182,7 +193,7 @@ class Response:
         # Requests-compatible attributes
         self.url = url or c_response_dict.get("url", "")
         self.history = []
-        self.raw = io.BytesIO(self.body) if self.body else io.BytesIO()
+        self._raw = None  # Lazy raw attribute
         self.links = {}
 
     def _format_http_version(self, version_enum):
@@ -196,9 +207,33 @@ class Response:
         return version_map.get(version_enum, "1.1")
 
     @property
+    def http_version(self):
+        """Get HTTP version string (lazy evaluation)"""
+        if self._http_version is None:
+            self._http_version = self._format_http_version(self._http_version_enum)
+        return self._http_version
+
+    @property
     def content(self):
         """Alias for body (requests compatibility)"""
         return self.body
+
+    @property
+    def text(self):
+        """Decode body as text (lazy evaluation)"""
+        if self._text is None:
+            try:
+                self._text = self.body.decode("utf-8")
+            except (UnicodeDecodeError, AttributeError):
+                self._text = self.body.decode("latin-1", errors="replace") if self.body else ""
+        return self._text
+
+    @property
+    def raw(self):
+        """Raw response body as file-like object (lazy evaluation)"""
+        if self._raw is None:
+            self._raw = io.BytesIO(self.body) if self.body else io.BytesIO()
+        return self._raw
 
     @property
     def ok(self):

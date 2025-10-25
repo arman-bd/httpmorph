@@ -376,8 +376,31 @@ if IS_WINDOWS:
     else:
         zlib_lib_name = "zlib"
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
+    EXT_LINK_ARGS = []  # No special linker flags for Windows
 else:
-    EXT_COMPILE_ARGS = ["-std=c11", "-O2", "-DHAVE_NGHTTP2"]
+    # More aggressive optimizations for Unix/macOS
+    import platform
+    EXT_COMPILE_ARGS = [
+        "-std=c11",
+        "-O3",  # More aggressive optimization than -O2
+        "-DHAVE_NGHTTP2",
+    ]
+
+    # Add CPU-specific optimizations
+    machine = platform.machine()
+    if machine in ('arm64', 'aarch64'):
+        # ARM (Apple Silicon, etc.)
+        EXT_COMPILE_ARGS.append("-mcpu=native")
+    elif machine in ('x86_64', 'AMD64'):
+        # x86_64
+        EXT_COMPILE_ARGS.append("-march=native")
+
+    # Add Link-Time Optimization for even better performance
+    EXT_COMPILE_ARGS.append("-flto")
+
+    # Linker flags (must include -flto for LTO to work)
+    EXT_LINK_ARGS = ["-flto"]
+
     # Unix library names
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
@@ -412,6 +435,7 @@ extensions = [
         sources=[
             str(BINDINGS_DIR / "_httpmorph.pyx"),
             str(CORE_DIR / "httpmorph.c"),
+            str(CORE_DIR / "connection_pool.c"),
             str(CORE_DIR / "io_engine.c"),
             str(TLS_DIR / "browser_profiles.c"),
         ],
@@ -419,6 +443,7 @@ extensions = [
         library_dirs=LIBRARY_DIRS,
         libraries=EXT_LIBRARIES,
         extra_compile_args=EXT_COMPILE_ARGS,
+        extra_link_args=EXT_LINK_ARGS,
         language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
     ),
     # HTTP/2 client extension
@@ -431,7 +456,8 @@ extensions = [
         include_dirs=[str(CORE_DIR)] + [LIB_PATHS["openssl_include"], LIB_PATHS["nghttp2_include"]],
         library_dirs=LIBRARY_DIRS,
         libraries=EXT_LIBRARIES,
-        extra_compile_args=EXT_COMPILE_ARGS if IS_WINDOWS else ["-std=c11", "-O2"],
+        extra_compile_args=EXT_COMPILE_ARGS,
+        extra_link_args=EXT_LINK_ARGS,
         language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
     ),
 ]

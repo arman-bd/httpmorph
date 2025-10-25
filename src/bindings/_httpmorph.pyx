@@ -53,6 +53,7 @@ cdef extern from "../include/httpmorph.h":
     # Forward declarations
     ctypedef struct httpmorph_client_t
     ctypedef struct httpmorph_session_t
+    ctypedef struct httpmorph_pool
 
     # Forward declarations
     ctypedef struct httpmorph_request_t
@@ -94,7 +95,7 @@ cdef extern from "../include/httpmorph.h":
     int httpmorph_request_set_body(httpmorph_request_t *request, const uint8_t *body, size_t body_len) nogil
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
     void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
-    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request) nogil
+    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool *pool) nogil
 
     # Response API
     void httpmorph_response_destroy(httpmorph_response *response) nogil
@@ -243,8 +244,9 @@ cdef class Client:
                 httpmorph_request_set_body(req, <const uint8_t*>body, len(body))
 
             # Execute request (release GIL to allow other Python threads to run)
+            # Client doesn't have connection pooling - pass NULL for pool
             with nogil:
-                resp = httpmorph_request_execute(self._client, req)
+                resp = httpmorph_request_execute(self._client, req, NULL)
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 

@@ -167,10 +167,12 @@ void httpmorph_client_destroy(httpmorph_client_t *client);
 
 /**
  * Execute a synchronous HTTP request
+ * @param pool Optional connection pool for connection reuse (pass NULL if not using pooling)
  */
 httpmorph_response_t* httpmorph_request_execute(
     httpmorph_client_t *client,
-    const httpmorph_request_t *request
+    const httpmorph_request_t *request,
+    httpmorph_pool_t *pool
 );
 
 /* Request helpers */

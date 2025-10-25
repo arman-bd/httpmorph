@@ -69,3 +69,4 @@ benchmarks/results/
 # Environment variables
 .env
 examples/.env
+.plan/
