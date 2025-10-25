@@ -22,6 +22,13 @@ typedef struct pooled_connection pooled_connection_t;
 #define POOL_IDLE_TIMEOUT_SECONDS 30       /* Close after 30s idle */
 #define POOL_MAX_HOST_KEY_LEN 256          /* "hostname:port" max length */
 
+/* Connection state (following httpcore's pattern) */
+typedef enum {
+    POOL_CONN_IDLE = 0,      /* Connection available for reuse */
+    POOL_CONN_ACTIVE = 1,    /* Connection currently processing request */
+    POOL_CONN_CLOSED = 2     /* Connection closed/invalid */
+} pool_connection_state_t;
+
 /**
  * Pooled connection structure
  * Represents a reusable connection to a specific host:port
@@ -38,6 +45,8 @@ struct pooled_connection {
     time_t last_used;                       /* Unix timestamp */
     bool is_http2;                          /* HTTP/2 connection */
     bool is_valid;                          /* Connection still alive */
+    bool preface_sent;                      /* HTTP/2 preface already sent on this connection */
+    pool_connection_state_t state;          /* Current connection state */
 
 #ifdef HAVE_NGHTTP2
     /* HTTP/2 session (only if is_http2 is true) */

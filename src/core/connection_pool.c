@@ -9,6 +9,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef HAVE_NGHTTP2
+    #include <nghttp2/nghttp2.h>
+#endif
+
 /* Platform-specific includes */
 #ifdef _WIN32
     #include <winsock2.h>
@@ -135,11 +139,8 @@ bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
         return false;
     }
 
-    /* Validate connection before pooling */
-    if (!pool_connection_validate(conn)) {
-        pool_connection_destroy(conn);
-        return false;
-    }
+    /* Skip validation on put - we'll validate on get instead.
+     * This saves 4 fcntl() system calls per request. */
 
     /* Check if pool is full */
     if (pool->total_connections >= pool->max_total_connections) {
@@ -189,18 +190,6 @@ pooled_connection_t* pool_connection_create(const char *host,
         }
     #endif
 
-    /* Drain any pending SSL buffer data before pooling */
-    if (ssl) {
-        int pending = SSL_pending(ssl);
-        if (pending > 0) {
-            char drain_buf[4096];
-            while (SSL_pending(ssl) > 0) {
-                int n = SSL_read(ssl, drain_buf, sizeof(drain_buf));
-                if (n <= 0) break;
-            }
-        }
-    }
-
     pooled_connection_t *conn = calloc(1, sizeof(pooled_connection_t));
     if (!conn) {
         return NULL;
@@ -214,8 +203,15 @@ pooled_connection_t* pool_connection_create(const char *host,
     conn->ssl = ssl;
     conn->is_http2 = is_http2;
     conn->is_valid = true;
+    conn->preface_sent = false;  /* Will be set to true after first HTTP/2 preface */
+    conn->state = POOL_CONN_IDLE;
     conn->last_used = time(NULL);
     conn->next = NULL;
+
+#ifdef HAVE_NGHTTP2
+    conn->http2_session = NULL;
+    conn->http2_stream_data = NULL;
+#endif
 
     return conn;
 }
@@ -224,6 +220,17 @@ void pool_connection_destroy(pooled_connection_t *conn) {
     if (!conn) {
         return;
     }
+
+#ifdef HAVE_NGHTTP2
+    /* Destroy HTTP/2 session if present */
+    if (conn->http2_session) {
+        /* nghttp2_session* */
+        nghttp2_session *session = (nghttp2_session *)conn->http2_session;
+        nghttp2_session_del(session);
+        conn->http2_session = NULL;
+    }
+    /* Note: http2_stream_data is managed separately and freed when session ends */
+#endif
 
     /* Close SSL */
     if (conn->ssl) {
@@ -244,99 +251,20 @@ bool pool_connection_validate(pooled_connection_t *conn) {
         return false;
     }
 
-    /* Check SSL shutdown state if this is an SSL connection */
+    /* For SSL connections, just check shutdown state */
     if (conn->ssl) {
         int shutdown_state = SSL_get_shutdown(conn->ssl);
         if (shutdown_state != 0) {
             return false;
         }
-
-        /* For SSL connections, use SSL_peek() to check if SSL session is alive */
-        /* Set socket to non-blocking temporarily */
-        #ifdef _WIN32
-            u_long mode = 1;
-            ioctlsocket(conn->sockfd, FIONBIO, &mode);
-        #else
-            int flags = fcntl(conn->sockfd, F_GETFL, 0);
-            if (flags == -1) {
-                return false;
-            }
-            if (fcntl(conn->sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-                return false;
-            }
-        #endif
-
-        /* Try to peek at SSL data */
-        char buf[1];
-        int result = SSL_peek(conn->ssl, buf, 1);
-
-        /* Restore blocking mode */
-        #ifdef _WIN32
-            mode = 0;
-            ioctlsocket(conn->sockfd, FIONBIO, &mode);
-        #else
-            fcntl(conn->sockfd, F_SETFL, flags & ~O_NONBLOCK);
-        #endif
-
-        if (result <= 0) {
-            int ssl_error = SSL_get_error(conn->ssl, result);
-            /* SSL_ERROR_WANT_READ (2) means no data available, which is OK */
-            if (ssl_error != SSL_ERROR_WANT_READ && ssl_error != SSL_ERROR_WANT_WRITE) {
-                /* SSL session is closed or has error */
-                return false;
-            }
-        }
-    } else {
-        /* For non-SSL connections, use regular MSG_PEEK */
-        char buf[1];
-        #ifdef _WIN32
-            /* Set to non-blocking */
-            u_long mode = 1;
-            ioctlsocket(conn->sockfd, FIONBIO, &mode);
-
-            int result = recv(conn->sockfd, buf, 1, MSG_PEEK);
-
-            /* Restore to blocking */
-            mode = 0;
-            ioctlsocket(conn->sockfd, FIONBIO, &mode);
-
-            if (result == SOCKET_ERROR) {
-                int error = WSAGetLastError();
-                if (error != WSAEWOULDBLOCK) {
-                    return false;  /* Socket is dead */
-                }
-            }
-        #else
-            /* Set socket to non-blocking for peek */
-            int flags = fcntl(conn->sockfd, F_GETFL, 0);
-            if (flags == -1) {
-                return false;
-            }
-
-            if (fcntl(conn->sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-                return false;
-            }
-
-            int result = recv(conn->sockfd, buf, 1, MSG_PEEK);
-            int saved_errno = errno;
-
-            /* Always restore to blocking mode explicitly */
-            fcntl(conn->sockfd, F_SETFL, flags & ~O_NONBLOCK);
-
-            if (result == 0) {
-                /* Connection closed by peer */
-                return false;
-            } else if (result < 0) {
-                /* Check errno */
-                if (saved_errno != EAGAIN && saved_errno != EWOULDBLOCK) {
-                    /* Real error - connection is dead */
-                    return false;
-                }
-                /* EAGAIN/EWOULDBLOCK means no data available, which is fine */
-            }
-        #endif
+        /* Trust the connection - if it fails, we'll handle it during actual use */
+        return true;
     }
 
+    /* For non-SSL connections, also just trust them */
+    /* The cost of validation (fcntl, recv) is higher than just trying to use
+     * the connection and handling failures. If the connection is dead, the
+     * next request will fail and we'll create a new one. */
     return true;
 }
 
