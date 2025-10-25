@@ -182,6 +182,7 @@ class Response:
         # Lazy text decoding (decode only when accessed)
         self._text = None
         self._encoding = None
+        self._json = None  # Lazy JSON decoding
 
         # Error information
         self.error = c_response_dict["error"]
@@ -227,6 +228,27 @@ class Response:
             except (UnicodeDecodeError, AttributeError):
                 self._text = self.body.decode("latin-1", errors="replace") if self.body else ""
         return self._text
+
+    def json(self, **kwargs):
+        """Decode body as JSON (lazy evaluation with orjson if available)"""
+        if self._json is None:
+            if not self.body:
+                raise ValueError("No JSON content in response")
+
+            if HAS_ORJSON:
+                # orjson.loads is 2-3x faster than json.loads
+                try:
+                    self._json = orjson.loads(self.body)
+                except orjson.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON: {e}") from e
+            else:
+                # Fall back to stdlib json
+                try:
+                    self._json = _json.loads(self.text)
+                except _json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON: {e}") from e
+
+        return self._json
 
     @property
     def raw(self):
@@ -279,10 +301,6 @@ class Response:
         """Detect encoding from content (simplified)"""
         # Simple detection - could be enhanced with chardet
         return "utf-8"
-
-    def json(self, **kwargs):
-        """Parse response body as JSON"""
-        return _json.loads(self.text, **kwargs)
 
     def raise_for_status(self):
         """Raise HTTPError if status code indicates an error"""

@@ -91,7 +91,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/bio.h>
-#include <openssl/md5.h>
+#include <openssl/evp.h>
 
 /* HTTP/2 support */
 #ifdef HAVE_NGHTTP2
@@ -1111,9 +1111,22 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         *p = '\0';
     }
 
-    /* Calculate MD5 hash of the JA3 string */
-    unsigned char md5_digest[MD5_DIGEST_LENGTH];
-    MD5((unsigned char*)ja3_string, strlen(ja3_string), md5_digest);
+    /* Calculate MD5 hash of the JA3 string using EVP interface */
+    unsigned char md5_digest[16];  /* MD5 produces 16 bytes */
+    unsigned int md5_len = 0;
+
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (!mdctx) {
+        return NULL;
+    }
+
+    if (EVP_DigestInit_ex(mdctx, EVP_md5(), NULL) != 1 ||
+        EVP_DigestUpdate(mdctx, ja3_string, strlen(ja3_string)) != 1 ||
+        EVP_DigestFinal_ex(mdctx, md5_digest, &md5_len) != 1) {
+        EVP_MD_CTX_free(mdctx);
+        return NULL;
+    }
+    EVP_MD_CTX_free(mdctx);
 
     /* Convert MD5 to hex string */
     char *ja3_hash = malloc(33);  /* 32 hex chars + null terminator */
@@ -1121,7 +1134,7 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         return NULL;
     }
 
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+    for (int i = 0; i < 16; i++) {
         snprintf(ja3_hash + (i * 2), 3, "%02x", md5_digest[i]);
     }
     ja3_hash[32] = '\0';
@@ -1678,11 +1691,12 @@ static int http2_request(SSL *ssl, const httpmorph_request_t *request,
 
 /* Helper: Receive HTTP response */
 static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *response,
-                              uint64_t *first_byte_time_us, bool *conn_will_close) {
+                              uint64_t *first_byte_time_us, bool *conn_will_close, httpmorph_method_t method) {
     char buffer[16384];
     size_t buffer_pos = 0;
     bool headers_complete = false;
     size_t content_length = 0;
+    bool is_head_request = (method == HTTPMORPH_HEAD);
     bool chunked = false;
     uint64_t first_byte_time = 0;
 
@@ -1794,7 +1808,6 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
 
     /* Read response body */
     size_t body_received = 0;
-    bool connection_will_close = false;  /* Track if we need to read until EOF */
 
     /* Copy any body data already in buffer */
     if (body_in_buffer > 0) {
@@ -1806,6 +1819,15 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
         }
         memcpy(response->body, body_start, body_in_buffer);
         body_received = body_in_buffer;
+    }
+
+    /* For HEAD requests, never read body even if Content-Length is present */
+    if (is_head_request) {
+        response->body_len = 0;
+        if (first_byte_time_us) {
+            *first_byte_time_us = first_byte_time;
+        }
+        return 0;
     }
 
     /* Allocate body buffer and read based on Content-Length if known */
@@ -1856,7 +1878,6 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
         }
     } else {
         /* No content length - read until EOF */
-        connection_will_close = true;  /* Server will close connection */
         if (conn_will_close) *conn_will_close = true;
         while (body_received < response->body_capacity - 1024) {
             int n;
@@ -2184,7 +2205,7 @@ httpmorph_response_t* httpmorph_request_execute(
     /* 4. Receive HTTP/1.x Response */
     uint64_t first_byte_time = 0;
     bool connection_will_close = false;
-    int recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close);
+    int recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close, request->method);
 
     /* If pooled connection failed, retry with new connection */
     if (recv_result != 0 && pooled_conn) {
@@ -2233,7 +2254,7 @@ httpmorph_response_t* httpmorph_request_execute(
         }
 
         /* Retry receiving response */
-        recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close);
+        recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close, request->method);
     }
 
     if (recv_result == 0) {
@@ -2323,14 +2344,9 @@ cleanup:
             sockfd = -1;
             ssl = NULL;
             pooled_conn = NULL;  /* Clear so we don't double-free */
-        } else if (conn_to_pool && !pooled_conn) {
-            /* Failed to pool new connection - destroy the wrapper */
-            pool_connection_destroy(conn_to_pool);
-            sockfd = -1;
-            ssl = NULL;
-        } else if (pooled_conn) {
-            /* Failed to re-pool existing connection - destroy it */
-            pool_connection_destroy(pooled_conn);
+        } else if (conn_to_pool || pooled_conn) {
+            /* Failed to pool connection - pool_put_connection already destroyed it */
+            /* Just clear our references to avoid double-free */
             sockfd = -1;
             ssl = NULL;
             pooled_conn = NULL;

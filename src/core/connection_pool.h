@@ -39,6 +39,12 @@ struct pooled_connection {
     bool is_http2;                          /* HTTP/2 connection */
     bool is_valid;                          /* Connection still alive */
 
+#ifdef HAVE_NGHTTP2
+    /* HTTP/2 session (only if is_http2 is true) */
+    void *http2_session;                    /* nghttp2_session* */
+    void *http2_stream_data;                /* http2_stream_data_t* - persistent callback data */
+#endif
+
     /* Linked list */
     pooled_connection_t *next;
 };
