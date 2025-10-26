@@ -53,6 +53,7 @@ cdef extern from "../include/httpmorph.h":
     # Forward declarations
     ctypedef struct httpmorph_client_t
     ctypedef struct httpmorph_session_t
+    ctypedef struct httpmorph_pool
 
     # Forward declarations
     ctypedef struct httpmorph_request_t
@@ -94,7 +95,8 @@ cdef extern from "../include/httpmorph.h":
     int httpmorph_request_set_body(httpmorph_request_t *request, const uint8_t *body, size_t body_len) nogil
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
     void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
-    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request) nogil
+    void httpmorph_request_set_http2(httpmorph_request_t *request, bint enabled) nogil
+    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool *pool) nogil
 
     # Response API
     void httpmorph_response_destroy(httpmorph_response *response) nogil
@@ -187,6 +189,10 @@ cdef class Client:
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
 
+            # Set HTTP/2 flag if provided (default is False)
+            http2 = kwargs.get('http2', False)
+            httpmorph_request_set_http2(req, http2)
+
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')
             proxy_auth = kwargs.get('proxy_auth')
@@ -225,7 +231,7 @@ cdef class Client:
 
             # Add default headers that will be added by C code if not present
             if 'User-Agent' not in request_headers:
-                request_headers['User-Agent'] = 'httpmorph/0.1.2'
+                request_headers['User-Agent'] = 'httpmorph/0.1.3'
             if 'Accept' not in request_headers:
                 request_headers['Accept'] = '*/*'
             if 'Connection' not in request_headers:
@@ -243,8 +249,9 @@ cdef class Client:
                 httpmorph_request_set_body(req, <const uint8_t*>body, len(body))
 
             # Execute request (release GIL to allow other Python threads to run)
+            # Client doesn't have connection pooling - pass NULL for pool
             with nogil:
-                resp = httpmorph_request_execute(self._client, req)
+                resp = httpmorph_request_execute(self._client, req, NULL)
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 
@@ -385,6 +392,10 @@ cdef class Session:
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
 
+            # Set HTTP/2 flag if provided (default is False)
+            http2 = kwargs.get('http2', False)
+            httpmorph_request_set_http2(req, http2)
+
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')
             proxy_auth = kwargs.get('proxy_auth')
@@ -464,7 +475,7 @@ cdef class Session:
                 'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
                 'edge': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
             }
-            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.2')
+            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.3')
 
             # Add browser-specific User-Agent header if not already set
             has_user_agent = False

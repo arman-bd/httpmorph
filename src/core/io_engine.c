@@ -26,6 +26,11 @@
 #include <sys/epoll.h>
 #endif
 
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
+
 #ifdef HAVE_IO_URING
 #include <liburing.h>
 #endif
@@ -87,6 +92,34 @@ static io_engine_t* io_engine_create_epoll(void) {
 #endif
 }
 
+/**
+ * Create kqueue-based engine (macOS/BSD)
+ */
+static io_engine_t* io_engine_create_kqueue(void) {
+#ifdef __APPLE__
+    io_engine_t *engine = calloc(1, sizeof(io_engine_t));
+    if (!engine) {
+        return NULL;
+    }
+
+    engine->type = IO_ENGINE_KQUEUE;
+    engine->engine_fd = kqueue();
+
+    if (engine->engine_fd < 0) {
+        free(engine);
+        return NULL;
+    }
+
+    /* Set close-on-exec flag */
+    fcntl(engine->engine_fd, F_SETFD, FD_CLOEXEC);
+
+    return engine;
+#else
+    /* Not supported on non-macOS */
+    return NULL;
+#endif
+}
+
 #ifdef HAVE_IO_URING
 /**
  * Create io_uring-based engine
@@ -141,15 +174,22 @@ io_engine_t* io_engine_create(uint32_t queue_depth) {
     }
 #endif
 
-    /* Fall back to epoll on Linux, or basic mode on macOS */
+    /* Try epoll on Linux */
     io_engine_t *engine = io_engine_create_epoll();
     if (engine) {
         printf("[io_engine] Using epoll\n");
         return engine;
     }
 
-    /* Basic fallback for macOS - no async engine */
-    printf("[io_engine] Using synchronous I/O (no epoll/io_uring available)\n");
+    /* Try kqueue on macOS */
+    engine = io_engine_create_kqueue();
+    if (engine) {
+        printf("[io_engine] Using kqueue\n");
+        return engine;
+    }
+
+    /* Basic fallback - synchronous I/O */
+    printf("[io_engine] Using synchronous I/O (no epoll/kqueue/io_uring available)\n");
     engine = calloc(1, sizeof(io_engine_t));
     if (engine) {
         engine->type = IO_ENGINE_EPOLL;  /* Placeholder */
