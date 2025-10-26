@@ -25,7 +25,7 @@ class TestUnicodeResponseBodies:
         """Test response with various unicode characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Parse JSON
             data = json.loads(response.body.decode("utf-8"))
@@ -44,7 +44,7 @@ class TestUnicodeResponseBodies:
         """Test Chinese characters specifically"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "你好世界" in body
@@ -54,7 +54,7 @@ class TestUnicodeResponseBodies:
         """Test Japanese characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "こんにちは世界" in body
@@ -63,7 +63,7 @@ class TestUnicodeResponseBodies:
         """Test Korean characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "안녕하세요 세계" in body
@@ -72,7 +72,7 @@ class TestUnicodeResponseBodies:
         """Test Arabic characters (RTL text)"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "مرحبا بالعالم" in body
@@ -81,7 +81,7 @@ class TestUnicodeResponseBodies:
         """Test Russian Cyrillic characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "Привет мир" in body
@@ -90,7 +90,7 @@ class TestUnicodeResponseBodies:
         """Test emoji characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             assert "👋" in body
@@ -101,7 +101,7 @@ class TestUnicodeResponseBodies:
         """Test mixed unicode (ASCII + CJK + Emoji)"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             data = json.loads(response.body.decode("utf-8"))
             assert data["mixed"] == "Hello 世界 🌍"
@@ -114,7 +114,7 @@ class TestUnicodeResponseBodies:
         """Test special Latin characters with accents"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             data = json.loads(response.body.decode("utf-8"))
             assert "¡" in data["special"]
@@ -135,7 +135,7 @@ class TestUnicodeHeaders:
         """
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/utf8-header")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Body should be readable
             assert b"Response with unicode-safe headers" in response.body
@@ -163,7 +163,7 @@ class TestBinaryData:
         """Test response with binary data"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/binary")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Should receive all 256 bytes
             assert len(response.body) == 256
@@ -173,7 +173,7 @@ class TestBinaryData:
         """Test response containing null bytes"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/null-bytes")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Verify null bytes preserved
             assert b"\x00" in response.body
@@ -184,7 +184,7 @@ class TestBinaryData:
         """Test response with high byte values (>127)"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/binary")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Check high bytes present
             assert response.body[255] == 255
@@ -199,7 +199,7 @@ class TestEncodingEdgeCases:
         """Test response with mixed encoding characters"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/mixed-encoding")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Should be decodable as UTF-8
             text = response.body.decode("utf-8")
@@ -211,7 +211,7 @@ class TestEncodingEdgeCases:
         """Test response with very long line (10000+ chars)"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/very-long-line")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Should handle long lines
             assert len(response.body) >= 10000
@@ -228,7 +228,7 @@ class TestMalformedData:
         """
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/malformed-json")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Response succeeds, but JSON parsing should fail
             with pytest.raises(json.JSONDecodeError):
@@ -241,7 +241,7 @@ class TestMalformedData:
         """
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/malformed-json")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
             # Should still return whatever data was received
             assert len(response.body) > 0
 
@@ -254,7 +254,7 @@ class TestPostWithUnicode:
         with MockHTTPServer() as server:
             payload = {"message": "你好世界", "emoji": "🎉", "mixed": "Hello 世界"}
             response = httpmorph.post(f"{server.url}/post", json=payload)
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             # Verify server received unicode data
             data = json.loads(response.body)
@@ -267,7 +267,7 @@ class TestPostWithUnicode:
         with MockHTTPServer() as server:
             form_data = "name=你好&message=世界"
             response = httpmorph.post(f"{server.url}/post", data=form_data.encode("utf-8"))
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
             # The server receives the data and includes it in the response
             # Unicode may be escaped in JSON representation
             body = response.body.decode("utf-8")
@@ -317,7 +317,7 @@ class TestRealWorldUnicode:
         """Test response with content in multiple languages"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             data = json.loads(response.body.decode("utf-8"))
 
@@ -331,7 +331,7 @@ class TestRealWorldUnicode:
         """Test emoji sequences (multi-codepoint emojis)"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/unicode")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
             body = response.body.decode("utf-8")
             # Basic emoji should work
@@ -348,7 +348,7 @@ class TestRealWorldUnicode:
             # Post data with zero-width characters
             payload = {"text": "Hello\u200bWorld"}  # Zero-width space
             response = httpmorph.post(f"{server.url}/post", json=payload)
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
 
 if __name__ == "__main__":

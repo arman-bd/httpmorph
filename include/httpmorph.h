@@ -99,9 +99,6 @@ struct httpmorph_request {
     char *proxy_username;
     char *proxy_password;
 
-    /* HTTP/2 control */
-    bool http2_enabled;
-
     /* TLS fingerprinting */
     char *ja3_string;
     char *user_agent;
@@ -170,12 +167,10 @@ void httpmorph_client_destroy(httpmorph_client_t *client);
 
 /**
  * Execute a synchronous HTTP request
- * @param pool Optional connection pool for connection reuse (pass NULL if not using pooling)
  */
 httpmorph_response_t* httpmorph_request_execute(
     httpmorph_client_t *client,
-    const httpmorph_request_t *request,
-    httpmorph_pool_t *pool
+    const httpmorph_request_t *request
 );
 
 /* Request helpers */
@@ -227,14 +222,6 @@ void httpmorph_request_set_proxy(
     const char *proxy_url,
     const char *username,
     const char *password
-);
-
-/**
- * Set HTTP/2 enabled flag for request
- */
-void httpmorph_request_set_http2(
-    httpmorph_request_t *request,
-    bool enabled
 );
 
 /* Response helpers */

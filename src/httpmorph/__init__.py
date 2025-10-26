@@ -8,7 +8,7 @@ Built from scratch in C with BoringSSL. No fallback implementations.
 
 import sys
 
-__version__ = "0.1.3"
+__version__ = "0.1.2"
 __author__ = "Arman Hossain"
 __license__ = "MIT"
 

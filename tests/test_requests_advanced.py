@@ -133,7 +133,7 @@ class TestFilesParameter:
                 files = {"file": f}
                 response = httpmorph.post(f"{httpbin_server}/post", files=files)
 
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
             data = response.json()
             assert "files" in data
         finally:
@@ -155,7 +155,7 @@ class TestFilesParameter:
                 files = {"file1": f1, "file2": f2}
                 response = httpmorph.post(f"{httpbin_server}/post", files=files)
 
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
             data = response.json()
             assert "files" in data
         finally:
@@ -169,7 +169,7 @@ class TestFilesParameter:
         files = {"file": ("custom_name.txt", io.BytesIO(content))}
         response = httpmorph.post(f"{httpbin_server}/post", files=files)
 
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
         data = response.json()
         assert "custom_name.txt" in str(data.get("files", ""))
 
@@ -180,7 +180,7 @@ class TestFilesParameter:
         files = {"file": ("data.bin", io.BytesIO(content), "application/octet-stream")}
         response = httpmorph.post(f"{httpbin_server}/post", files=files)
 
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_files_and_data_combined(self, httpbin_server):
         """Test uploading files with additional form data"""
@@ -195,7 +195,7 @@ class TestFilesParameter:
 
                 response = httpmorph.post(f"{httpbin_server}/post", files=files, data=data)
 
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
             result = response.json()
             assert result["form"]["field1"] == "value1"
             assert result["form"]["field2"] == "value2"
@@ -210,13 +210,13 @@ class TestVerifyParameter:
         """Test verify=True validates SSL certificate"""
         # Should succeed with valid cert
         response = httpmorph.get(f"{httpbin_server}/get", verify=True)
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_verify_false_skips_validation(self, httpbin_server):
         """Test verify=False skips SSL validation"""
         # Should succeed even with invalid cert (if we had one to test)
         response = httpmorph.get(f"{httpbin_server}/get", verify=False)
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_verify_ca_bundle_path(self, httpbin_server):
         """Test verify with path to CA bundle"""
@@ -235,7 +235,7 @@ class TestVerifyParameter:
 
         if ca_path:
             response = httpmorph.get(f"{httpbin_server}/get", verify=ca_path)
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
         else:
             pytest.skip("No CA bundle found on system")
 
@@ -329,14 +329,14 @@ class TestRedirectHandling:
         """Test redirect to absolute URL"""
         response = httpmorph.get(f"{httpbin_server}/absolute-redirect/1")
 
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
         assert response.url == f"{httpbin_server}/get"
 
     def test_redirect_relative_url(self, httpbin_server):
         """Test redirect to relative URL"""
         response = httpmorph.get(f"{httpbin_server}/relative-redirect/1")
 
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
 
 class TestResponseLinks:

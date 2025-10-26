@@ -47,7 +47,6 @@ dmypy.json
 
 # Documentation
 docs/_build/
-docs/build/
 
 # Virtual environments
 venv/
@@ -70,4 +69,6 @@ benchmarks/results/
 # Environment variables
 .env
 examples/.env
-.plan/
+
+# Planning documents (internal)
+plan/

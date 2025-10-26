@@ -71,20 +71,18 @@ class TestBrowserProfiles:
         - Binary framing via nghttp2
         - Request/response handling
         """
-        session = httpmorph.Session(browser="chrome", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        session = httpmorph.Session(browser="chrome")
+        response = session.get("https://www.google.com")
 
-        # Chrome negotiates HTTP/2 with httpbingo
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        # Chrome negotiates HTTP/2 with Google
         assert response.http_version == "2.0"
 
     def test_firefox_http2_settings(self):
         """Test Firefox HTTP/2 SETTINGS frame characteristics"""
-        session = httpmorph.Session(browser="firefox", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        session = httpmorph.Session(browser="firefox")
+        response = session.get("https://www.google.com")
 
         # Firefox has different HTTP/2 SETTINGS than Chrome
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
     def test_chrome_header_order(self):
@@ -94,7 +92,7 @@ class TestBrowserProfiles:
 
         # Chrome sends headers in specific order
         # This would need to be verified by the server
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_firefox_header_order(self):
         """Test Firefox header order is correct"""
@@ -102,7 +100,7 @@ class TestBrowserProfiles:
         response = session.get("https://example.com")
 
         # Firefox sends headers in different order than Chrome
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_chrome_user_agent_matches_fingerprint(self):
         """Test Chrome User-Agent matches TLS fingerprint"""
@@ -139,7 +137,7 @@ class TestFingerprintMorphing:
         for _ in range(10):
             response = httpmorph.get("https://example.com", browser="chrome", morph=True)
             # Should still successfully connect and get response
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
     def test_morph_variation_parameter(self):
         """Test morph variation parameter
@@ -149,7 +147,7 @@ class TestFingerprintMorphing:
         """
         session = httpmorph.Session(browser="chrome")
         response = session.get("https://example.com")
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_random_browser_selection(self):
         """Test random browser selection"""
@@ -157,7 +155,7 @@ class TestFingerprintMorphing:
             session = httpmorph.Session(browser="random")
             # Would need a way to check which browser was selected
             response = session.get("https://example.com")
-            assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+            assert response.status_code == 200
 
 
 class TestJA3Fingerprinting:
@@ -184,7 +182,7 @@ class TestJA3Fingerprinting:
         """
         session = httpmorph.Session(browser="chrome")
         response = session.get("https://example.com")
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
     def test_ja4_fingerprint_generated(self):
         """Test that JA4 fingerprint is generated
@@ -216,7 +214,7 @@ class TestGREASE:
         """Test that GREASE values are valid"""
         # GREASE values follow specific pattern
         response = httpmorph.get("https://example.com", browser="chrome")
-        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+        assert response.status_code == 200
 
 
 if __name__ == "__main__":

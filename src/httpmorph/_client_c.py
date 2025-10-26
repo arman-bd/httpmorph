@@ -13,13 +13,6 @@ from http.client import responses as http_responses
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-# Try to import orjson for faster JSON encoding (2-3x faster than stdlib)
-try:
-    import orjson
-    HAS_ORJSON = True
-except ImportError:
-    HAS_ORJSON = False
-
 # On Windows, add DLL search paths for dependencies
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
     # Add vcpkg DLL directory
@@ -144,11 +137,7 @@ class PreparedRequest:
         self.headers = headers or {}
 
         if json is not None:
-            # Use orjson if available (2-3x faster than stdlib json)
-            if HAS_ORJSON:
-                self.body = orjson.dumps(json)  # orjson.dumps returns bytes directly
-            else:
-                self.body = _json.dumps(json).encode("utf-8")
+            self.body = _json.dumps(json).encode("utf-8")
             self.headers["Content-Type"] = "application/json"
         elif data is not None:
             self.body = data if isinstance(data, bytes) else str(data).encode("utf-8")
@@ -163,10 +152,7 @@ class Response:
         self.status_code = c_response_dict["status_code"]
         self.headers = c_response_dict["headers"]
         self.body = c_response_dict["body"]
-
-        # Store raw http_version enum for lazy formatting
-        self._http_version_enum = c_response_dict["http_version"]
-        self._http_version = None
+        self.http_version = self._format_http_version(c_response_dict["http_version"])
 
         # Timing information (in microseconds)
         self.connect_time_us = c_response_dict["connect_time_us"]
@@ -179,10 +165,12 @@ class Response:
         self.tls_cipher = c_response_dict["tls_cipher"]
         self.ja3_fingerprint = c_response_dict["ja3_fingerprint"]
 
-        # Lazy text decoding (decode only when accessed)
-        self._text = None
+        # Decode body as text
         self._encoding = None
-        self._json = None  # Lazy JSON decoding
+        try:
+            self.text = self.body.decode("utf-8")
+        except (UnicodeDecodeError, AttributeError):
+            self.text = self.body.decode("latin-1", errors="replace")
 
         # Error information
         self.error = c_response_dict["error"]
@@ -194,7 +182,7 @@ class Response:
         # Requests-compatible attributes
         self.url = url or c_response_dict.get("url", "")
         self.history = []
-        self._raw = None  # Lazy raw attribute
+        self.raw = io.BytesIO(self.body) if self.body else io.BytesIO()
         self.links = {}
 
     def _format_http_version(self, version_enum):
@@ -208,54 +196,9 @@ class Response:
         return version_map.get(version_enum, "1.1")
 
     @property
-    def http_version(self):
-        """Get HTTP version string (lazy evaluation)"""
-        if self._http_version is None:
-            self._http_version = self._format_http_version(self._http_version_enum)
-        return self._http_version
-
-    @property
     def content(self):
         """Alias for body (requests compatibility)"""
         return self.body
-
-    @property
-    def text(self):
-        """Decode body as text (lazy evaluation)"""
-        if self._text is None:
-            try:
-                self._text = self.body.decode("utf-8")
-            except (UnicodeDecodeError, AttributeError):
-                self._text = self.body.decode("latin-1", errors="replace") if self.body else ""
-        return self._text
-
-    def json(self, **kwargs):
-        """Decode body as JSON (lazy evaluation with orjson if available)"""
-        if self._json is None:
-            if not self.body:
-                raise ValueError("No JSON content in response")
-
-            if HAS_ORJSON:
-                # orjson.loads is 2-3x faster than json.loads
-                try:
-                    self._json = orjson.loads(self.body)
-                except orjson.JSONDecodeError as e:
-                    raise ValueError(f"Invalid JSON: {e}") from e
-            else:
-                # Fall back to stdlib json
-                try:
-                    self._json = _json.loads(self.text)
-                except _json.JSONDecodeError as e:
-                    raise ValueError(f"Invalid JSON: {e}") from e
-
-        return self._json
-
-    @property
-    def raw(self):
-        """Raw response body as file-like object (lazy evaluation)"""
-        if self._raw is None:
-            self._raw = io.BytesIO(self.body) if self.body else io.BytesIO()
-        return self._raw
 
     @property
     def ok(self):
@@ -302,6 +245,10 @@ class Response:
         # Simple detection - could be enhanced with chardet
         return "utf-8"
 
+    def json(self, **kwargs):
+        """Parse response body as JSON"""
+        return _json.loads(self.text, **kwargs)
+
     def raise_for_status(self):
         """Raise HTTPError if status code indicates an error"""
         if 400 <= self.status_code < 600:
@@ -340,18 +287,13 @@ class Response:
 class Client:
     """HTTP client using C implementation"""
 
-    def __init__(self, http2=False):
+    def __init__(self):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
-        self.http2 = http2  # HTTP/2 enabled flag
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request"""
-        # Handle http2 parameter - use client default if not specified
-        if "http2" not in kwargs:
-            kwargs["http2"] = self.http2
-
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")
@@ -608,12 +550,11 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
-    def __init__(self, browser="chrome", http2=False):
+    def __init__(self, browser="chrome"):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._session = _httpmorph.Session(browser=browser)
         self.browser = browser
-        self.http2 = http2  # HTTP/2 enabled flag
         self.headers = {}  # Persistent headers
         self._cookies = CookieDict(self._session.cookie_jar)
 
@@ -629,10 +570,6 @@ class Session:
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request within this session"""
-        # Handle http2 parameter - use session default if not specified
-        if "http2" not in kwargs:
-            kwargs["http2"] = self.http2
-
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")
@@ -944,4 +881,4 @@ def version():
     """Get library version"""
     if HAS_C_EXTENSION:
         return _httpmorph.version()
-    return "0.1.3"
+    return "0.1.2"

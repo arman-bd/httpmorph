@@ -36,7 +36,6 @@
 #include "../include/httpmorph.h"
 #include "../tls/browser_profiles.h"
 #include "io_engine.h"
-#include "connection_pool.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -91,7 +90,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/bio.h>
-#include <openssl/evp.h>
+#include <openssl/md5.h>
 
 /* HTTP/2 support */
 #ifdef HAVE_NGHTTP2
@@ -431,10 +430,6 @@ httpmorph_client_t* httpmorph_client_create(void) {
         return NULL;
     }
 
-    /* Enable SSL session caching for faster reconnects */
-    SSL_CTX_set_session_cache_mode(client->ssl_ctx, SSL_SESS_CACHE_CLIENT);
-    SSL_CTX_sess_set_cache_size(client->ssl_ctx, 1024);  /* Cache up to 1024 sessions */
-
     /* Default configuration */
     client->timeout_ms = 30000;  /* 30 seconds */
     client->follow_redirects = false;  /* Python layer handles redirects for better control */
@@ -504,13 +499,6 @@ httpmorph_session_t* httpmorph_session_create(httpmorph_browser_t browser_type) 
     /* Initialize cookie jar */
     session->cookies = NULL;
     session->cookie_count = 0;
-
-    /* Initialize connection pool for keep-alive */
-    session->pool = pool_create();
-    if (!session->pool) {
-        httpmorph_session_destroy(session);
-        return NULL;
-    }
 
     return session;
 }
@@ -662,11 +650,6 @@ static char* get_cookies_for_request(httpmorph_session_t *session, const char *d
 void httpmorph_session_destroy(httpmorph_session_t *session) {
     if (!session) {
         return;
-    }
-
-    /* Destroy connection pool (closes all pooled connections) */
-    if (session->pool) {
-        pool_destroy(session->pool);
     }
 
     if (session->client) {
@@ -995,36 +978,12 @@ static int proxy_connect(int sockfd, const char *target_host, uint16_t target_po
 
 /* Helper: TLS connect with browser fingerprint */
 static SSL* tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
-                        const browser_profile_t *profile, bool http2_enabled,
                         uint64_t *tls_time_us) {
     uint64_t start_time = get_time_us();
 
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         return NULL;
-    }
-
-    /* Set ALPN protocols based on http2_enabled flag */
-    if (profile && profile->alpn_protocol_count > 0) {
-        unsigned char alpn_list[256];
-        unsigned char *alpn_p = alpn_list;
-
-        for (int i = 0; i < profile->alpn_protocol_count; i++) {
-            /* Skip "h2" if HTTP/2 not enabled */
-            if (!http2_enabled && strcmp(profile->alpn_protocols[i], "h2") == 0) {
-                continue;
-            }
-
-            size_t len = strlen(profile->alpn_protocols[i]);
-            *alpn_p++ = (unsigned char)len;
-            memcpy(alpn_p, profile->alpn_protocols[i], len);
-            alpn_p += len;
-        }
-
-        /* Only set ALPN if we have protocols */
-        if (alpn_p > alpn_list) {
-            SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
-        }
     }
 
     /* Set SNI hostname */
@@ -1134,22 +1093,9 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         *p = '\0';
     }
 
-    /* Calculate MD5 hash of the JA3 string using EVP interface */
-    unsigned char md5_digest[16];  /* MD5 produces 16 bytes */
-    unsigned int md5_len = 0;
-
-    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-    if (!mdctx) {
-        return NULL;
-    }
-
-    if (EVP_DigestInit_ex(mdctx, EVP_md5(), NULL) != 1 ||
-        EVP_DigestUpdate(mdctx, ja3_string, strlen(ja3_string)) != 1 ||
-        EVP_DigestFinal_ex(mdctx, md5_digest, &md5_len) != 1) {
-        EVP_MD_CTX_free(mdctx);
-        return NULL;
-    }
-    EVP_MD_CTX_free(mdctx);
+    /* Calculate MD5 hash of the JA3 string */
+    unsigned char md5_digest[MD5_DIGEST_LENGTH];
+    MD5((unsigned char*)ja3_string, strlen(ja3_string), md5_digest);
 
     /* Convert MD5 to hex string */
     char *ja3_hash = malloc(33);  /* 32 hex chars + null terminator */
@@ -1157,7 +1103,7 @@ static char* calculate_ja3_fingerprint(SSL *ssl, const browser_profile_t *profil
         return NULL;
     }
 
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         snprintf(ja3_hash + (i * 2), 3, "%02x", md5_digest[i]);
     }
     ja3_hash[32] = '\0';
@@ -1224,15 +1170,14 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
     /* Add default headers if missing */
     if (!has_user_agent) {
         /* Use request's user agent if set, otherwise use generic */
-        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.3";
+        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.2";
         p += snprintf(p, SNPRINTF_SIZE(end - p), "User-Agent: %s\r\n", user_agent);
     }
     if (!has_accept) {
         p += snprintf(p, SNPRINTF_SIZE(end - p), "Accept: */*\r\n");
     }
     if (!has_connection) {
-        /* Use keep-alive for connection reuse */
-        p += snprintf(p, SNPRINTF_SIZE(end - p), "Connection: keep-alive\r\n");
+        p += snprintf(p, SNPRINTF_SIZE(end - p), "Connection: close\r\n");
     }
 
     /* Add Proxy-Authorization header for HTTP proxy (not HTTPS/CONNECT) */
@@ -1267,7 +1212,6 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
     /* Send request headers */
     size_t total_sent = 0;
     size_t header_len = p - request_buf;
-
 
     if (ssl) {
         while (total_sent < header_len) {
@@ -1714,12 +1658,11 @@ static int http2_request(SSL *ssl, const httpmorph_request_t *request,
 
 /* Helper: Receive HTTP response */
 static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *response,
-                              uint64_t *first_byte_time_us, bool *conn_will_close, httpmorph_method_t method) {
+                              uint64_t *first_byte_time_us) {
     char buffer[16384];
     size_t buffer_pos = 0;
     bool headers_complete = false;
     size_t content_length = 0;
-    bool is_head_request = (method == HTTPMORPH_HEAD);
     bool chunked = false;
     uint64_t first_byte_time = 0;
 
@@ -1835,27 +1778,16 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
     /* Copy any body data already in buffer */
     if (body_in_buffer > 0) {
         if (response->body_capacity < body_in_buffer) {
-            /* Use 2x growth strategy instead of exact size */
-            size_t new_capacity = body_in_buffer * 2;
-            response->body = realloc(response->body, new_capacity);
-            response->body_capacity = new_capacity;
+            response->body = realloc(response->body, body_in_buffer);
+            response->body_capacity = body_in_buffer;
         }
         memcpy(response->body, body_start, body_in_buffer);
         body_received = body_in_buffer;
     }
 
-    /* For HEAD requests, never read body even if Content-Length is present */
-    if (is_head_request) {
-        response->body_len = 0;
-        if (first_byte_time_us) {
-            *first_byte_time_us = first_byte_time;
-        }
-        return 0;
-    }
-
-    /* Allocate body buffer and read based on Content-Length if known */
+    /* Allocate body buffer */
     if (content_length > 0 && content_length < 100 * 1024 * 1024) {
-        /* Known content length - pre-allocate exact size */
+        /* Known content length */
         if (response->body_capacity < content_length) {
             response->body = realloc(response->body, content_length);
             response->body_capacity = content_length;
@@ -1901,7 +1833,6 @@ static int recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *respon
         }
     } else {
         /* No content length - read until EOF */
-        if (conn_will_close) *conn_will_close = true;
         while (body_received < response->body_capacity - 1024) {
             int n;
             if (ssl) {
@@ -2011,8 +1942,7 @@ static int decompress_gzip(httpmorph_response_t *response) {
  */
 httpmorph_response_t* httpmorph_request_execute(
     httpmorph_client_t *client,
-    const httpmorph_request_t *request,
-    httpmorph_pool_t *pool) {
+    const httpmorph_request_t *request) {
 
     if (!client || !request || !request->url) {
         return NULL;
@@ -2028,8 +1958,6 @@ httpmorph_response_t* httpmorph_request_execute(
     SSL *ssl = NULL;
     char *proxy_user = NULL;
     char *proxy_pass = NULL;
-    pooled_connection_t *pooled_conn = NULL;  /* Track if we got connection from pool */
-    bool use_http2 = false;  /* Track if HTTP/2 is being used */
 
     /* Parse URL */
     char *scheme = NULL, *host = NULL, *path = NULL;
@@ -2100,67 +2028,20 @@ httpmorph_response_t* httpmorph_request_execute(
         free(proxy_host);
         /* Keep proxy_user and proxy_pass for HTTP proxy requests - will be freed later */
     } else {
-        /* Direct connection - try pool first for connection reuse */
-        if (pool) {
-            pooled_conn = pool_get_connection(pool, host, port);
-            if (pooled_conn) {
-                /* Reuse existing connection from pool */
-                sockfd = pooled_conn->sockfd;
-                ssl = pooled_conn->ssl;
-                use_http2 = pooled_conn->is_http2;  /* Use same protocol as pooled connection */
-
-                /* Don't reuse HTTP/2 connections - HTTP/2 pooling has reliability issues */
-                if (use_http2) {
-                    pool_connection_destroy(pooled_conn);
-                    pooled_conn = NULL;
-                    sockfd = -1;
-                    ssl = NULL;
-                    use_http2 = false;
-                }
-
-                /* For SSL connections, verify still valid before reuse */
-                if (ssl) {
-                    int shutdown_state = SSL_get_shutdown(ssl);
-                    if (shutdown_state != 0) {
-                        /* SSL was shut down - destroy and recreate */
-                        pool_connection_destroy(pooled_conn);
-                        pooled_conn = NULL;
-                        sockfd = -1;
-                        ssl = NULL;
-                    }
-                }
-
-                if (sockfd >= 0) {
-                    /* Connection reused - no connect/TLS time */
-                    connect_time = 0;
-                    response->tls_time_us = 0;
-
-                    /* Restore TLS info from pooled connection */
-                    if (pooled_conn->ja3_fingerprint) {
-                        response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
-                    }
-                }
-            } else {
-            }
-        }
-
-        /* If no pooled connection, create new one */
+        /* Direct connection */
+        sockfd = tcp_connect(host, port, request->timeout_ms, &connect_time);
         if (sockfd < 0) {
-            sockfd = tcp_connect(host, port, request->timeout_ms, &connect_time);
-            if (sockfd < 0) {
-                response->error = HTTPMORPH_ERROR_NETWORK;
-                response->error_message = strdup("Failed to connect");
-                goto cleanup;
-            }
+            response->error = HTTPMORPH_ERROR_NETWORK;
+            response->error_message = strdup("Failed to connect");
+            goto cleanup;
         }
     }
     response->connect_time_us = connect_time;
 
-    /* 2. TLS Handshake (if HTTPS and not reused) */
-    if (use_tls && !ssl) {
+    /* 2. TLS Handshake (if HTTPS) */
+    if (use_tls) {
         uint64_t tls_time = 0;
-        ssl = tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
-                         request->http2_enabled, &tls_time);
+        ssl = tls_connect(client->ssl_ctx, sockfd, host, &tls_time);
         if (!ssl) {
             response->error = HTTPMORPH_ERROR_TLS;
             response->error_message = strdup("TLS handshake failed");
@@ -2168,7 +2049,14 @@ httpmorph_response_t* httpmorph_request_execute(
         }
         response->tls_time_us = tls_time;
 
-        /* Calculate JA3 fingerprint (only for new connections) */
+        /* Extract TLS info */
+        const SSL_CIPHER *cipher = SSL_get_current_cipher(ssl);
+        if (cipher) {
+            response->tls_cipher = strdup(SSL_CIPHER_get_name(cipher));
+        }
+        response->tls_version = strdup(SSL_get_version(ssl));
+
+        /* Calculate JA3 fingerprint */
         response->ja3_fingerprint = calculate_ja3_fingerprint(ssl, client->browser_profile);
 
         /* Check negotiated ALPN protocol */
@@ -2176,6 +2064,7 @@ httpmorph_response_t* httpmorph_request_execute(
         unsigned int alpn_len = 0;
         SSL_get0_alpn_selected(ssl, &alpn_data, &alpn_len);
 
+        bool use_http2 = false;
         if (alpn_data && alpn_len > 0) {
             if (alpn_len == 2 && memcmp(alpn_data, "h2", 2) == 0) {
                 /* HTTP/2 negotiated */
@@ -2200,30 +2089,21 @@ httpmorph_response_t* httpmorph_request_execute(
                 response->http_version = HTTPMORPH_VERSION_1_0;
             }
         }
-    }
-
-    /* Extract TLS info for all HTTPS connections (new and reused) */
-    if (use_tls && ssl) {
-        const SSL_CIPHER *cipher = SSL_get_current_cipher(ssl);
-        if (cipher) {
-            response->tls_cipher = strdup(SSL_CIPHER_get_name(cipher));
-        }
-        response->tls_version = strdup(SSL_get_version(ssl));
-    }
 
 #ifdef HAVE_NGHTTP2
-    /* Use HTTP/2 if negotiated (for both new and pooled connections) */
-    if (use_http2) {
-        uint64_t first_byte_time = get_time_us();
-        if (http2_request(ssl, request, host, path, response) != 0) {
-            response->error = HTTPMORPH_ERROR_NETWORK;
-            response->error_message = strdup("HTTP/2 request failed");
-            goto cleanup;
+        /* Use HTTP/2 if negotiated */
+        if (use_http2) {
+            uint64_t first_byte_time = get_time_us();
+            if (http2_request(ssl, request, host, path, response) != 0) {
+                response->error = HTTPMORPH_ERROR_NETWORK;
+                response->error_message = strdup("HTTP/2 request failed");
+                goto cleanup;
+            }
+            response->first_byte_time_us = first_byte_time - start_time;
+            goto http2_done;
         }
-        response->first_byte_time_us = first_byte_time - start_time;
-        goto http2_done;
-    }
 #endif
+    }
 
     /* 3. Send HTTP/1.x Request */
     bool using_proxy = (request->proxy_url != NULL);
@@ -2235,65 +2115,9 @@ httpmorph_response_t* httpmorph_request_execute(
 
     /* 4. Receive HTTP/1.x Response */
     uint64_t first_byte_time = 0;
-    bool connection_will_close = false;
-    int recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close, request->method);
-
-    /* If pooled connection failed, retry with new connection */
-    if (recv_result != 0 && pooled_conn) {
-
-        /* Destroy the failed pooled connection */
-        pool_connection_destroy(pooled_conn);
-        pooled_conn = NULL;
-        sockfd = -1;
-        ssl = NULL;
-
-        /* Create new connection */
-        sockfd = tcp_connect(host, port, request->timeout_ms, &connect_time);
-        if (sockfd < 0) {
-            response->error = HTTPMORPH_ERROR_NETWORK;
-            response->error_message = strdup("Failed to connect");
-            goto cleanup;
-        }
-        response->connect_time_us = connect_time;
-
-        /* New TLS handshake */
-        if (use_tls) {
-            uint64_t tls_time = 0;
-            ssl = tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
-                             request->http2_enabled, &tls_time);
-            if (!ssl) {
-                response->error = HTTPMORPH_ERROR_TLS;
-                response->error_message = strdup("TLS handshake failed");
-                goto cleanup;
-            }
-            response->tls_time_us = tls_time;
-        }
-
-        /* Reset response completely for retry */
-        for (size_t i = 0; i < response->header_count; i++) {
-            free(response->header_keys[i]);
-            free(response->header_values[i]);
-        }
-        response->header_count = 0;
-        response->body_len = 0;
-        response->status_code = 0;
-
-        /* Resend HTTP request */
-        if (send_http_request(ssl, sockfd, request, host, path, scheme, port, using_proxy, proxy_user, proxy_pass) != 0) {
-            response->error = HTTPMORPH_ERROR_NETWORK;
-            response->error_message = strdup("Failed to send request");
-            goto cleanup;
-        }
-
-        /* Retry receiving response */
-        recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time, &connection_will_close, request->method);
-    }
-
-    if (recv_result == 0) {
-    }
-
+    int recv_result = recv_http_response(ssl, sockfd, response, &first_byte_time);
     if (recv_result != 0) {
-        response->error = recv_result;
+        response->error = recv_result;  /* Use specific error code from recv_http_response */
         if (recv_result == HTTPMORPH_ERROR_TIMEOUT) {
             response->error_message = strdup("Request timed out");
         } else {
@@ -2338,73 +2162,6 @@ http2_done:
     }
 
 cleanup:
-    /* Handle connection pooling */
-    if (pool && sockfd >= 0 && response->error == HTTPMORPH_OK) {
-        /* Check if server requested connection close or we read until EOF */
-        bool should_close = connection_will_close;
-        const char *conn_header = httpmorph_response_get_header(response, "Connection");
-        if (conn_header && (strstr(conn_header, "close") || strstr(conn_header, "Close"))) {
-            should_close = true;
-        }
-        if (connection_will_close) {
-        }
-
-        if (should_close) {
-            /* Server wants to close - don't pool */
-            if (pooled_conn) {
-                pool_connection_destroy(pooled_conn);
-                pooled_conn = NULL;
-            }
-            /* Let normal cleanup close the connection */
-        } else {
-            /* Request succeeded - pool the connection for reuse */
-            pooled_connection_t *conn_to_pool = pooled_conn;
-
-        if (!conn_to_pool) {
-            /* New connection - create wrapper */
-            bool use_http2 = (response->http_version == HTTPMORPH_VERSION_2_0);
-            /* Don't pool HTTP/2 connections - HTTP/2 pooling has reliability issues */
-            if (use_http2) {
-                conn_to_pool = NULL;
-            } else {
-                conn_to_pool = pool_connection_create(host, port, sockfd, ssl, use_http2);
-                /* Store TLS info in pooled connection for future reuse */
-                if (conn_to_pool && ssl) {
-                    if (response->ja3_fingerprint) {
-                        conn_to_pool->ja3_fingerprint = strdup(response->ja3_fingerprint);
-                    }
-                    if (response->tls_version) {
-                        conn_to_pool->tls_version = strdup(response->tls_version);
-                    }
-                    if (response->tls_cipher) {
-                        conn_to_pool->tls_cipher = strdup(response->tls_cipher);
-                    }
-                }
-            }
-        }
-
-        if (conn_to_pool && pool_put_connection(pool, conn_to_pool)) {
-            /* Connection successfully pooled - don't close it */
-            sockfd = -1;
-            ssl = NULL;
-            pooled_conn = NULL;  /* Clear so we don't double-free */
-        } else if (conn_to_pool || pooled_conn) {
-            /* Failed to pool connection - pool_put_connection already destroyed it */
-            /* Just clear our references to avoid double-free */
-            sockfd = -1;
-            ssl = NULL;
-            pooled_conn = NULL;
-        }
-        }  /* End of should_close else block */
-    } else if (pooled_conn) {
-        /* Request failed - destroy the pooled connection */
-        pool_connection_destroy(pooled_conn);
-        sockfd = -1;
-        ssl = NULL;
-        pooled_conn = NULL;
-    }
-
-    /* Only close if not pooled */
     if (ssl) {
         SSL_shutdown(ssl);
         SSL_free(ssl);
@@ -2568,15 +2325,6 @@ void httpmorph_request_set_proxy(httpmorph_request_t *request,
 }
 
 /**
- * Set HTTP/2 enabled flag
- */
-void httpmorph_request_set_http2(httpmorph_request_t *request, bool enabled) {
-    if (request) {
-        request->http2_enabled = enabled;
-    }
-}
-
-/**
  * Get response header value
  */
 const char* httpmorph_response_get_header(const httpmorph_response_t *response,
@@ -2626,8 +2374,8 @@ httpmorph_response_t* httpmorph_session_request(httpmorph_session_t *session,
         free(cookie_header);
     }
 
-    /* Execute the request with connection pooling */
-    httpmorph_response_t *response = httpmorph_request_execute(session->client, req_with_cookies, session->pool);
+    /* Execute the request */
+    httpmorph_response_t *response = httpmorph_request_execute(session->client, req_with_cookies);
 
     /* Parse Set-Cookie headers from response */
     if (response) {
