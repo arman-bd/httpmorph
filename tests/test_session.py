@@ -123,15 +123,15 @@ class TestSession:
         """Test that session maintains cookies"""
         session = httpmorph.Session(browser="chrome")
 
-        # Test with a real site that sets cookies (Google)
-        session.get("https://httpbingo.org/get")
+        # Test with httpbingo cookies endpoint
+        session.get("https://httpbingo.org/cookies/set?test=value&session=abc123")
         cookies_before = len(session.cookie_jar)
 
-        # Cookies should be set after first request
-        assert cookies_before > 0, "No cookies were set by Google"
+        # Cookies should be set after cookies/set request
+        assert cookies_before > 0, "No cookies were set by httpbingo"
 
         # Second request - cookies should persist
-        session.get("https://httpbingo.org/search?q=test")
+        session.get("https://httpbingo.org/cookies")
         cookies_after = len(session.cookie_jar)
 
         # Cookie count should be stable (same cookies)

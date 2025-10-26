@@ -217,10 +217,11 @@ class TestFingerprintDetection:
 
     def test_http2_fingerprint_detection(self):
         """Test HTTP/2 fingerprint detection"""
-        session = httpmorph.Session(browser="chrome")
-        response = session.get("https://httpbingo.org/get")
+        session = httpmorph.Session(browser="chrome", http2=True)
+        response = session.get("https://httpbingo.org/get", timeout=10)
 
         # Should use HTTP/2 with Chrome-like SETTINGS
+        assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
 
