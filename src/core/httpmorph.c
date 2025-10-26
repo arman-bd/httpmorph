@@ -2406,7 +2406,8 @@ cleanup:
 
     /* Only close if not pooled */
     if (ssl) {
-        SSL_shutdown(ssl);
+        /* Skip SSL_shutdown() as it can block indefinitely on stale/proxy connections.
+         * SSL_free() will handle cleanup safely without blocking. */
         SSL_free(ssl);
     }
     if (sockfd >= 0) {

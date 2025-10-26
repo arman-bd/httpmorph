@@ -250,7 +250,8 @@ void pool_connection_destroy(pooled_connection_t *conn) {
 
     /* Close SSL */
     if (conn->ssl) {
-        SSL_shutdown(conn->ssl);
+        /* Skip SSL_shutdown() as it can block indefinitely on stale/proxy connections.
+         * SSL_free() will handle cleanup safely without blocking. */
         SSL_free(conn->ssl);
     }
 
