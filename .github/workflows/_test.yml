@@ -15,6 +15,11 @@ on:
       primary-python:
         required: true
         type: string
+    secrets:
+      TEST_PROXY_URL:
+        required: false
+      CODECOV_TOKEN:
+        required: false
 
 jobs:
   test:
@@ -224,6 +229,8 @@ jobs:
 
     - name: Run tests
       run: pytest tests/ -v --cov=httpmorph --cov-report=xml
+      env:
+        TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
 
     - name: Upload coverage
       if: matrix.os == inputs.primary-os && matrix.python-version == inputs.primary-python

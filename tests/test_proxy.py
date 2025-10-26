@@ -2,6 +2,8 @@
 Proxy support tests for httpmorph
 """
 
+import os
+
 import pytest
 
 import httpmorph
@@ -217,6 +219,86 @@ class TestProxyDocumentation:
             assert response.status_code >= 0
         except Exception:
             pass
+
+
+class TestRealProxyIntegration:
+    """Test with real proxy from environment variables
+
+    These tests use TEST_PROXY_URL from .env file locally or GitHub Actions secrets in CI.
+    Tests are skipped if TEST_PROXY_URL is not set.
+    """
+
+    @pytest.fixture
+    def real_proxy_url(self):
+        """Get real proxy URL from environment"""
+        proxy_url = os.environ.get("TEST_PROXY_URL")
+        if not proxy_url:
+            pytest.skip("TEST_PROXY_URL environment variable not set")
+        return proxy_url
+
+    def test_http_via_real_proxy(self, real_proxy_url):
+        """Test HTTP request via real proxy
+
+        Note: Real external proxies cannot reach local servers, so we test with a real HTTP site
+        """
+        # Use a real HTTP site instead of MockHTTPServer (external proxy can't reach localhost)
+        response = httpmorph.get("http://example.com", proxy=real_proxy_url, timeout=30)
+        assert response.status_code in [200, 301, 302]
+
+    def test_https_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS request via real proxy using CONNECT"""
+        response = httpmorph.get("https://example.com", proxy=real_proxy_url, timeout=30)
+        assert response.status_code in [200, 301, 302]
+        assert len(response.text) > 0
+
+    def test_https_api_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS API request via real proxy"""
+        response = httpmorph.get("https://httpbin.org/ip", proxy=real_proxy_url, timeout=30)
+        assert response.status_code == 200
+        # Response should contain the proxy's IP, not our IP
+        assert "origin" in response.json()
+
+    def test_http2_via_real_proxy(self, real_proxy_url):
+        """Test HTTP/2 request via real proxy"""
+        response = httpmorph.get(
+            "https://www.google.com", proxy=real_proxy_url, http2=True, timeout=30
+        )
+        assert response.status_code in [200, 301, 302]
+        # HTTP/2 should work through proxy via CONNECT tunnel
+        assert len(response.text) > 0
+
+    def test_multiple_requests_via_real_proxy(self, real_proxy_url):
+        """Test multiple requests through same proxy"""
+        urls = [
+            "https://example.com",
+            "https://httpbin.org/get",
+            "https://www.google.com",
+        ]
+
+        for url in urls:
+            response = httpmorph.get(url, proxy=real_proxy_url, timeout=30)
+            assert response.status_code in [200, 301, 302]
+
+    def test_session_with_real_proxy(self, real_proxy_url):
+        """Test session with real proxy"""
+        session = httpmorph.Session(browser="chrome")
+
+        # Make multiple requests with same session
+        response1 = session.get("https://example.com", proxy=real_proxy_url, timeout=30)
+        assert response1.status_code in [200, 301, 302]
+
+        response2 = session.get("https://httpbin.org/get", proxy=real_proxy_url, timeout=30)
+        assert response2.status_code == 200
+
+    def test_post_via_real_proxy(self, real_proxy_url):
+        """Test POST request via real proxy"""
+        data = {"test": "data", "foo": "bar"}
+        response = httpmorph.post(
+            "https://httpbin.org/post", json=data, proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data.get("json") == data
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 Pytest configuration and fixtures for httpmorph tests
 """
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -10,6 +11,18 @@ import filelock
 import pytest
 
 import httpmorph
+
+# Load .env file for local testing
+# This allows TEST_PROXY_URL and other env vars to be loaded from .env
+try:
+    from dotenv import load_dotenv
+
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # python-dotenv not installed, skip
+    pass
 
 
 @pytest.fixture(scope="session", autouse=True)
