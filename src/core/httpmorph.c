@@ -2228,9 +2228,48 @@ httpmorph_response_t* httpmorph_request_execute(
     /* 3. Send HTTP/1.x Request */
     bool using_proxy = (request->proxy_url != NULL);
     if (send_http_request(ssl, sockfd, request, host, path, scheme, port, using_proxy, proxy_user, proxy_pass) != 0) {
-        response->error = HTTPMORPH_ERROR_NETWORK;
-        response->error_message = strdup("Failed to send request");
-        goto cleanup;
+        /* If send failed on a pooled connection, retry with fresh connection */
+        if (pooled_conn) {
+            /* Destroy the stale pooled connection */
+            pool_connection_destroy(pooled_conn);
+            pooled_conn = NULL;
+            sockfd = -1;
+            ssl = NULL;
+
+            /* Create new connection */
+            sockfd = tcp_connect(host, port, request->timeout_ms, &connect_time);
+            if (sockfd < 0) {
+                response->error = HTTPMORPH_ERROR_NETWORK;
+                response->error_message = strdup("Failed to connect after retry");
+                goto cleanup;
+            }
+            response->connect_time_us = connect_time;
+
+            /* New TLS handshake if needed */
+            if (use_tls) {
+                uint64_t tls_time = 0;
+                ssl = tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+                                request->http2_enabled, &tls_time);
+                if (!ssl) {
+                    response->error = HTTPMORPH_ERROR_TLS;
+                    response->error_message = strdup("TLS handshake failed on retry");
+                    goto cleanup;
+                }
+                response->tls_time_us = tls_time;
+            }
+
+            /* Retry sending request with fresh connection */
+            if (send_http_request(ssl, sockfd, request, host, path, scheme, port, using_proxy, proxy_user, proxy_pass) != 0) {
+                response->error = HTTPMORPH_ERROR_NETWORK;
+                response->error_message = strdup("Failed to send request after retry");
+                goto cleanup;
+            }
+        } else {
+            /* Not a pooled connection, fail immediately */
+            response->error = HTTPMORPH_ERROR_NETWORK;
+            response->error_message = strdup("Failed to send request");
+            goto cleanup;
+        }
     }
 
     /* 4. Receive HTTP/1.x Response */
