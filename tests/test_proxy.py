@@ -22,7 +22,7 @@ class TestProxyWithoutAuth:
     def test_https_via_proxy_connect(self):
         """Test HTTPS request via proxy using CONNECT method"""
         with MockProxyServer() as proxy:
-            response = httpmorph.get("https://example.com", proxy=proxy.url)
+            response = httpmorph.get("https://example.com", proxy=proxy.url, timeout=10)
             assert response.status_code in [200, 301, 302]
 
     def test_proxy_parameter_string(self):
@@ -81,7 +81,7 @@ class TestProxyWithAuth:
         """Test HTTPS via proxy with authentication"""
         with MockProxyServer(username="testuser", password="testpass") as proxy:
             response = httpmorph.get(
-                "https://example.com", proxy=proxy.url, proxy_auth=("testuser", "testpass")
+                "https://example.com", proxy=proxy.url, proxy_auth=("testuser", "testpass"), timeout=10
             )
             assert response.status_code in [200, 301, 302]
 
@@ -126,17 +126,17 @@ class TestProxyEdgeCases:
 
     def test_no_proxy_parameter(self):
         """Test request without proxy (normal direct connection)"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get("https://example.com", timeout=10)
         assert response.status_code in [200, 301, 302]
 
     def test_empty_proxy(self):
         """Test with empty proxy parameter"""
-        response = httpmorph.get("https://example.com", proxy="")
+        response = httpmorph.get("https://example.com", proxy="", timeout=10)
         assert response.status_code in [200, 301, 302]
 
     def test_none_proxy(self):
         """Test with None proxy parameter"""
-        response = httpmorph.get("https://example.com", proxy=None)
+        response = httpmorph.get("https://example.com", proxy=None, timeout=10)
         assert response.status_code in [200, 301, 302]
 
     def test_proxy_with_session(self):
