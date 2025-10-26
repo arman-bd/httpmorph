@@ -356,14 +356,16 @@ if IS_WINDOWS:
     # Use /TP to compile as C++ (required for BoringSSL compatibility on Windows)
     # Define WIN32, _WINDOWS, and OPENSSL_WINDOWS for proper BoringSSL compilation
     EXT_COMPILE_ARGS = [
-        "/TP",
         "/O2",
         "/DHAVE_NGHTTP2",
+        "/DNGHTTP2_STATICLIB",  # Static linking for nghttp2
         "/EHsc",
         "/DWIN32",
         "/D_WINDOWS",
         "/DOPENSSL_WINDOWS",
         "/D_WIN32",
+        # Force include windows_compat.h to define ssize_t properly for all compilation units
+        "/FIwindows_compat.h",
     ]
     # BoringSSL and nghttp2 library names on Windows (without .lib extension)
     # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
@@ -413,6 +415,7 @@ INCLUDE_DIRS = [
     str(INCLUDE_DIR),
     str(CORE_DIR),
     str(TLS_DIR),
+    str(SRC_DIR / "include"),  # Add src/include for windows_compat.h
     LIB_PATHS["openssl_include"],
     LIB_PATHS["nghttp2_include"],
 ]
@@ -453,7 +456,7 @@ extensions = [
             str(BINDINGS_DIR / "_http2.pyx"),
             str(CORE_DIR / "http2_client.c"),
         ],
-        include_dirs=[str(CORE_DIR)] + [LIB_PATHS["openssl_include"], LIB_PATHS["nghttp2_include"]],
+        include_dirs=INCLUDE_DIRS,  # Use same include dirs as main extension
         library_dirs=LIBRARY_DIRS,
         libraries=EXT_LIBRARIES,
         extra_compile_args=EXT_COMPILE_ARGS,

@@ -9,6 +9,8 @@
  * - Connection pooling
  */
 
+/* Note: windows_compat.h is force-included via /FI compiler flag on Windows */
+
 /* POSIX feature macros (only for POSIX systems) */
 #ifndef _WIN32
     #define _POSIX_C_SOURCE 200809L
@@ -22,7 +24,7 @@
     #define strncasecmp _strnicmp
     #define strdup _strdup
     #define close closesocket
-    #define ssize_t SSIZE_T
+    /* ssize_t is defined via windows_compat.h as SSIZE_T */
     /* Helper for snprintf size parameter (Windows uses int, POSIX uses size_t) */
     #define SNPRINTF_SIZE(size) ((int)(size))
     /* Windows select() ignores first parameter (nfds) */
