@@ -29,7 +29,7 @@
 /* === Pool Management === */
 
 httpmorph_pool_t* pool_create(void) {
-    httpmorph_pool_t *pool = calloc(1, sizeof(httpmorph_pool_t));
+    httpmorph_pool_t *pool = (httpmorph_pool_t*)calloc(1, sizeof(httpmorph_pool_t));
     if (!pool) {
         return NULL;
     }
@@ -190,7 +190,7 @@ pooled_connection_t* pool_connection_create(const char *host,
         }
     #endif
 
-    pooled_connection_t *conn = calloc(1, sizeof(pooled_connection_t));
+    pooled_connection_t *conn = (pooled_connection_t*)calloc(1, sizeof(pooled_connection_t));
     if (!conn) {
         return NULL;
     }
