@@ -184,5 +184,73 @@ class TestSessionWithRealHTTPS:
         assert response2.status_code == 200
 
 
+class TestSessionHTTP2Flag:
+    """Test Session with HTTP/2 flag (httpx-like API)"""
+
+    def test_session_http2_flag_default(self):
+        """Test that Session http2 flag defaults to False"""
+        session = httpmorph.Session(browser="chrome")
+        assert hasattr(session, "http2")
+        assert session.http2 is False
+
+    def test_session_http2_flag_enabled(self):
+        """Test Session with http2=True"""
+        session = httpmorph.Session(browser="chrome", http2=True)
+        assert session.http2 is True
+
+        # Test actual HTTP/2 request
+        response = session.get("https://www.google.com", timeout=10)
+        assert response.status_code == 200
+        assert response.http_version == "2.0"
+
+    def test_session_http2_flag_disabled(self):
+        """Test Session with http2=False explicitly"""
+        session = httpmorph.Session(browser="chrome", http2=False)
+        assert session.http2 is False
+
+    def test_session_http2_per_request_override(self):
+        """Test per-request http2 parameter overrides session default"""
+        # Session default is False
+        session = httpmorph.Session(browser="chrome", http2=False)
+        assert session.http2 is False
+
+        # But request with http2=True should use HTTP/2
+        response = session.get("https://www.google.com", http2=True, timeout=10)
+        assert response.status_code == 200
+        assert response.http_version == "2.0"
+
+    def test_session_http2_flag_persistence(self):
+        """Test http2 flag persists across multiple requests"""
+        session = httpmorph.Session(browser="chrome", http2=True)
+
+        # Make multiple requests
+        for _ in range(3):
+            response = session.get("https://www.google.com", timeout=10)
+            assert response.http_version == "2.0"
+
+        # Flag should still be True
+        assert session.http2 is True
+
+    def test_session_http2_with_different_browsers(self):
+        """Test HTTP/2 flag works with different browser profiles"""
+        browsers = ["chrome", "firefox", "safari", "edge"]
+
+        for browser in browsers:
+            session = httpmorph.Session(browser=browser, http2=True)
+            assert session.http2 is True
+
+            response = session.get("https://www.google.com", timeout=10)
+            assert response.status_code == 200
+            assert response.http_version == "2.0", f"HTTP/2 failed for {browser} browser"
+
+    def test_session_http2_with_context_manager(self):
+        """Test HTTP/2 flag with session as context manager"""
+        with httpmorph.Session(browser="chrome", http2=True) as session:
+            assert session.http2 is True
+            response = session.get("https://www.google.com", timeout=10)
+            assert response.status_code == 200
+            assert response.http_version == "2.0"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

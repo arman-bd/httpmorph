@@ -996,12 +996,36 @@ static int proxy_connect(int sockfd, const char *target_host, uint16_t target_po
 
 /* Helper: TLS connect with browser fingerprint */
 static SSL* tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
+                        const browser_profile_t *profile, bool http2_enabled,
                         uint64_t *tls_time_us) {
     uint64_t start_time = get_time_us();
 
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         return NULL;
+    }
+
+    /* Set ALPN protocols based on http2_enabled flag */
+    if (profile && profile->alpn_protocol_count > 0) {
+        unsigned char alpn_list[256];
+        unsigned char *alpn_p = alpn_list;
+
+        for (int i = 0; i < profile->alpn_protocol_count; i++) {
+            /* Skip "h2" if HTTP/2 not enabled */
+            if (!http2_enabled && strcmp(profile->alpn_protocols[i], "h2") == 0) {
+                continue;
+            }
+
+            size_t len = strlen(profile->alpn_protocols[i]);
+            *alpn_p++ = (unsigned char)len;
+            memcpy(alpn_p, profile->alpn_protocols[i], len);
+            alpn_p += len;
+        }
+
+        /* Only set ALPN if we have protocols */
+        if (alpn_p > alpn_list) {
+            SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
+        }
     }
 
     /* Set SNI hostname */
@@ -2131,7 +2155,8 @@ httpmorph_response_t* httpmorph_request_execute(
     /* 2. TLS Handshake (if HTTPS and not reused) */
     if (use_tls && !ssl) {
         uint64_t tls_time = 0;
-        ssl = tls_connect(client->ssl_ctx, sockfd, host, &tls_time);
+        ssl = tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+                         request->http2_enabled, &tls_time);
         if (!ssl) {
             response->error = HTTPMORPH_ERROR_TLS;
             response->error_message = strdup("TLS handshake failed");
@@ -2228,7 +2253,8 @@ httpmorph_response_t* httpmorph_request_execute(
         /* New TLS handshake */
         if (use_tls) {
             uint64_t tls_time = 0;
-            ssl = tls_connect(client->ssl_ctx, sockfd, host, &tls_time);
+            ssl = tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+                             request->http2_enabled, &tls_time);
             if (!ssl) {
                 response->error = HTTPMORPH_ERROR_TLS;
                 response->error_message = strdup("TLS handshake failed");
@@ -2520,6 +2546,15 @@ void httpmorph_request_set_proxy(httpmorph_request_t *request,
     }
     if (password) {
         request->proxy_password = strdup(password);
+    }
+}
+
+/**
+ * Set HTTP/2 enabled flag
+ */
+void httpmorph_request_set_http2(httpmorph_request_t *request, bool enabled) {
+    if (request) {
+        request->http2_enabled = enabled;
     }
 }
 

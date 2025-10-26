@@ -340,13 +340,18 @@ class Response:
 class Client:
     """HTTP client using C implementation"""
 
-    def __init__(self):
+    def __init__(self, http2=False):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
+        self.http2 = http2  # HTTP/2 enabled flag
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request"""
+        # Handle http2 parameter - use client default if not specified
+        if "http2" not in kwargs:
+            kwargs["http2"] = self.http2
+
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")
@@ -603,11 +608,12 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
-    def __init__(self, browser="chrome"):
+    def __init__(self, browser="chrome", http2=False):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._session = _httpmorph.Session(browser=browser)
         self.browser = browser
+        self.http2 = http2  # HTTP/2 enabled flag
         self.headers = {}  # Persistent headers
         self._cookies = CookieDict(self._session.cookie_jar)
 
@@ -623,6 +629,10 @@ class Session:
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request within this session"""
+        # Handle http2 parameter - use session default if not specified
+        if "http2" not in kwargs:
+            kwargs["http2"] = self.http2
+
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")

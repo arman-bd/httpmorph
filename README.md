@@ -1,18 +1,95 @@
 # httpmorph
 
-[![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph)
+![Build](https://github.com/arman-bd/httpmorph/workflows/CI/badge.svg) [![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph) [![PyPI version](https://badge.fury.io/py/httpmorph.svg)](https://pypi.org/project/httpmorph/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A high-performance HTTP client for Python with advanced browser fingerprinting capabilities. Built with C for speed, designed for compatibility.
+A Python HTTP client focused on mimicking browser fingerprints.
+
+**⚠️ Work in Progress** - This library is in early development. Features and API may change.
 
 ## Features
 
 - **Requests-compatible API** - Drop-in replacement for most Python `requests` use cases
 - **High Performance** - Native C implementation with BoringSSL for blazing-fast HTTP/HTTPS
-- **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2
+- **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2 (httpx-like API)
 - **Browser Fingerprinting** - Realistic browser profiles (Chrome, Firefox, Safari, Edge)
 - **TLS Fingerprinting** - JA3 fingerprint generation and customization
 - **Connection Pooling** - Automatic connection reuse for better performance
 - **Session Management** - Persistent cookies and headers across requests
+
+## Performance
+
+httpmorph delivers exceptional performance, especially for remote requests where it's **1.83x - 3.34x faster than requests**.
+
+### Benchmark Results (100 requests - Mean Response Time in ms)
+
+**Test Environment:** macOS (Apple M2), httpmorph v0.1.3
+**Methodology:** Benchmarks run sequentially to avoid resource conflicts
+*Note: Results may vary based on hardware, network conditions, and server load*
+
+| Library | Local HTTP | Remote HTTP | Remote HTTPS | HTTP/2 |
+|---------|-------:|-------:|-------:|-------:|
+| **httpmorph** | **0.27ms** 🥇 | **190.50ms** 🥇 | **115.29ms** 🥇 | 582.77ms |
+| **requests** | 0.91ms | 348.71ms | 373.18ms | N/A |
+| **httpx** | 0.91ms | 348.71ms | 349.50ms | **446.78ms** 🥇 |
+| **aiohttp** | 0.83ms | 349.24ms | 350.73ms | N/A |
+| **urllib3** | 0.62ms | 351.44ms | 372.47ms | N/A |
+| **urllib** | 23.19ms | 380.34ms | 374.64ms | N/A |
+
+**Speedup vs requests:**
+- **Local HTTP**: 3.34x faster 🚀
+- **Remote HTTP**: 1.83x faster 🚀
+- **Remote HTTPS**: 3.24x faster 🔥
+
+### Performance Charts
+
+Click on any chart to view full size:
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_scenario_local_http.png">
+        <img src="benchmarks/res/benchmark_scenario_local_http.png" width="400px" alt="Local HTTP Performance"/>
+        <br/><b>Local HTTP Performance</b>
+      </a>
+    </td>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_scenario_remote_http.png">
+        <img src="benchmarks/res/benchmark_scenario_remote_http.png" width="400px" alt="Remote HTTP Performance"/>
+        <br/><b>Remote HTTP Performance</b>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_scenario_remote_https.png">
+        <img src="benchmarks/res/benchmark_scenario_remote_https.png" width="400px" alt="Remote HTTPS Performance"/>
+        <br/><b>Remote HTTPS Performance</b>
+      </a>
+    </td>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_scenario_http_2.png">
+        <img src="benchmarks/res/benchmark_scenario_http_2.png" width="400px" alt="HTTP/2 Performance"/>
+        <br/><b>HTTP/2 Performance</b>
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_speedup_comparison.png">
+        <img src="benchmarks/res/benchmark_speedup_comparison.png" width="400px" alt="Speedup Comparison"/>
+        <br/><b>Speedup vs requests</b>
+      </a>
+    </td>
+    <td align="center" width="50%">
+      <a href="benchmarks/res/benchmark_performance_heatmap.png">
+        <img src="benchmarks/res/benchmark_performance_heatmap.png" width="400px" alt="Performance Heatmap"/>
+        <br/><b>Performance Heatmap</b>
+      </a>
+    </td>
+  </tr>
+</table>
+
+For detailed benchmarks and more data, see [benchmarks/res/benchmark_results_latest.md](benchmarks/res/benchmark_results_latest.md).
 
 ## Installation
 
@@ -46,6 +123,11 @@ response = httpmorph.post(
 # Using sessions
 session = httpmorph.Session(browser='chrome')
 response = session.get('https://example.com')
+
+# HTTP/2 support (httpx-like API)
+client = httpmorph.Client(http2=True)
+response = client.get('https://www.google.com')
+print(response.http_version)  # '2.0'
 ```
 
 ## Browser Profiles
@@ -64,6 +146,26 @@ response = session.get('https://example.com')
 ```
 
 ## Advanced Usage
+
+### HTTP/2 Support
+
+httpmorph supports HTTP/2 with an httpx-like API:
+
+```python
+# Enable HTTP/2 for a client (default is False)
+client = httpmorph.Client(http2=True)
+response = client.get('https://www.google.com')
+print(response.http_version)  # '2.0'
+
+# Enable HTTP/2 for a session
+session = httpmorph.Session(browser='chrome', http2=True)
+response = session.get('https://www.google.com')
+print(response.http_version)  # '2.0'
+
+# Per-request HTTP/2 override
+client = httpmorph.Client(http2=False)  # Default disabled
+response = client.get('https://www.google.com', http2=True)  # Enable for this request
+```
 
 ### Custom Headers
 
@@ -270,7 +372,7 @@ sudo dnf install cmake ninja-build openssl-devel pkg-config autoconf automake li
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/httpmorph.git
+git clone https://github.com/arman-bd/httpmorph.git
 cd httpmorph
 
 # 2. Build vendor dependencies (BoringSSL, nghttp2, zlib)
@@ -289,7 +391,7 @@ pip install -e ".[dev]"
 
 ```bash
 # Clone and setup (includes building BoringSSL)
-git clone https://github.com/yourusername/httpmorph.git
+git clone https://github.com/arman-bd/httpmorph.git
 cd httpmorph
 ./scripts/setup_vendors.sh
 
@@ -365,9 +467,6 @@ A: httpmorph combines the performance of native C with browser fingerprinting ca
 **Q: Is it production-ready?**
 A: No, httpmorph is still in active development and not yet recommended for production use.
 
-**Q: What about Windows?**
-A: Windows support is in active development. The core functionality works, but some platform-specific features are still being refined.
-
 **Q: Can I use this as a drop-in replacement for requests?**
 A: For most common use cases, yes! We've implemented the most widely-used requests API. Some advanced features may have slight differences.
 
@@ -376,7 +475,7 @@ A: Please open an issue on GitHub with a minimal reproduction example and your e
 
 ## Support
 
-- GitHub Issues: [Report bugs and feature requests](https://github.com/yourusername/httpmorph/issues)
+- GitHub Issues: [Report bugs and feature requests](https://github.com/arman-bd/httpmorph/issues)
 - Documentation: [Full API documentation](https://httpmorph.readthedocs.io) (coming soon)
 
 ---

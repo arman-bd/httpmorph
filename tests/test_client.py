@@ -171,5 +171,53 @@ class TestClientWithRealHTTPS:
         assert response.http_version == "2.0"
 
 
+class TestClientHTTP2Flag:
+    """Test Client with HTTP/2 flag (httpx-like API)"""
+
+    def test_client_http2_flag_default(self):
+        """Test that Client http2 flag defaults to False"""
+        client = httpmorph.Client()
+        assert hasattr(client, "http2")
+        assert client.http2 is False
+
+    def test_client_http2_flag_enabled(self):
+        """Test Client with http2=True"""
+        client = httpmorph.Client(http2=True)
+        assert client.http2 is True
+
+        # Test actual HTTP/2 request
+        response = client.get("https://www.google.com", timeout=10)
+        assert response.status_code == 200
+        assert response.http_version == "2.0"
+
+    def test_client_http2_flag_disabled(self):
+        """Test Client with http2=False explicitly"""
+        client = httpmorph.Client(http2=False)
+        assert client.http2 is False
+
+    def test_client_http2_per_request_override(self):
+        """Test per-request http2 parameter overrides client default"""
+        # Client default is False
+        client = httpmorph.Client(http2=False)
+        assert client.http2 is False
+
+        # But request with http2=True should use HTTP/2
+        response = client.get("https://www.google.com", http2=True, timeout=10)
+        assert response.status_code == 200
+        assert response.http_version == "2.0"
+
+    def test_client_http2_flag_persistence(self):
+        """Test http2 flag persists across multiple requests"""
+        client = httpmorph.Client(http2=True)
+
+        # Make multiple requests
+        for _ in range(3):
+            response = client.get("https://www.google.com", timeout=10)
+            assert response.http_version == "2.0"
+
+        # Flag should still be True
+        assert client.http2 is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
