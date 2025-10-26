@@ -2134,6 +2134,11 @@ httpmorph_response_t* httpmorph_request_execute(
                     /* Connection reused - no connect/TLS time */
                     connect_time = 0;
                     response->tls_time_us = 0;
+
+                    /* Restore TLS info from pooled connection */
+                    if (pooled_conn->ja3_fingerprint) {
+                        response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
+                    }
                 }
             } else {
             }
@@ -2163,14 +2168,7 @@ httpmorph_response_t* httpmorph_request_execute(
         }
         response->tls_time_us = tls_time;
 
-        /* Extract TLS info */
-        const SSL_CIPHER *cipher = SSL_get_current_cipher(ssl);
-        if (cipher) {
-            response->tls_cipher = strdup(SSL_CIPHER_get_name(cipher));
-        }
-        response->tls_version = strdup(SSL_get_version(ssl));
-
-        /* Calculate JA3 fingerprint */
+        /* Calculate JA3 fingerprint (only for new connections) */
         response->ja3_fingerprint = calculate_ja3_fingerprint(ssl, client->browser_profile);
 
         /* Check negotiated ALPN protocol */
@@ -2202,6 +2200,15 @@ httpmorph_response_t* httpmorph_request_execute(
                 response->http_version = HTTPMORPH_VERSION_1_0;
             }
         }
+    }
+
+    /* Extract TLS info for all HTTPS connections (new and reused) */
+    if (use_tls && ssl) {
+        const SSL_CIPHER *cipher = SSL_get_current_cipher(ssl);
+        if (cipher) {
+            response->tls_cipher = strdup(SSL_CIPHER_get_name(cipher));
+        }
+        response->tls_version = strdup(SSL_get_version(ssl));
     }
 
 #ifdef HAVE_NGHTTP2
@@ -2361,6 +2368,18 @@ cleanup:
                 conn_to_pool = NULL;
             } else {
                 conn_to_pool = pool_connection_create(host, port, sockfd, ssl, use_http2);
+                /* Store TLS info in pooled connection for future reuse */
+                if (conn_to_pool && ssl) {
+                    if (response->ja3_fingerprint) {
+                        conn_to_pool->ja3_fingerprint = strdup(response->ja3_fingerprint);
+                    }
+                    if (response->tls_version) {
+                        conn_to_pool->tls_version = strdup(response->tls_version);
+                    }
+                    if (response->tls_cipher) {
+                        conn_to_pool->tls_cipher = strdup(response->tls_cipher);
+                    }
+                }
             }
         }
 

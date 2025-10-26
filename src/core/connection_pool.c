@@ -208,6 +208,11 @@ pooled_connection_t* pool_connection_create(const char *host,
     conn->last_used = time(NULL);
     conn->next = NULL;
 
+    /* Initialize TLS info fields */
+    conn->ja3_fingerprint = NULL;
+    conn->tls_version = NULL;
+    conn->tls_cipher = NULL;
+
 #ifdef HAVE_NGHTTP2
     conn->http2_session = NULL;
     conn->http2_stream_data = NULL;
@@ -231,6 +236,17 @@ void pool_connection_destroy(pooled_connection_t *conn) {
     }
     /* Note: http2_stream_data is managed separately and freed when session ends */
 #endif
+
+    /* Free TLS info */
+    if (conn->ja3_fingerprint) {
+        free(conn->ja3_fingerprint);
+    }
+    if (conn->tls_version) {
+        free(conn->tls_version);
+    }
+    if (conn->tls_cipher) {
+        free(conn->tls_cipher);
+    }
 
     /* Close SSL */
     if (conn->ssl) {

@@ -48,6 +48,11 @@ struct pooled_connection {
     bool preface_sent;                      /* HTTP/2 preface already sent on this connection */
     pool_connection_state_t state;          /* Current connection state */
 
+    /* TLS fingerprinting info (for HTTPS connections) */
+    char *ja3_fingerprint;                  /* JA3 fingerprint from initial handshake */
+    char *tls_version;                      /* TLS version string */
+    char *tls_cipher;                       /* TLS cipher suite name */
+
 #ifdef HAVE_NGHTTP2
     /* HTTP/2 session (only if is_http2 is true) */
     void *http2_session;                    /* nghttp2_session* */
