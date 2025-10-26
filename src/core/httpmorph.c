@@ -314,7 +314,8 @@ static int configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) {
         }
 
         if (nid_count > 0) {
-            SSL_CTX_set1_curves(ctx, nids, nid_count);
+            /* BoringSSL uses SSL_CTX_set1_groups (curves are now called groups) */
+            SSL_CTX_set1_groups(ctx, nids, nid_count);
         }
     }
 
@@ -358,10 +359,8 @@ int httpmorph_init(void) {
     }
 #endif
 
-    /* Initialize BoringSSL */
-    SSL_library_init();
-    SSL_load_error_strings();
-    OpenSSL_add_all_algorithms();
+    /* Initialize BoringSSL - no explicit initialization needed */
+    /* BoringSSL initializes automatically, unlike old OpenSSL versions */
 
     /* Create default I/O engine */
     default_io_engine = io_engine_create(256);
@@ -1225,7 +1224,7 @@ static int send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t *re
     /* Add default headers if missing */
     if (!has_user_agent) {
         /* Use request's user agent if set, otherwise use generic */
-        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.0";
+        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.3";
         p += snprintf(p, SNPRINTF_SIZE(end - p), "User-Agent: %s\r\n", user_agent);
     }
     if (!has_accept) {
