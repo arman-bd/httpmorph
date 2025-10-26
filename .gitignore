@@ -47,6 +47,7 @@ dmypy.json
 
 # Documentation
 docs/_build/
+docs/build/
 
 # Virtual environments
 venv/

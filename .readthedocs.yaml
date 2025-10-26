@@ -4,16 +4,19 @@
 # Required
 version: 2
 
-# Set the OS, Python version, and other tools you might need
+# Set the OS, Python version and other tools you might need
 build:
   os: ubuntu-24.04
   tools:
-    ruby: "3.3"
+    python: "3.11"
 
-  commands:
-    # Install dependencies
-    - gem install bundler
-    - bundle install
-    # Build the site and save generated files into Read the Docs directory
-    - jekyll build --destination $READTHEDOCS_OUTPUT/html
-        
+# Build documentation in the docs/ directory with Sphinx
+sphinx:
+  configuration: docs/source/conf.py
+
+# Install Python dependencies required to build your docs
+python:
+  install:
+    - requirements: docs/requirements.txt
+    - method: pip
+      path: .
