@@ -16,12 +16,14 @@
 /* Platform-specific includes */
 #ifdef _WIN32
     #include <winsock2.h>
+    #include <windows.h>
     #define close closesocket
 #else
     #include <unistd.h>
     #include <sys/socket.h>
     #include <fcntl.h>
     #include <errno.h>
+    #include <pthread.h>
 #endif
 
 #include <openssl/ssl.h>
@@ -41,6 +43,31 @@ httpmorph_pool_t* pool_create(void) {
     pool->max_total_connections = POOL_MAX_TOTAL_CONNECTIONS;
     pool->idle_timeout_seconds = POOL_IDLE_TIMEOUT_SECONDS;
 
+    /* Initialize mutex for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
+    if (cs) {
+        InitializeCriticalSection(cs);
+        pool->mutex = cs;
+    } else {
+        free(pool);
+        return NULL;
+    }
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+    if (mutex) {
+        if (pthread_mutex_init(mutex, NULL) != 0) {
+            free(mutex);
+            free(pool);
+            return NULL;
+        }
+        pool->mutex = mutex;
+    } else {
+        free(pool);
+        return NULL;
+    }
+#endif
+
     return pool;
 }
 
@@ -57,6 +84,19 @@ void pool_destroy(httpmorph_pool_t *pool) {
         conn = next;
     }
 
+    /* Destroy mutex */
+    if (pool->mutex) {
+#ifdef _WIN32
+        CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+        DeleteCriticalSection(cs);
+        free(cs);
+#else
+        pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+        pthread_mutex_destroy(mutex);
+        free(mutex);
+#endif
+    }
+
     free(pool);
 }
 
@@ -64,6 +104,15 @@ void pool_cleanup_idle(httpmorph_pool_t *pool) {
     if (!pool) {
         return;
     }
+
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
 
     time_t now = time(NULL);
     pooled_connection_t **curr = &pool->connections;
@@ -84,6 +133,13 @@ void pool_cleanup_idle(httpmorph_pool_t *pool) {
             curr = &conn->next;
         }
     }
+
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
 }
 
 /* === Connection Operations === */
@@ -95,12 +151,23 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
         return NULL;
     }
 
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
     /* Build host key */
     char host_key[POOL_MAX_HOST_KEY_LEN];
     pool_build_host_key(host, port, host_key);
 
     /* Search for matching connection */
     pooled_connection_t **curr = &pool->connections;
+    pooled_connection_t *result = NULL;
+
     while (*curr) {
         pooled_connection_t *conn = *curr;
 
@@ -116,7 +183,8 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
                 conn->last_used = time(NULL);
                 conn->next = NULL;
 
-                return conn;
+                result = conn;
+                break;
             } else {
                 /* Connection is dead - remove and destroy it */
                 *curr = conn->next;
@@ -130,8 +198,14 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
         }
     }
 
-    /* No connection found */
-    return NULL;
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+
+    return result;
 }
 
 bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
@@ -139,22 +213,31 @@ bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
         return false;
     }
 
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
     /* Skip validation on put - we'll validate on get instead.
      * This saves 4 fcntl() system calls per request. */
 
+    bool result = false;
+
     /* Check if pool is full */
     if (pool->total_connections >= pool->max_total_connections) {
-        /* Pool is full - close connection */
-        pool_connection_destroy(conn);
-        return false;
+        /* Pool is full - close connection (outside lock) */
+        goto unlock_and_destroy;
     }
 
     /* Check per-host limit */
     int host_conn_count = pool_count_connections_for_host(pool, conn->host_key);
     if (host_conn_count >= pool->max_connections_per_host) {
-        /* Too many connections for this host */
-        pool_connection_destroy(conn);
-        return false;
+        /* Too many connections for this host (outside lock) */
+        goto unlock_and_destroy;
     }
 
     /* Add to pool */
@@ -167,7 +250,22 @@ bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
         pool->active_connections--;
     }
 
-    return true;
+    result = true;
+
+unlock_and_destroy:
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+
+    /* Destroy connection if not pooled (outside of lock) */
+    if (!result) {
+        pool_connection_destroy(conn);
+    }
+
+    return result;
 }
 
 pooled_connection_t* pool_connection_create(const char *host,
@@ -208,6 +306,12 @@ pooled_connection_t* pool_connection_create(const char *host,
     conn->last_used = time(NULL);
     conn->next = NULL;
 
+    /* Initialize proxy info fields */
+    conn->is_proxy = false;
+    conn->proxy_url = NULL;
+    conn->target_host = NULL;
+    conn->target_port = 0;
+
     /* Initialize TLS info fields */
     conn->ja3_fingerprint = NULL;
     conn->tls_version = NULL;
@@ -236,6 +340,14 @@ void pool_connection_destroy(pooled_connection_t *conn) {
     }
     /* Note: http2_stream_data is managed separately and freed when session ends */
 #endif
+
+    /* Free proxy info */
+    if (conn->proxy_url) {
+        free(conn->proxy_url);
+    }
+    if (conn->target_host) {
+        free(conn->target_host);
+    }
 
     /* Free TLS info */
     if (conn->ja3_fingerprint) {

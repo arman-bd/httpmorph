@@ -53,7 +53,7 @@ cdef extern from "../include/httpmorph.h":
     # Forward declarations
     ctypedef struct httpmorph_client_t
     ctypedef struct httpmorph_session_t
-    ctypedef struct httpmorph_pool
+    ctypedef struct httpmorph_pool_t
 
     # Forward declarations
     ctypedef struct httpmorph_request_t
@@ -96,7 +96,8 @@ cdef extern from "../include/httpmorph.h":
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
     void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
     void httpmorph_request_set_http2(httpmorph_request_t *request, bint enabled) nogil
-    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool *pool) nogil
+    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool_t *pool) nogil
+    httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client) nogil
 
     # Response API
     void httpmorph_response_destroy(httpmorph_response *response) nogil
@@ -155,6 +156,7 @@ cdef class Client:
         cdef httpmorph_response *resp
         cdef const char* c_username
         cdef const char* c_password
+        cdef httpmorph_pool_t* client_pool
 
         # Convert method string to enum
         method_upper = method.upper()
@@ -249,9 +251,10 @@ cdef class Client:
                 httpmorph_request_set_body(req, <const uint8_t*>body, len(body))
 
             # Execute request (release GIL to allow other Python threads to run)
-            # Client doesn't have connection pooling - pass NULL for pool
+            # Use client's connection pool for reuse
+            client_pool = httpmorph_client_get_pool(self._client)
             with nogil:
-                resp = httpmorph_request_execute(self._client, req, NULL)
+                resp = httpmorph_request_execute(self._client, req, client_pool)
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 

@@ -48,6 +48,12 @@ struct pooled_connection {
     bool preface_sent;                      /* HTTP/2 preface already sent on this connection */
     pool_connection_state_t state;          /* Current connection state */
 
+    /* Proxy connection info */
+    bool is_proxy;                          /* True if connection goes through proxy */
+    char *proxy_url;                        /* Proxy URL (for proxy connections) */
+    char *target_host;                      /* Target host (for HTTPS CONNECT tunnels) */
+    uint16_t target_port;                   /* Target port (for HTTPS CONNECT tunnels) */
+
     /* TLS fingerprinting info (for HTTPS connections) */
     char *ja3_fingerprint;                  /* JA3 fingerprint from initial handshake */
     char *tls_version;                      /* TLS version string */
@@ -79,6 +85,13 @@ struct httpmorph_pool {
     int max_connections_per_host;
     int max_total_connections;
     int idle_timeout_seconds;
+
+    /* Thread safety */
+#ifdef _WIN32
+    void *mutex;  /* CRITICAL_SECTION* */
+#else
+    void *mutex;  /* pthread_mutex_t* */
+#endif
 };
 
 /* === Pool Management === */

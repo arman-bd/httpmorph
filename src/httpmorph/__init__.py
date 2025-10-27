@@ -58,6 +58,15 @@ if not HAS_C_EXTENSION:
 
 print("[httpmorph] Using C extension with BoringSSL", file=sys.stderr)
 
+# Import async support
+try:
+    from httpmorph._async import AsyncClient, request as async_request, get as async_get, post as async_post
+    HAS_ASYNC = True
+except ImportError:
+    HAS_ASYNC = False
+    AsyncClient = None
+    async_request = async_get = async_post = None
+
 __all__ = [
     "Client",
     "Session",
@@ -80,4 +89,9 @@ __all__ = [
     "cleanup",
     "version",
     "HAS_HTTP2",
+    "HAS_ASYNC",
+    "AsyncClient",
+    "async_request",
+    "async_get",
+    "async_post",
 ]

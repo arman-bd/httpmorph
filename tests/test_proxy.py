@@ -300,6 +300,156 @@ class TestRealProxyIntegration:
         response_data = response.json()
         assert response_data.get("json") == data
 
+    def test_https_with_custom_headers_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS request with custom headers via real proxy"""
+        headers = {
+            "User-Agent": "httpmorph-test/1.0",
+            "X-Custom-Header": "test-value",
+            "Accept": "application/json",
+        }
+        response = httpmorph.get(
+            "https://httpbin.org/headers", headers=headers, proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        # Verify custom headers were sent
+        assert "X-Custom-Header" in response_data.get("headers", {})
+        assert response_data["headers"]["X-Custom-Header"] == "test-value"
+
+    def test_https_redirects_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS redirects through real proxy"""
+        # httpbin.org/redirect/3 will redirect 3 times
+        response = httpmorph.get(
+            "https://httpbin.org/redirect/3", proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        # Check that redirects were followed
+        assert len(response.history) == 3
+        for redirect in response.history:
+            assert redirect.status_code in [301, 302, 303, 307, 308]
+
+    def test_https_no_redirects_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS with allow_redirects=False via real proxy"""
+        response = httpmorph.get(
+            "https://httpbin.org/redirect/1",
+            proxy=real_proxy_url,
+            allow_redirects=False,
+            timeout=30,
+        )
+        # Should get the redirect status, not follow it
+        assert response.status_code in [301, 302, 303, 307, 308]
+        assert len(response.history) == 0
+
+    def test_https_json_response_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS JSON response via real proxy"""
+        response = httpmorph.get("https://httpbin.org/json", proxy=real_proxy_url, timeout=30)
+        # httpbin.org sometimes returns 502, be resilient
+        if response.status_code == 502:
+            pytest.skip("httpbin.org returned 502 (temporary service issue)")
+        assert response.status_code == 200
+        # Should be able to parse JSON
+        data = response.json()
+        assert isinstance(data, dict)
+        assert "slideshow" in data
+
+    def test_https_put_request_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS PUT request via real proxy"""
+        data = {"updated": "value"}
+        response = httpmorph.put(
+            "https://httpbin.org/put", json=data, proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data.get("json") == data
+
+    def test_https_delete_request_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS DELETE request via real proxy"""
+        response = httpmorph.delete(
+            "https://httpbin.org/delete", proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        assert "url" in response_data
+
+    def test_https_timeout_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS request timeout via real proxy"""
+        # httpbin.org/delay/5 delays response by 5 seconds
+        try:
+            response = httpmorph.get(
+                "https://httpbin.org/delay/5", proxy=real_proxy_url, timeout=1
+            )
+            # Should timeout
+            assert response.status_code == 0  # Timeout error
+        except Exception as e:
+            # Timeout exception is also acceptable
+            assert "timeout" in str(e).lower() or "timed out" in str(e).lower()
+
+    def test_https_connection_pooling_via_real_proxy(self, real_proxy_url):
+        """Test connection pooling for HTTPS requests via real proxy"""
+        # Make multiple requests to the same host to test connection reuse
+        urls = [
+            "https://httpbin.org/get",
+            "https://httpbin.org/user-agent",
+            "https://httpbin.org/headers",
+            "https://httpbin.org/ip",
+        ]
+
+        session = httpmorph.Session(browser="chrome")
+
+        for url in urls:
+            response = session.get(url, proxy=real_proxy_url, timeout=30)
+            assert response.status_code == 200
+
+    def test_https_large_response_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS request with large response via real proxy"""
+        # Request a large JSON response (100 slides)
+        response = httpmorph.get(
+            "https://httpbin.org/stream/100", proxy=real_proxy_url, timeout=30
+        )
+        assert response.status_code == 200
+        # Response should contain multiple lines
+        lines = response.text.strip().split("\n")
+        assert len(lines) >= 50  # Should have many lines
+
+    def test_https_basic_auth_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS with basic authentication via real proxy"""
+        # Note: This is site authentication, not proxy authentication
+        response = httpmorph.get(
+            "https://httpbin.org/basic-auth/user/pass",
+            auth=("user", "pass"),
+            proxy=real_proxy_url,
+            timeout=30,
+        )
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data.get("authenticated") is True
+        assert response_data.get("user") == "user"
+
+    def test_https_verify_ssl_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS with SSL verification via real proxy"""
+        # Test with SSL verification enabled (default)
+        response = httpmorph.get(
+            "https://httpbin.org/get", proxy=real_proxy_url, verify=True, timeout=30
+        )
+        assert response.status_code == 200
+
+    def test_https_different_ports_via_real_proxy(self, real_proxy_url):
+        """Test HTTPS to different ports via real proxy"""
+        # Most HTTPS sites use port 443, test a few common endpoints
+        urls = [
+            "https://www.google.com",
+            "https://github.com",
+            "https://api.github.com",
+        ]
+
+        for url in urls:
+            try:
+                response = httpmorph.get(url, proxy=real_proxy_url, timeout=30)
+                assert response.status_code in [200, 301, 302, 403]
+            except Exception as e:
+                # Some sites might block proxies, that's okay
+                pytest.skip(f"Site {url} not accessible via proxy: {e}")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

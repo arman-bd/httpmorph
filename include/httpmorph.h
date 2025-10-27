@@ -164,6 +164,11 @@ const char* httpmorph_version(void);
 httpmorph_client_t* httpmorph_client_create(void);
 
 /**
+ * Get the connection pool from a client
+ */
+httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client);
+
+/**
  * Destroy an HTTP client
  */
 void httpmorph_client_destroy(httpmorph_client_t *client);
