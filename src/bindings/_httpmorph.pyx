@@ -60,12 +60,16 @@ cdef extern from "../include/httpmorph.h":
     ctypedef httpmorph_request_t httpmorph_request
     ctypedef struct httpmorph_response_t
 
+    # Header structure for better cache locality
+    ctypedef struct httpmorph_header_t:
+        char *key
+        char *value
+
     # Response structure (match the header exactly)
     struct httpmorph_response:
         uint16_t status_code
         httpmorph_version_t http_version
-        char **header_keys
-        char **header_values
+        httpmorph_header_t *headers
         size_t header_count
         uint8_t *body
         size_t body_len
@@ -108,6 +112,9 @@ cdef extern from "../include/httpmorph.h":
     void httpmorph_session_destroy(httpmorph_session_t *session) nogil
     httpmorph_response* httpmorph_session_request(httpmorph_session_t *session, const httpmorph_request_t *request) nogil
     size_t httpmorph_session_cookie_count(httpmorph_session_t *session) nogil
+
+    # Async I/O API
+    int httpmorph_pool_get_connection_fd(httpmorph_pool_t *pool, const char *host, uint16_t port) nogil
 
 
 # Python classes
@@ -278,11 +285,11 @@ cdef class Client:
 
             # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('latin-1')
+                key = resp.headers[i].key.decode('latin-1')
                 try:
-                    value = resp.header_values[i].decode('latin-1')
+                    value = resp.headers[i].value.decode('latin-1')
                 except:
-                    value = resp.header_values[i].decode('utf-8', errors='replace')
+                    value = resp.headers[i].value.decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response
@@ -292,6 +299,34 @@ cdef class Client:
 
         finally:
             httpmorph_request_destroy(req)
+
+    def get_connection_fd(self, str host, int port):
+        """Get file descriptor from connection pool for event loop integration
+
+        Returns the underlying socket file descriptor for a pooled connection.
+        This enables integration with async event loops (asyncio.add_reader/add_writer).
+
+        Args:
+            host: Target hostname
+            port: Target port number
+
+        Returns:
+            int: File descriptor (>= 0) on success, -1 if no active connection found
+
+        Example:
+            >>> client = Client()
+            >>> response = client.request('GET', 'https://example.com')
+            >>> fd = client.get_connection_fd('example.com', 443)
+            >>> if fd >= 0:
+            >>>     print(f"Socket FD: {fd}")
+        """
+        cdef httpmorph_pool_t* pool = httpmorph_client_get_pool(self._client)
+        if pool is NULL:
+            return -1
+
+        host_bytes = host.encode('utf-8')
+        cdef int fd = httpmorph_pool_get_connection_fd(pool, <const char*>host_bytes, port)
+        return fd
 
 
 cdef class Session:
@@ -524,11 +559,11 @@ cdef class Session:
 
             # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('latin-1')
+                key = resp.headers[i].key.decode('latin-1')
                 try:
-                    value = resp.header_values[i].decode('latin-1')
+                    value = resp.headers[i].value.decode('latin-1')
                 except:
-                    value = resp.header_values[i].decode('utf-8', errors='replace')
+                    value = resp.headers[i].value.decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response

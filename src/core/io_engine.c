@@ -210,18 +210,91 @@ void io_engine_destroy(io_engine_t *engine) {
     if (engine->type == IO_ENGINE_URING && engine->ring) {
         io_uring_queue_exit(engine->ring);
         free(engine->ring);
+        engine->ring = NULL;
     }
 #endif
 
     if (engine->engine_fd >= 0) {
         close(engine->engine_fd);
+        engine->engine_fd = -1;
     }
 
-    printf("[io_engine] Stats - submitted: %" PRIu64 ", completed: %" PRIu64 ", failed: %" PRIu64 "\n",
-           engine->ops_submitted, engine->ops_completed, engine->ops_failed);
+    /* Only print stats if there was actual activity */
+    if (engine->ops_submitted > 0 || engine->ops_completed > 0 || engine->ops_failed > 0) {
+        /* Avoid printf during program exit - can cause crashes */
+        fprintf(stderr, "[io_engine] Stats - submitted: %" PRIu64 ", completed: %" PRIu64 ", failed: %" PRIu64 "\n",
+               engine->ops_submitted, engine->ops_completed, engine->ops_failed);
+    }
 
     free(engine);
 }
+
+/**
+ * Submit an I/O operation - epoll implementation
+ */
+#ifdef __linux__
+static int io_engine_submit_epoll(io_engine_t *engine, io_operation_t *op) {
+    struct epoll_event ev = {0};
+
+    switch (op->type) {
+        case IO_OP_RECV:
+            ev.events = EPOLLIN | EPOLLET;  /* Edge-triggered read */
+            break;
+        case IO_OP_SEND:
+            ev.events = EPOLLOUT | EPOLLET;  /* Edge-triggered write */
+            break;
+        case IO_OP_CONNECT:
+            ev.events = EPOLLOUT | EPOLLET;  /* Connect completes on writable */
+            break;
+        default:
+            return -1;
+    }
+
+    ev.data.ptr = op;  /* Store operation pointer in event data */
+
+    if (epoll_ctl(engine->engine_fd, EPOLL_CTL_ADD, op->fd, &ev) < 0) {
+        /* If already exists, modify instead */
+        if (errno == EEXIST) {
+            if (epoll_ctl(engine->engine_fd, EPOLL_CTL_MOD, op->fd, &ev) < 0) {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
+
+/**
+ * Submit an I/O operation - kqueue implementation
+ */
+#ifdef __APPLE__
+static int io_engine_submit_kqueue(io_engine_t *engine, io_operation_t *op) {
+    struct kevent kev;
+
+    switch (op->type) {
+        case IO_OP_RECV:
+            EV_SET(&kev, op->fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, op);
+            break;
+        case IO_OP_SEND:
+        case IO_OP_CONNECT:
+            EV_SET(&kev, op->fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, op);
+            break;
+        default:
+            return -1;
+    }
+
+    if (kevent(engine->engine_fd, &kev, 1, NULL, 0, NULL) < 0) {
+        return -1;
+    }
+
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
 
 /**
  * Submit an I/O operation
@@ -231,8 +304,18 @@ int io_engine_submit(io_engine_t *engine, io_operation_t *op) {
         return -1;
     }
 
-    /* For now, just a placeholder */
-    return 0;
+    switch (engine->type) {
+#ifdef __linux__
+        case IO_ENGINE_EPOLL:
+            return io_engine_submit_epoll(engine, op);
+#endif
+#ifdef __APPLE__
+        case IO_ENGINE_KQUEUE:
+            return io_engine_submit_kqueue(engine, op);
+#endif
+        default:
+            return -1;
+    }
 }
 
 /**
@@ -254,6 +337,92 @@ int io_engine_submit_batch(io_engine_t *engine, io_operation_t **ops, size_t cou
 }
 
 /**
+ * Wait for I/O completions - epoll implementation
+ */
+#ifdef __linux__
+static int epoll_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    struct epoll_event events[MAX_EVENTS];
+    int n = epoll_wait(engine->engine_fd, events, MAX_EVENTS, timeout_ms);
+
+    if (n < 0) {
+        if (errno == EINTR) {
+            return 0;  /* Interrupted, try again */
+        }
+        return -1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        io_operation_t *op = (io_operation_t*)events[i].data.ptr;
+        if (!op) {
+            continue;
+        }
+
+        /* Determine result based on events */
+        if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+            op->result = -1;
+            engine->ops_failed++;
+        } else {
+            op->result = 0;
+            engine->ops_completed++;
+        }
+
+        /* Invoke callback if registered */
+        if (op->callback) {
+            op->callback(op);
+        }
+    }
+
+    return n;
+}
+#endif
+
+/**
+ * Wait for I/O completions - kqueue implementation
+ */
+#ifdef __APPLE__
+static int kqueue_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    struct kevent events[MAX_EVENTS];
+    struct timespec timeout;
+
+    /* Convert milliseconds to timespec */
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_nsec = (timeout_ms % 1000) * 1000000;
+
+    int n = kevent(engine->engine_fd, NULL, 0, events, MAX_EVENTS, &timeout);
+
+    if (n < 0) {
+        if (errno == EINTR) {
+            return 0;  /* Interrupted, try again */
+        }
+        return -1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        io_operation_t *op = (io_operation_t*)events[i].udata;
+        if (!op) {
+            continue;
+        }
+
+        /* Determine result based on flags */
+        if (events[i].flags & EV_ERROR) {
+            op->result = -1;
+            engine->ops_failed++;
+        } else {
+            op->result = (int)events[i].data;  /* Number of bytes available */
+            engine->ops_completed++;
+        }
+
+        /* Invoke callback if registered */
+        if (op->callback) {
+            op->callback(op);
+        }
+    }
+
+    return n;
+}
+#endif
+
+/**
  * Wait for I/O completions
  */
 int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
@@ -261,8 +430,18 @@ int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
         return -1;
     }
 
-    /* Placeholder */
-    return 0;
+    switch (engine->type) {
+#ifdef __linux__
+        case IO_ENGINE_EPOLL:
+            return epoll_wait_events(engine, timeout_ms);
+#endif
+#ifdef __APPLE__
+        case IO_ENGINE_KQUEUE:
+            return kqueue_wait_events(engine, timeout_ms);
+#endif
+        default:
+            return -1;
+    }
 }
 
 /**
@@ -273,7 +452,8 @@ int io_engine_process_completions(io_engine_t *engine) {
         return -1;
     }
 
-    /* Placeholder */
+    /* For epoll/kqueue, callbacks are invoked in wait function */
+    /* This function can be used for additional post-processing if needed */
     return 0;
 }
 

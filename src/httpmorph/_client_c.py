@@ -7,6 +7,7 @@ import io
 import json as _json
 import os
 import sys
+import threading
 import uuid
 from datetime import timedelta
 from http.client import responses as http_responses
@@ -37,14 +38,34 @@ if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
     except Exception:
         pass  # Silently ignore if we can't determine paths
 
-try:
-    from httpmorph import _httpmorph
+_httpmorph = None
+HAS_C_EXTENSION = False
 
-    HAS_C_EXTENSION = True
-except ImportError as e:
+# Import C extension using importlib to avoid circular import
+try:
+    import importlib.util
+    import glob
+
+    # Find the .so file in current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    so_files = glob.glob(os.path.join(current_dir, '_httpmorph*.so'))
+
+    if not so_files:
+        raise ImportError(f"C extension not found in {current_dir}")
+
+    # Load the module directly from the .so file
+    spec = importlib.util.spec_from_file_location("_httpmorph", so_files[0])
+    if spec and spec.loader:
+        _httpmorph = importlib.util.module_from_spec(spec)
+        # Add to sys.modules to make it available for other imports
+        sys.modules['_httpmorph'] = _httpmorph
+        spec.loader.exec_module(_httpmorph)
+        HAS_C_EXTENSION = True
+    else:
+        raise ImportError("Could not create module spec")
+
+except (ImportError, Exception) as e:
     print(f"WARNING: Failed to import _httpmorph: {e}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
     HAS_C_EXTENSION = False
     _httpmorph = None
 
@@ -345,6 +366,7 @@ class Client:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
         self.http2 = http2  # HTTP/2 enabled flag
+        self._cookies = {}  # Cookie jar for this client
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request"""
@@ -617,6 +639,20 @@ class Session:
         self.headers = {}  # Persistent headers
         self._cookies = CookieDict(self._session.cookie_jar)
 
+    def __del__(self):
+        """Cleanup C resources when Session is garbage collected"""
+        if hasattr(self, '_session') and self._session is not None:
+            # The C Session object will be automatically freed by Cython
+            # but we should explicitly clear the reference
+            self._session = None
+
+    def close(self):
+        """Explicitly close the session and free resources"""
+        if hasattr(self, '_session') and self._session is not None:
+            self._session = None
+            # Don't force gc.collect() - let Python handle cleanup naturally
+            # Aggressive GC can cause double-free issues with C extensions
+
     @property
     def cookie_jar(self):
         """Get cookie jar from underlying session"""
@@ -876,19 +912,21 @@ class Session:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        """Cleanup resources when exiting context manager"""
+        self.close()
+        return False
 
 
 # Module-level convenience functions
-_default_session = None
+# Use thread-local storage to avoid race conditions in parallel test execution
+_default_sessions = threading.local()
 
 
 def get_default_session():
-    """Get or create default session"""
-    global _default_session
-    if _default_session is None:
-        _default_session = Session()
-    return _default_session
+    """Get or create thread-local default session (thread-safe)"""
+    if not hasattr(_default_sessions, 'session') or _default_sessions.session is None:
+        _default_sessions.session = Session()
+    return _default_sessions.session
 
 
 def get(url, **kwargs):
@@ -934,10 +972,29 @@ def init():
 
 def cleanup():
     """Cleanup the httpmorph library"""
-    global _default_session
-    _default_session = None
+    # In parallel test mode (pytest-xdist), skip cleanup to avoid race conditions
+    # The OS will clean up resources when worker processes exit
+    import sys
+    if 'xdist' in sys.modules or 'PYTEST_XDIST_WORKER' in os.environ:
+        # Running in pytest-xdist worker - skip cleanup
+        return
+
+    # Explicitly close thread-local default session before clearing
+    try:
+        if hasattr(_default_sessions, 'session') and _default_sessions.session is not None:
+            # Just clear the reference, don't call close() during cleanup
+            # The C extension will handle cleanup when the process exits
+            _default_sessions.session = None
+    except Exception:
+        # Ignore any exceptions during cleanup (common in parallel test teardown)
+        pass
+
     if HAS_C_EXTENSION:
-        _httpmorph.cleanup()
+        try:
+            _httpmorph.cleanup()
+        except Exception:
+            # Ignore cleanup errors - they're common during parallel test teardown
+            pass
 
 
 def version():

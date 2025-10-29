@@ -13,36 +13,36 @@ from tests.test_server import MockHTTPServer
 class TestClientHTTP2Flag:
     """Test Client class with HTTP/2 flag"""
 
-    def test_client_http2_default_false(self):
+    def test_client_http2_default_false(self, httpbin_host):
         """Test that Client http2 flag defaults to False"""
         client = httpmorph.Client()
         assert client.http2 is False
 
-    def test_client_http2_true(self):
+    def test_client_http2_true(self, httpbin_host):
         """Test Client with http2=True"""
         client = httpmorph.Client(http2=True)
         assert client.http2 is True
 
-    def test_client_http2_enabled_request(self):
+    def test_client_http2_enabled_request(self, httpbin_host):
         """Test request with http2=True returns HTTP/2"""
         client = httpmorph.Client(http2=True)
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_client_http2_per_request_override_enable(self):
+    def test_client_http2_per_request_override_enable(self, httpbin_host):
         """Test per-request http2=True overrides client default"""
         client = httpmorph.Client(http2=False)  # Default disabled
-        response = client.get("https://httpbingo.org/get", http2=True, timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", http2=True, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_client_http2_per_request_override_disable(self):
+    def test_client_http2_per_request_override_disable(self, httpbin_host):
         """Test per-request http2=False overrides client default"""
         client = httpmorph.Client(http2=True)  # Default enabled
         # Use a server that supports both HTTP/1.1 and HTTP/2
         try:
-            response = client.get("https://example.com", http2=False, timeout=10)
+            response = client.get(f"https://{httpbin_host}", http2=False, timeout=10)
             # If server supports it, should get HTTP/1.1
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
             # Note: Some servers may still negotiate HTTP/2, so we don't assert version
@@ -50,13 +50,13 @@ class TestClientHTTP2Flag:
             # Some servers require HTTP/2
             pytest.skip(f"Server requires HTTP/2: {e}")
 
-    def test_client_http2_flag_persistence(self):
+    def test_client_http2_flag_persistence(self, httpbin_host):
         """Test that client http2 flag persists across requests"""
         client = httpmorph.Client(http2=True)
 
         # Make multiple requests
         for _ in range(3):
-            response = client.get("https://httpbingo.org/get", timeout=10)
+            response = client.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.http_version == "2.0"
             assert client.http2 is True  # Flag should remain True
 
@@ -74,37 +74,37 @@ class TestSessionHTTP2Flag:
         session = httpmorph.Session(browser="chrome", http2=True)
         assert session.http2 is True
 
-    def test_session_http2_enabled_request(self):
+    def test_session_http2_enabled_request(self, httpbin_host):
         """Test session request with http2=True returns HTTP/2"""
         session = httpmorph.Session(browser="chrome", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_session_http2_per_request_override(self):
+    def test_session_http2_per_request_override(self, httpbin_host):
         """Test per-request http2 override in session"""
         session = httpmorph.Session(browser="chrome", http2=False)
-        response = session.get("https://httpbingo.org/get", http2=True, timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", http2=True, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_session_http2_with_different_browsers(self):
+    def test_session_http2_with_different_browsers(self, httpbin_host):
         """Test HTTP/2 works with different browser profiles"""
         browsers = ["chrome", "firefox", "safari", "edge"]
 
         for browser in browsers:
             session = httpmorph.Session(browser=browser, http2=True)
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
             assert response.http_version == "2.0", f"HTTP/2 failed for {browser}"
 
-    def test_session_http2_flag_persistence(self):
+    def test_session_http2_flag_persistence(self, httpbin_host):
         """Test that session http2 flag persists across requests"""
         session = httpmorph.Session(browser="chrome", http2=True)
 
         # Make multiple requests
         for _ in range(3):
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.http_version == "2.0"
             assert session.http2 is True  # Flag should remain True
 
@@ -126,39 +126,39 @@ class TestHTTP2WithMockServer:
 class TestHTTP2Compatibility:
     """Test HTTP/2 API compatibility with httpx"""
 
-    def test_httpx_style_client_api(self):
+    def test_httpx_style_client_api(self, httpbin_host):
         """Test httpx-style Client(http2=True) API"""
         # This should work exactly like httpx.Client(http2=True)
         client = httpmorph.Client(http2=True)
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert hasattr(response, "http_version")
         assert response.http_version == "2.0"
 
-    def test_httpx_style_session_api(self):
+    def test_httpx_style_session_api(self, httpbin_host):
         """Test httpx-style session with http2 parameter"""
         # Similar to httpx session API
         with httpmorph.Session(browser="chrome", http2=True) as session:
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
             assert response.http_version == "2.0"
 
-    def test_httpx_style_per_request_override(self):
+    def test_httpx_style_per_request_override(self, httpbin_host):
         """Test httpx-style per-request http2 override"""
         client = httpmorph.Client(http2=False)
 
         # Override at request level (like httpx)
-        response = client.get("https://httpbingo.org/get", http2=True, timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", http2=True, timeout=10)
         assert response.http_version == "2.0"
 
 
 class TestHTTP2Features:
     """Test HTTP/2 specific features"""
 
-    def test_http2_response_attributes(self):
+    def test_http2_response_attributes(self, httpbin_host):
         """Test that HTTP/2 responses have expected attributes"""
         client = httpmorph.Client(http2=True)
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
 
         # Standard response attributes
         assert hasattr(response, "status_code")
@@ -175,7 +175,7 @@ class TestHTTP2Features:
         assert hasattr(response, "tls_cipher")
         assert response.tls_version is not None
 
-    def test_http2_with_headers(self):
+    def test_http2_with_headers(self, httpbin_host):
         """Test HTTP/2 request with custom headers"""
         client = httpmorph.Client(http2=True)
         headers = {
@@ -183,28 +183,28 @@ class TestHTTP2Features:
             "Accept": "application/json",
             "X-Custom-Header": "test-value",
         }
-        response = client.get("https://httpbingo.org/get", headers=headers, timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", headers=headers, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_http2_post_request(self):
+    def test_http2_post_request(self, httpbin_host):
         """Test HTTP/2 POST request with JSON data"""
         client = httpmorph.Client(http2=True)
         data = {"test": "data", "number": 42}
 
         # Use httpbingo.org which supports HTTP/2
         response = client.post(
-            "https://httpbingo.org/post",
+            f"https://{httpbin_host}/post",
             json=data,
             timeout=10
         )
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_http2_timing_information(self):
+    def test_http2_timing_information(self, httpbin_host):
         """Test that HTTP/2 requests include timing information"""
         client = httpmorph.Client(http2=True)
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
 
         assert response.total_time_us > 0
         assert response.first_byte_time_us > 0
@@ -215,12 +215,12 @@ class TestHTTP2Features:
 class TestHTTP2EdgeCases:
     """Test HTTP/2 edge cases and error handling"""
 
-    def test_http2_with_timeout(self):
+    def test_http2_with_timeout(self, httpbin_host):
         """Test HTTP/2 request with timeout"""
         client = httpmorph.Client(http2=True)
 
         # Should complete within timeout
-        response = client.get("https://httpbingo.org/get", timeout=5)
+        response = client.get(f"https://{httpbin_host}/get", timeout=5)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
     def test_http2_flag_type_checking(self):
@@ -237,14 +237,14 @@ class TestHTTP2EdgeCases:
         client3 = httpmorph.Client()
         assert client3.http2 is False
 
-    def test_http2_multiple_concurrent_requests(self):
+    def test_http2_multiple_concurrent_requests(self, httpbin_host):
         """Test HTTP/2 with concurrent requests (multiplexing)"""
         import concurrent.futures
 
         client = httpmorph.Client(http2=True)
 
         def make_request():
-            return client.get("https://httpbingo.org/get", timeout=10)
+            return client.get(f"https://{httpbin_host}/get", timeout=10)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             futures = [executor.submit(make_request) for _ in range(10)]

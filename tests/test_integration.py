@@ -11,29 +11,29 @@ from tests.test_server import MockHTTPServer
 class TestRealHTTPSIntegration:
     """Integration tests with real HTTPS endpoints"""
 
-    def test_example_com(self):
+    def test_example_com(self, httpbin_host):
         """Test connection to example.com"""
         response = httpmorph.get("https://example.com")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert b"Example Domain" in response.body
         print(f"Response time: {response.total_time_us / 1000}ms")
 
-    def test_example_com_with_chrome(self):
-        """Test example.com with Chrome profile"""
+    def test_example_com_with_chrome(self, httpbin_host):
+        """Test HTTPS with Chrome profile"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.tls_version is not None
 
-    def test_example_com_with_firefox(self):
-        """Test example.com with Firefox profile"""
+    def test_example_com_with_firefox(self, httpbin_host):
+        """Test HTTPS with Firefox profile"""
         session = httpmorph.Session(browser="firefox")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_google_http2(self):
+    def test_google_http2(self, httpbin_host):
         """Test Google with HTTP/2"""
-        response = httpmorph.get("https://httpbingo.org/get")
+        response = httpmorph.get(f"https://{httpbin_host}/get")
         assert response.status_code in [200, 301, 302]
         # Google supports HTTP/2
         assert response.http_version in ["1.1", "2.0"]
@@ -92,7 +92,7 @@ class TestRealHTTPSIntegration:
             data = json.loads(response.body)
             assert "user-agent" in data
 
-    def test_httpbin_gzip(self):
+    def test_httpbin_gzip(self, httpbin_host):
         """Test gzip compression"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/gzip")
@@ -102,7 +102,7 @@ class TestRealHTTPSIntegration:
             data = json.loads(response.body)
             assert data["gzipped"] is True
 
-    def test_httpbin_status_codes(self):
+    def test_httpbin_status_codes(self, httpbin_host):
         """Test various HTTP status codes"""
         status_codes = [200, 204, 400, 404, 500]
         with MockHTTPServer() as server:
@@ -110,7 +110,7 @@ class TestRealHTTPSIntegration:
                 response = httpmorph.get(f"{server.url}/status/{code}")
                 assert response.status_code == code
 
-    def test_httpbin_redirect(self):
+    def test_httpbin_redirect(self, httpbin_host):
         """Test redirect handling - redirects are now followed by default"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/redirect/3")
@@ -119,9 +119,9 @@ class TestRealHTTPSIntegration:
             # Should have redirect history
             assert len(response.history) == 3
 
-    def test_multiple_domains_in_sequence(self):
+    def test_multiple_domains_in_sequence(self, httpbin_host):
         """Test requests to multiple different domains"""
-        domains = ["https://example.com", "https://httpbingo.org/get", "https://icanhazip.com"]
+        domains = ["https://example.com", f"https://{httpbin_host}/get", "https://icanhazip.com"]
 
         session = httpmorph.Session(browser="chrome")
         for domain in domains:
@@ -129,11 +129,11 @@ class TestRealHTTPSIntegration:
             assert response.status_code in [200, 301, 302, 403]
             print(f"{domain}: {response.status_code}")
 
-    def test_concurrent_requests_different_domains(self):
+    def test_concurrent_requests_different_domains(self, httpbin_host):
         """Test concurrent requests to different domains"""
         import concurrent.futures
 
-        urls = ["https://example.com", "https://httpbingo.org/get", "https://icanhazip.com"]
+        urls = ["https://example.com", f"https://{httpbin_host}/get", "https://icanhazip.com"]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(httpmorph.get, url) for url in urls]
@@ -145,19 +145,19 @@ class TestRealHTTPSIntegration:
 class TestTLSVersions:
     """Test different TLS versions"""
 
-    def test_tls_1_2(self):
+    def test_tls_1_2(self, httpbin_host):
         """Test TLS 1.2 connection
 
         Note: tls_version parameter not yet implemented for requests.
         Server negotiates the highest available version (TLSv1.3).
         """
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.tls_version in ["TLSv1.2", "TLSv1.3"]
 
-    def test_tls_1_3(self):
+    def test_tls_1_3(self, httpbin_host):
         """Test TLS 1.3 connection"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         # TLS version format is "TLSv1.3" not "1.3"
         assert response.tls_version == "TLSv1.3"
@@ -192,7 +192,7 @@ class TestPerformance:
 class TestFingerprintDetection:
     """Test against fingerprint detection services"""
 
-    def test_tls_fingerprint_detection(self):
+    def test_tls_fingerprint_detection(self, httpbin_host):
         """Test TLS fingerprint against detection service"""
         # There are services that can detect TLS fingerprints
         # This would test against such a service
@@ -201,24 +201,24 @@ class TestFingerprintDetection:
         # and verify it looks like Chrome
         pass
 
-    def test_ja3_fingerprint_uniqueness(self):
+    def test_ja3_fingerprint_uniqueness(self, httpbin_host):
         """Test JA3 fingerprints are unique per browser"""
         browsers = ["chrome", "firefox", "safari", "edge"]
         fingerprints = {}
 
         for browser in browsers:
             session = httpmorph.Session(browser=browser)
-            response = session.get("https://example.com")
+            response = session.get(f"https://{httpbin_host}")
             fingerprints[browser] = response.ja3_fingerprint
 
         # All fingerprints should be unique
         unique_fingerprints = set(fingerprints.values())
         assert len(unique_fingerprints) == len(browsers)
 
-    def test_http2_fingerprint_detection(self):
+    def test_http2_fingerprint_detection(self, httpbin_host):
         """Test HTTP/2 fingerprint detection"""
         session = httpmorph.Session(browser="chrome", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", timeout=10)
 
         # Should use HTTP/2 with Chrome-like SETTINGS
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2

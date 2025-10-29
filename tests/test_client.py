@@ -114,7 +114,7 @@ class TestClient:
             with pytest.raises(httpmorph.Timeout):
                 httpmorph.get(f"{server.url}/delay/1", timeout=0.1)
 
-    def test_response_timing(self):
+    def test_response_timing(self, httpbin_host):
         """Test response timing information"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/get")
@@ -122,7 +122,7 @@ class TestClient:
             assert hasattr(response, "total_time_us")
             assert response.total_time_us > 0
 
-    def test_gzip_decompression(self):
+    def test_gzip_decompression(self, httpbin_host):
         """Test automatic gzip decompression"""
         with MockHTTPServer() as server:
             response = httpmorph.get(f"{server.url}/gzip")
@@ -137,27 +137,27 @@ class TestClient:
 class TestClientWithRealHTTPS:
     """Test client with real HTTPS connections"""
 
-    def test_real_https_connection(self):
+    def test_real_https_connection(self, httpbin_host):
         """Test connection to real HTTPS server"""
         response = httpmorph.get("https://example.com")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert b"Example Domain" in response.body
 
-    def test_tls_information(self):
+    def test_tls_information(self, httpbin_host):
         """Test TLS information is captured"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         assert hasattr(response, "tls_version")
         assert hasattr(response, "tls_cipher")
         assert response.tls_version is not None
 
-    def test_ja3_fingerprint(self):
+    def test_ja3_fingerprint(self, httpbin_host):
         """Test JA3 fingerprint is generated"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         assert hasattr(response, "ja3_fingerprint")
         assert response.ja3_fingerprint is not None
         assert len(response.ja3_fingerprint) > 0
 
-    def test_http2_connection(self):
+    def test_http2_connection(self, httpbin_host):
         """Test HTTP/2 connection
 
         HTTP/2 support is fully implemented using nghttp2:
@@ -167,7 +167,7 @@ class TestClientWithRealHTTPS:
         - EOF handling in recv_callback ✓
         """
         client = httpmorph.Client(http2=True)
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
         # httpbingo returns 402 for HTTP/2 requests
         assert response.status_code in [200, 402]
         assert response.http_version == "2.0"
@@ -182,13 +182,13 @@ class TestClientHTTP2Flag:
         assert hasattr(client, "http2")
         assert client.http2 is False
 
-    def test_client_http2_flag_enabled(self):
+    def test_client_http2_flag_enabled(self, httpbin_host):
         """Test Client with http2=True"""
         client = httpmorph.Client(http2=True)
         assert client.http2 is True
 
         # Test actual HTTP/2 request
-        response = client.get("https://httpbingo.org/get", timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
@@ -197,24 +197,24 @@ class TestClientHTTP2Flag:
         client = httpmorph.Client(http2=False)
         assert client.http2 is False
 
-    def test_client_http2_per_request_override(self):
+    def test_client_http2_per_request_override(self, httpbin_host):
         """Test per-request http2 parameter overrides client default"""
         # Client default is False
         client = httpmorph.Client(http2=False)
         assert client.http2 is False
 
         # But request with http2=True should use HTTP/2
-        response = client.get("https://httpbingo.org/get", http2=True, timeout=10)
+        response = client.get(f"https://{httpbin_host}/get", http2=True, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_client_http2_flag_persistence(self):
+    def test_client_http2_flag_persistence(self, httpbin_host):
         """Test http2 flag persists across multiple requests"""
         client = httpmorph.Client(http2=True)
 
         # Make multiple requests
         for _ in range(3):
-            response = client.get("https://httpbingo.org/get", timeout=10)
+            response = client.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.http_version == "2.0"
 
         # Flag should still be True

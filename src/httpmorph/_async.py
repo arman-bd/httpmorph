@@ -1,25 +1,34 @@
 """
 Async/await support for httpmorph using Python's asyncio.
 
-This provides a native async API that integrates with asyncio event loops,
-giving excellent concurrent performance without threading issues.
+This provides a native async API using run_in_executor to prevent blocking
+the event loop. This approach:
+- Runs C operations in a thread pool (non-blocking to event loop)
+- Enables excellent concurrent performance
+- Avoids SSL threading issues through proper executor usage
+
+The C layer includes non-blocking socket infrastructure (WOULD_BLOCK handling)
+which is prepared for future event-loop-based async integration.
 """
 
 import asyncio
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Optional
 
 if TYPE_CHECKING:
-    from . import Response
+    pass
 
 # Import at runtime
-import httpmorph
 
 
 class AsyncClient:
-    """Async HTTP client with native asyncio support.
+    """Async HTTP client with asyncio support.
 
-    Uses run_in_executor to run blocking C operations without blocking
-    the event loop. For true async, would need non-blocking C sockets.
+    Uses asyncio.run_in_executor to run C operations in a thread pool,
+    preventing event loop blocking. This provides excellent concurrent
+    performance for async/await code.
+
+    The underlying C layer includes non-blocking socket infrastructure
+    ready for future event-loop-based async integration.
     """
 
     def __init__(self, http2: bool = False, timeout: int = 30):

@@ -47,6 +47,7 @@ struct pooled_connection {
     bool is_valid;                          /* Connection still alive */
     bool preface_sent;                      /* HTTP/2 preface already sent on this connection */
     pool_connection_state_t state;          /* Current connection state */
+    int ref_count;                          /* Reference count for sharing (HTTP/2 multiplexing) */
 
     /* Proxy connection info */
     bool is_proxy;                          /* True if connection goes through proxy */
@@ -63,6 +64,7 @@ struct pooled_connection {
     /* HTTP/2 session (only if is_http2 is true) */
     void *http2_session;                    /* nghttp2_session* */
     void *http2_stream_data;                /* http2_stream_data_t* - persistent callback data */
+    void *http2_session_manager;            /* http2_session_manager_t* - for concurrent multiplexing */
 #endif
 
     /* Linked list */
@@ -189,5 +191,74 @@ void pool_build_host_key(const char *host, int port, char *key_out);
  * @return Number of connections for this host
  */
 int pool_count_connections_for_host(httpmorph_pool_t *pool, const char *host_key);
+
+/* Forward declare httpmorph_client_t */
+typedef struct httpmorph_client httpmorph_client_t;
+
+/**
+ * Pre-warm connections to a host
+ * Establishes N connections and adds them to the pool
+ *
+ * @param pool The connection pool
+ * @param client HTTP client for creating connections
+ * @param host Hostname to pre-warm
+ * @param port Port number
+ * @param use_tls Whether to use TLS
+ * @param count Number of connections to pre-warm
+ * @return Number of connections successfully pre-warmed
+ */
+int pool_prewarm_connections(httpmorph_pool_t *pool,
+                             httpmorph_client_t *client,
+                             const char *host,
+                             int port,
+                             bool use_tls,
+                             int count);
+
+/* === Async I/O Support === */
+
+/**
+ * Socket event callback type
+ * Called when a socket becomes readable or writable
+ */
+typedef void (*socket_event_callback_t)(int sockfd, void *user_data);
+
+/**
+ * Get file descriptor from a pooled connection
+ * Returns the underlying socket file descriptor for event loop integration
+ *
+ * @param conn Pooled connection
+ * @return File descriptor (>= 0) on success, -1 if connection is invalid or closed
+ */
+int httpmorph_connection_get_fd(pooled_connection_t *conn);
+
+/**
+ * Register callback for socket readable event
+ * This is a placeholder for Phase A - actual event loop integration happens in Python
+ *
+ * @param conn Pooled connection
+ * @param callback Callback function to invoke when socket is readable
+ * @param user_data User data to pass to callback
+ * @return 0 on success, -1 on error
+ */
+int httpmorph_connection_on_readable(
+    pooled_connection_t *conn,
+    socket_event_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Register callback for socket writable event
+ * This is a placeholder for Phase A - actual event loop integration happens in Python
+ *
+ * @param conn Pooled connection
+ * @param callback Callback function to invoke when socket is writable
+ * @param user_data User data to pass to callback
+ * @return 0 on success, -1 on error
+ */
+int httpmorph_connection_on_writable(
+    pooled_connection_t *conn,
+    socket_event_callback_t callback,
+    void *user_data
+);
 
 #endif /* HTTPMORPH_CONNECTION_POOL_H */

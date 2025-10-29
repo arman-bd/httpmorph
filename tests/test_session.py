@@ -67,7 +67,7 @@ class TestSession:
             response = session.get(f"{server.url}/get")
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_session_post_request(self):
+    def test_session_post_request(self, httpbin_host):
         """Test POST request using session"""
         with MockHTTPServer() as server:
             session = httpmorph.Session(browser="chrome")
@@ -75,7 +75,7 @@ class TestSession:
             response = session.post(f"{server.url}/post", json=data)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_session_multiple_requests(self):
+    def test_session_multiple_requests(self, httpbin_host):
         """Test multiple requests with same session"""
         with MockHTTPServer() as server:
             session = httpmorph.Session(browser="chrome")
@@ -85,26 +85,26 @@ class TestSession:
                 response = session.get(f"{server.url}/get")
                 assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_session_fingerprint_consistency(self):
+    def test_session_fingerprint_consistency(self, httpbin_host):
         """Test that session maintains consistent fingerprint"""
         session = httpmorph.Session(browser="chrome")
 
         # Make multiple requests
         fingerprints = []
         for _ in range(3):
-            response = session.get("https://example.com")
+            response = session.get(f"https://{httpbin_host}")
             fingerprints.append(response.ja3_fingerprint)
 
         # All fingerprints should be the same within a session
         assert len(set(fingerprints)) == 1
 
-    def test_different_sessions_different_fingerprints(self):
+    def test_different_sessions_different_fingerprints(self, httpbin_host):
         """Test that different sessions have different fingerprints when using random"""
         fingerprints = []
 
         for _ in range(3):
             session = httpmorph.Session(browser="random")
-            response = session.get("https://example.com")
+            response = session.get(f"https://{httpbin_host}")
             fingerprints.append(response.ja3_fingerprint)
 
         # Should have variation (though not guaranteed to be different)
@@ -119,25 +119,25 @@ class TestSession:
             response = session.get(f"{server.url}/headers", headers=headers)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_session_cookie_persistence(self):
+    def test_session_cookie_persistence(self, httpbin_host):
         """Test that session maintains cookies"""
         session = httpmorph.Session(browser="chrome")
 
         # Test with httpbingo cookies endpoint
-        session.get("https://httpbingo.org/cookies/set?test=value&session=abc123")
+        session.get(f"https://{httpbin_host}/cookies/set?test=value&session=abc123")
         cookies_before = len(session.cookie_jar)
 
         # Cookies should be set after cookies/set request
         assert cookies_before > 0, "No cookies were set by httpbingo"
 
         # Second request - cookies should persist
-        session.get("https://httpbingo.org/cookies")
+        session.get(f"https://{httpbin_host}/cookies")
         cookies_after = len(session.cookie_jar)
 
         # Cookie count should be stable (same cookies)
         assert cookies_after >= cookies_before, "Cookies were lost between requests"
 
-    def test_session_context_manager(self):
+    def test_session_context_manager(self, httpbin_host):
         """Test session as context manager"""
         with MockHTTPServer() as server:
             with httpmorph.Session(browser="chrome") as session:
@@ -148,37 +148,37 @@ class TestSession:
 class TestSessionWithRealHTTPS:
     """Test session with real HTTPS connections"""
 
-    def test_session_real_https(self):
+    def test_session_real_https(self, httpbin_host):
         """Test session with real HTTPS endpoint"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_chrome_session_characteristics(self):
+    def test_chrome_session_characteristics(self, httpbin_host):
         """Test Chrome session has Chrome characteristics"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Should have Chrome-like TLS fingerprint
         assert response.tls_version is not None
         assert response.ja3_fingerprint is not None
 
-    def test_firefox_session_characteristics(self):
+    def test_firefox_session_characteristics(self, httpbin_host):
         """Test Firefox session has Firefox characteristics"""
         session = httpmorph.Session(browser="firefox")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Should have Firefox-like TLS fingerprint
         assert response.tls_version is not None
         assert response.ja3_fingerprint is not None
 
-    def test_session_multiple_domains(self):
+    def test_session_multiple_domains(self, httpbin_host):
         """Test session working with multiple domains"""
         session = httpmorph.Session(browser="chrome")
 
         # Request to different domains
-        response1 = session.get("https://example.com")
-        response2 = session.get("https://httpbingo.org/get")
+        response1 = session.get(f"https://{httpbin_host}")
+        response2 = session.get(f"https://{httpbin_host}/get")
 
         assert response1.status_code == 200
         assert response2.status_code == 200
@@ -193,13 +193,13 @@ class TestSessionHTTP2Flag:
         assert hasattr(session, "http2")
         assert session.http2 is False
 
-    def test_session_http2_flag_enabled(self):
+    def test_session_http2_flag_enabled(self, httpbin_host):
         """Test Session with http2=True"""
         session = httpmorph.Session(browser="chrome", http2=True)
         assert session.http2 is True
 
         # Test actual HTTP/2 request
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
@@ -208,30 +208,30 @@ class TestSessionHTTP2Flag:
         session = httpmorph.Session(browser="chrome", http2=False)
         assert session.http2 is False
 
-    def test_session_http2_per_request_override(self):
+    def test_session_http2_per_request_override(self, httpbin_host):
         """Test per-request http2 parameter overrides session default"""
         # Session default is False
         session = httpmorph.Session(browser="chrome", http2=False)
         assert session.http2 is False
 
         # But request with http2=True should use HTTP/2
-        response = session.get("https://httpbingo.org/get", http2=True, timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", http2=True, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_session_http2_flag_persistence(self):
+    def test_session_http2_flag_persistence(self, httpbin_host):
         """Test http2 flag persists across multiple requests"""
         session = httpmorph.Session(browser="chrome", http2=True)
 
         # Make multiple requests
         for _ in range(3):
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.http_version == "2.0"
 
         # Flag should still be True
         assert session.http2 is True
 
-    def test_session_http2_with_different_browsers(self):
+    def test_session_http2_with_different_browsers(self, httpbin_host):
         """Test HTTP/2 flag works with different browser profiles"""
         browsers = ["chrome", "firefox", "safari", "edge"]
 
@@ -239,15 +239,15 @@ class TestSessionHTTP2Flag:
             session = httpmorph.Session(browser=browser, http2=True)
             assert session.http2 is True
 
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
             assert response.http_version == "2.0", f"HTTP/2 failed for {browser} browser"
 
-    def test_session_http2_with_context_manager(self):
+    def test_session_http2_with_context_manager(self, httpbin_host):
         """Test HTTP/2 flag with session as context manager"""
         with httpmorph.Session(browser="chrome", http2=True) as session:
             assert session.http2 is True
-            response = session.get("https://httpbingo.org/get", timeout=10)
+            response = session.get(f"https://{httpbin_host}/get", timeout=10)
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
             assert response.http_version == "2.0"
 

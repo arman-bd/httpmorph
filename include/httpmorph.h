@@ -70,6 +70,12 @@ typedef struct httpmorph_response httpmorph_response_t;
 typedef struct httpmorph_session httpmorph_session_t;
 typedef struct httpmorph_pool httpmorph_pool_t;
 
+/* Header structure - stores key-value pairs together for better cache locality */
+typedef struct {
+    char *key;
+    char *value;
+} httpmorph_header_t;
+
 /* Request structure */
 struct httpmorph_request {
     httpmorph_method_t method;
@@ -78,10 +84,10 @@ struct httpmorph_request {
     uint16_t port;
     bool use_tls;
 
-    /* Headers */
-    char **header_keys;
-    char **header_values;
+    /* Headers - optimized for cache locality */
+    httpmorph_header_t *headers;
     size_t header_count;
+    size_t header_capacity;  /* Pre-allocated header capacity */
 
     /* Body */
     uint8_t *body;
@@ -102,6 +108,11 @@ struct httpmorph_request {
     /* HTTP/2 control */
     bool http2_enabled;
 
+    /* HTTP/2 priority (RFC 7540 Section 5.3) */
+    int32_t http2_stream_dependency;  /* Parent stream ID (0 = no dependency) */
+    int32_t http2_priority_weight;    /* Priority weight: 1-256 (default: 16) */
+    bool http2_priority_exclusive;    /* Exclusive dependency flag */
+
     /* TLS fingerprinting */
     char *ja3_string;
     char *user_agent;
@@ -112,15 +123,19 @@ struct httpmorph_response {
     uint16_t status_code;
     httpmorph_version_t http_version;
 
-    /* Headers */
-    char **header_keys;
-    char **header_values;
+    /* Headers - optimized for cache locality */
+    httpmorph_header_t *headers;
     size_t header_count;
+    size_t header_capacity;  /* Pre-allocated header capacity */
 
     /* Body */
     uint8_t *body;
     size_t body_len;
     size_t body_capacity;
+
+    /* Internal: Buffer pool tracking (do not access directly) */
+    void *_buffer_pool;  /* httpmorph_buffer_pool_t* */
+    size_t _body_actual_size;  /* Actual allocated size (for pool return) */
 
     /* Timing */
     uint64_t connect_time_us;
@@ -242,6 +257,32 @@ void httpmorph_request_set_http2(
     bool enabled
 );
 
+/**
+ * Set HTTP/2 priority for request (RFC 7540 Section 5.3)
+ *
+ * Priority allows control over resource loading order:
+ * - Higher weight = more important
+ * - Stream dependency creates parent-child relationships
+ * - Exclusive flag makes this stream the only child of parent
+ *
+ * Common weight values:
+ * - 256: Highest priority (critical resources like HTML)
+ * - 128: High priority (CSS, fonts)
+ * - 16:  Default/medium priority
+ * - 1:   Lowest priority (images, analytics)
+ *
+ * @param request Request to configure
+ * @param stream_dependency Parent stream ID (0 for no dependency)
+ * @param weight Priority weight: 1-256 (higher = more important)
+ * @param exclusive Whether to make this stream exclusive child of parent
+ */
+void httpmorph_request_set_http2_priority(
+    httpmorph_request_t *request,
+    int32_t stream_dependency,
+    int32_t weight,
+    bool exclusive
+);
+
 /* Response helpers */
 
 /**
@@ -283,6 +324,27 @@ httpmorph_response_t* httpmorph_session_request(
  * Get cookie count for session
  */
 size_t httpmorph_session_cookie_count(httpmorph_session_t *session);
+
+/* Async I/O API */
+
+/**
+ * Get file descriptor from connection pool
+ * Retrieves the underlying socket file descriptor from a pooled connection
+ * for integration with event loops (asyncio, etc.)
+ *
+ * Note: This requires access to internal pool connection structure
+ * Use with caution - for advanced async I/O integration only
+ *
+ * @param pool Connection pool
+ * @param host Target host
+ * @param port Target port
+ * @return File descriptor (>= 0) on success, -1 if no active connection found
+ */
+int httpmorph_pool_get_connection_fd(
+    httpmorph_pool_t *pool,
+    const char *host,
+    uint16_t port
+);
 
 #ifdef __cplusplus
 }

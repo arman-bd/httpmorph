@@ -56,14 +56,15 @@ if IS_WINDOWS:
 else:
     # GCC/Clang flags
     EXTRA_COMPILE_ARGS = [
-        "-O3",  # Maximum optimization
-        "-march=native",  # CPU-specific optimizations
-        "-ffast-math",  # Fast math operations
+        "-O1",  # Lower optimization for better ASan reports
+        "-g",  # Debug symbols
+        "-fsanitize=address",  # AddressSanitizer
+        "-fno-omit-frame-pointer",  # Better stack traces
         "-Wall",  # All warnings
         "-Wextra",  # Extra warnings
         "-std=c11",  # C11 standard
     ]
-    EXTRA_LINK_ARGS = []
+    EXTRA_LINK_ARGS = ["-fsanitize=address"]
 
 # Add io_uring if available
 if HAS_IO_URING:
@@ -380,28 +381,16 @@ if IS_WINDOWS:
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
     EXT_LINK_ARGS = []  # No special linker flags for Windows
 else:
-    # More aggressive optimizations for Unix/macOS
+    # Production optimized build
     import platform
     EXT_COMPILE_ARGS = [
         "-std=c11",
-        "-O3",  # More aggressive optimization than -O2
+        "-O3",
+        "-march=native" if platform.machine() in ["x86_64", "AMD64"] else "-mcpu=native",
+        "-ffast-math",
         "-DHAVE_NGHTTP2",
     ]
-
-    # Add CPU-specific optimizations
-    machine = platform.machine()
-    if machine in ('arm64', 'aarch64'):
-        # ARM (Apple Silicon, etc.)
-        EXT_COMPILE_ARGS.append("-mcpu=native")
-    elif machine in ('x86_64', 'AMD64'):
-        # x86_64
-        EXT_COMPILE_ARGS.append("-march=native")
-
-    # Add Link-Time Optimization for even better performance
-    EXT_COMPILE_ARGS.append("-flto")
-
-    # Linker flags (must include -flto for LTO to work)
-    EXT_LINK_ARGS = ["-flto"]
+    EXT_LINK_ARGS = []
 
     # Unix library names
     EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
@@ -414,6 +403,7 @@ BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
 INCLUDE_DIRS = [
     str(INCLUDE_DIR),
     str(CORE_DIR),
+    str(CORE_DIR / "internal"),  # Add internal headers directory for modular architecture
     str(TLS_DIR),
     str(SRC_DIR / "include"),  # Add src/include for windows_compat.h
     LIB_PATHS["openssl_include"],
@@ -437,9 +427,30 @@ extensions = [
         "httpmorph._httpmorph",
         sources=[
             str(BINDINGS_DIR / "_httpmorph.pyx"),
-            str(CORE_DIR / "httpmorph.c"),
+            # Modular C source files (refactored from httpmorph.c)
+            str(CORE_DIR / "util.c"),
+            str(CORE_DIR / "url.c"),
+            str(CORE_DIR / "network.c"),
+            str(CORE_DIR / "proxy.c"),
+            str(CORE_DIR / "tls.c"),
+            str(CORE_DIR / "compression.c"),
+            str(CORE_DIR / "cookies.c"),
+            str(CORE_DIR / "request.c"),
+            str(CORE_DIR / "response.c"),
+            str(CORE_DIR / "client.c"),
+            str(CORE_DIR / "session.c"),
+            str(CORE_DIR / "http1.c"),
+            str(CORE_DIR / "http2_logic.c"),
+            str(CORE_DIR / "http2_session_manager.c"),
+            str(CORE_DIR / "core.c"),
+            # Supporting modules
             str(CORE_DIR / "connection_pool.c"),
+            str(CORE_DIR / "buffer_pool.c"),
+            str(CORE_DIR / "request_builder.c"),
+            str(CORE_DIR / "string_intern.c"),
             str(CORE_DIR / "io_engine.c"),
+            str(CORE_DIR / "async_request.c"),
+            str(CORE_DIR / "async_request_manager.c"),
             str(TLS_DIR / "browser_profiles.c"),
         ],
         include_dirs=INCLUDE_DIRS,

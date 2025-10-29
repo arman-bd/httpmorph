@@ -5,12 +5,16 @@
  */
 
 #include "connection_pool.h"
+#include "internal/network.h"
+#include "internal/tls.h"
+#include "internal/client.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 #ifdef HAVE_NGHTTP2
     #include <nghttp2/nghttp2.h>
+    #include "http2_session_manager.h"
 #endif
 
 /* Platform-specific includes */
@@ -76,27 +80,54 @@ void pool_destroy(httpmorph_pool_t *pool) {
         return;
     }
 
-    /* Close and free all connections */
+    /* Lock mutex before destroying to prevent concurrent access */
+    void *mutex_ptr = pool->mutex;
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)mutex_ptr;
+    if (cs) {
+        EnterCriticalSection(cs);
+    }
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)mutex_ptr;
+    if (mutex) {
+        pthread_mutex_lock(mutex);
+    }
+#endif
+
+    /* Close and free all connections while holding lock
+     * BUT only if they're not still in use (ref_count == 0)
+     * If ref_count > 0, the connection is still being used by another thread
+     * and we should NOT destroy it to avoid use-after-free bugs */
     pooled_connection_t *conn = pool->connections;
     while (conn) {
         pooled_connection_t *next = conn->next;
-        pool_connection_destroy(conn);
+
+        /* Only destroy if not in use */
+        if (conn->ref_count == 0) {
+            pool_connection_destroy(conn);
+        }
+        /* If ref_count > 0, leak it rather than crash - the OS will clean up on exit */
+
         conn = next;
     }
+    pool->connections = NULL;
 
-    /* Destroy mutex */
-    if (pool->mutex) {
+    /* Unlock before destroying mutex */
 #ifdef _WIN32
-        CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) {
+        LeaveCriticalSection(cs);
         DeleteCriticalSection(cs);
         free(cs);
+    }
 #else
-        pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) {
+        pthread_mutex_unlock(mutex);
         pthread_mutex_destroy(mutex);
         free(mutex);
-#endif
     }
+#endif
 
+    pool->mutex = NULL;
     free(pool);
 }
 
@@ -174,13 +205,23 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
         if (strcmp(conn->host_key, host_key) == 0) {
             /* Found matching host - validate it */
             if (pool_connection_validate(conn)) {
-                /* Remove from list and return */
+                /* HTTP/2 connections can be shared (multiplexing) */
+                if (conn->is_http2 && conn->ref_count > 0) {
+                    /* Connection already in use - increment ref_count and share it */
+                    conn->ref_count++;
+                    conn->last_used = time(NULL);
+                    result = conn;
+                    break;
+                }
+
+                /* For HTTP/1.1 or first use of HTTP/2: remove from pool */
                 *curr = conn->next;
                 pool->total_connections--;
                 pool->active_connections++;
 
-                /* Update last used time */
+                /* Update last used time and increment reference count */
                 conn->last_used = time(NULL);
+                conn->ref_count = 1;  /* First reference */
                 conn->next = NULL;
 
                 result = conn;
@@ -227,6 +268,20 @@ bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
 
     bool result = false;
 
+    /* Decrement reference count */
+    if (conn->ref_count > 0) {
+        conn->ref_count--;
+    }
+
+    /* HTTP/2 connections with remaining references stay in pool (shared) */
+    if (conn->is_http2 && conn->ref_count > 0) {
+        /* Connection still in use by other requests - keep it shared */
+        result = true;
+        goto unlock_and_return;
+    }
+
+    /* HTTP/1.1 connections or HTTP/2 with no more references: return to pool */
+
     /* Check if pool is full */
     if (pool->total_connections >= pool->max_total_connections) {
         /* Pool is full - close connection (outside lock) */
@@ -251,6 +306,15 @@ bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
     }
 
     result = true;
+
+unlock_and_return:
+    /* Unlock pool and return (connection stays in pool) */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+    return result;
 
 unlock_and_destroy:
     /* Unlock pool */
@@ -277,16 +341,19 @@ pooled_connection_t* pool_connection_create(const char *host,
         return NULL;
     }
 
-    /* Ensure socket is in blocking mode before pooling */
-    #ifdef _WIN32
+    /* Ensure socket is in blocking mode for HTTP/1.1 compatibility
+     * (HTTP/2 connections are already non-blocking) */
+    if (!is_http2) {
+#ifdef _WIN32
         u_long mode = 0;  /* 0 = blocking */
         ioctlsocket(sockfd, FIONBIO, &mode);
-    #else
+#else
         int flags = fcntl(sockfd, F_GETFL, 0);
         if (flags != -1) {
             fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
         }
-    #endif
+#endif
+    }
 
     pooled_connection_t *conn = (pooled_connection_t*)calloc(1, sizeof(pooled_connection_t));
     if (!conn) {
@@ -303,6 +370,7 @@ pooled_connection_t* pool_connection_create(const char *host,
     conn->is_valid = true;
     conn->preface_sent = false;  /* Will be set to true after first HTTP/2 preface */
     conn->state = POOL_CONN_IDLE;
+    conn->ref_count = 0;  /* No references yet */
     conn->last_used = time(NULL);
     conn->next = NULL;
 
@@ -320,6 +388,7 @@ pooled_connection_t* pool_connection_create(const char *host,
 #ifdef HAVE_NGHTTP2
     conn->http2_session = NULL;
     conn->http2_stream_data = NULL;
+    conn->http2_session_manager = NULL;
 #endif
 
     return conn;
@@ -331,7 +400,14 @@ void pool_connection_destroy(pooled_connection_t *conn) {
     }
 
 #ifdef HAVE_NGHTTP2
-    /* Destroy HTTP/2 session if present */
+    /* Destroy HTTP/2 session manager if present (includes session cleanup) */
+    if (conn->http2_session_manager) {
+        http2_session_manager_t *mgr = (http2_session_manager_t *)conn->http2_session_manager;
+        http2_session_manager_destroy(mgr);
+        conn->http2_session_manager = NULL;
+    }
+
+    /* Destroy HTTP/2 session if present (for connections without manager) */
     if (conn->http2_session) {
         /* nghttp2_session* */
         nghttp2_session *session = (nghttp2_session *)conn->http2_session;
@@ -344,20 +420,25 @@ void pool_connection_destroy(pooled_connection_t *conn) {
     /* Free proxy info */
     if (conn->proxy_url) {
         free(conn->proxy_url);
+        conn->proxy_url = NULL;
     }
     if (conn->target_host) {
         free(conn->target_host);
+        conn->target_host = NULL;
     }
 
     /* Free TLS info */
     if (conn->ja3_fingerprint) {
         free(conn->ja3_fingerprint);
+        conn->ja3_fingerprint = NULL;
     }
     if (conn->tls_version) {
         free(conn->tls_version);
+        conn->tls_version = NULL;
     }
     if (conn->tls_cipher) {
         free(conn->tls_cipher);
+        conn->tls_cipher = NULL;
     }
 
     /* Close SSL */
@@ -365,11 +446,13 @@ void pool_connection_destroy(pooled_connection_t *conn) {
         /* Skip SSL_shutdown() as it can block indefinitely on stale/proxy connections.
          * SSL_free() will handle cleanup safely without blocking. */
         SSL_free(conn->ssl);
+        conn->ssl = NULL;
     }
 
-    /* Close socket */
-    if (conn->sockfd >= 0) {
+    /* Close socket (but never close stdin/stdout/stderr) */
+    if (conn->sockfd > 2) {
         close(conn->sockfd);
+        conn->sockfd = -1;  /* Mark as closed to prevent double-close */
     }
 
     free(conn);
@@ -422,4 +505,170 @@ int pool_count_connections_for_host(httpmorph_pool_t *pool, const char *host_key
     }
 
     return count;
+}
+
+/**
+ * Pre-warm connections to a host
+ * Establishes N connections and adds them to the pool for immediate reuse
+ */
+int pool_prewarm_connections(httpmorph_pool_t *pool,
+                             httpmorph_client_t *client,
+                             const char *host,
+                             int port,
+                             bool use_tls,
+                             int count) {
+    if (!pool || !client || !host || count <= 0) {
+        return 0;
+    }
+
+    int created = 0;
+    uint16_t actual_port = (port > 0) ? port : (use_tls ? 443 : 80);
+
+    for (int i = 0; i < count; i++) {
+        /* Create TCP connection */
+        uint64_t connect_time_us = 0;
+        int sockfd = httpmorph_tcp_connect(host, actual_port, client->timeout_ms, &connect_time_us);
+        if (sockfd < 0) {
+            continue;  /* Skip failed connections */
+        }
+
+        SSL *ssl = NULL;
+        if (use_tls) {
+            /* Establish TLS */
+            uint64_t tls_time = 0;
+            ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host,
+                                       client->browser_profile,
+                                       true, &tls_time);  /* verify_cert = true by default */
+            if (!ssl) {
+                if (sockfd > 2) close(sockfd);
+                continue;  /* Skip failed TLS */
+            }
+        }
+
+        /* Create pooled connection */
+        pooled_connection_t *conn = pool_connection_create(host, actual_port, sockfd, ssl, false);
+        if (!conn) {
+            if (ssl) SSL_free(ssl);
+            if (sockfd > 2) close(sockfd);
+            continue;
+        }
+
+        /* Add to pool */
+        if (pool_put_connection(pool, conn)) {
+            created++;
+        } else {
+            /* Pool rejected connection - clean up and stop */
+            pool_connection_destroy(conn);
+            break;
+        }
+    }
+
+    return created;
+}
+
+/* === Async I/O Support === */
+
+/**
+ * Get file descriptor from a pooled connection
+ */
+int httpmorph_connection_get_fd(pooled_connection_t *conn) {
+    if (!conn) {
+        return -1;
+    }
+
+    /* Return -1 if connection is closed or invalid */
+    if (conn->state == POOL_CONN_CLOSED || !conn->is_valid) {
+        return -1;
+    }
+
+    /* Return the socket file descriptor */
+    return conn->sockfd;
+}
+
+/**
+ * Get file descriptor from connection pool (public API wrapper)
+ */
+int httpmorph_pool_get_connection_fd(httpmorph_pool_t *pool,
+                                     const char *host,
+                                     uint16_t port) {
+    if (!pool || !host) {
+        return -1;
+    }
+
+    /* Build host key */
+    char host_key[POOL_MAX_HOST_KEY_LEN];
+    pool_build_host_key(host, port, host_key);
+
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
+    /* Find an active connection for this host */
+    pooled_connection_t *conn = pool->connections;
+    int fd = -1;
+
+    while (conn) {
+        if (strcmp(conn->host_key, host_key) == 0) {
+            /* Found a connection for this host */
+            if (conn->state == POOL_CONN_ACTIVE && conn->is_valid) {
+                fd = conn->sockfd;
+                break;
+            }
+        }
+        conn = conn->next;
+    }
+
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+
+    return fd;
+}
+
+/**
+ * Register callback for socket readable event (Phase A placeholder)
+ * In Phase A, event loop integration happens in Python using add_reader/add_writer
+ * This function is a stub for future C-level event loop integration (Phase B)
+ */
+int httpmorph_connection_on_readable(pooled_connection_t *conn,
+                                     socket_event_callback_t callback,
+                                     void *user_data) {
+    if (!conn || !callback) {
+        return -1;
+    }
+
+    /* Phase A: This is a placeholder
+     * Phase B: Will integrate with io_engine to register socket events
+     * For now, Python handles event loop integration using asyncio.add_reader()
+     */
+
+    (void)user_data;  /* Unused in Phase A */
+    return 0;  /* Success (no-op) */
+}
+
+/**
+ * Register callback for socket writable event (Phase A placeholder)
+ */
+int httpmorph_connection_on_writable(pooled_connection_t *conn,
+                                     socket_event_callback_t callback,
+                                     void *user_data) {
+    if (!conn || !callback) {
+        return -1;
+    }
+
+    /* Phase A: This is a placeholder
+     * Phase B: Will integrate with io_engine to register socket events
+     * For now, Python handles event loop integration using asyncio.add_writer()
+     */
+
+    (void)user_data;  /* Unused in Phase A */
+    return 0;  /* Success (no-op) */
 }

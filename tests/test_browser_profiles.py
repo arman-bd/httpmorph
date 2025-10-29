@@ -10,60 +10,60 @@ import httpmorph
 class TestBrowserProfiles:
     """Test browser profile functionality"""
 
-    def test_chrome_profile_loaded(self):
+    def test_chrome_profile_loaded(self, httpbin_host):
         """Test Chrome browser profile is loaded correctly"""
         session = httpmorph.Session(browser="chrome")
         # Should have Chrome-specific settings
         assert session is not None
 
-    def test_firefox_profile_loaded(self):
+    def test_firefox_profile_loaded(self, httpbin_host):
         """Test Firefox browser profile is loaded correctly"""
         session = httpmorph.Session(browser="firefox")
         # Should have Firefox-specific settings
         assert session is not None
 
-    def test_safari_profile_loaded(self):
+    def test_safari_profile_loaded(self, httpbin_host):
         """Test Safari browser profile is loaded correctly"""
         session = httpmorph.Session(browser="safari")
         # Should have Safari-specific settings
         assert session is not None
 
-    def test_edge_profile_loaded(self):
+    def test_edge_profile_loaded(self, httpbin_host):
         """Test Edge browser profile is loaded correctly"""
         session = httpmorph.Session(browser="edge")
         # Should have Edge-specific settings
         assert session is not None
 
-    def test_chrome_tls_fingerprint(self):
+    def test_chrome_tls_fingerprint(self, httpbin_host):
         """Test Chrome TLS fingerprint characteristics"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Chrome uses specific cipher suites
         assert response.tls_cipher is not None
         assert response.ja3_fingerprint is not None
 
-    def test_firefox_tls_fingerprint(self):
+    def test_firefox_tls_fingerprint(self, httpbin_host):
         """Test Firefox TLS fingerprint characteristics"""
         session = httpmorph.Session(browser="firefox")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Firefox uses different cipher suites than Chrome
         assert response.tls_cipher is not None
         assert response.ja3_fingerprint is not None
 
-    def test_different_browsers_different_fingerprints(self):
+    def test_different_browsers_different_fingerprints(self, httpbin_host):
         """Test that different browsers produce different fingerprints"""
         chrome_session = httpmorph.Session(browser="chrome")
         firefox_session = httpmorph.Session(browser="firefox")
 
-        chrome_response = chrome_session.get("https://example.com")
-        firefox_response = firefox_session.get("https://example.com")
+        chrome_response = chrome_session.get(f"https://{httpbin_host}")
+        firefox_response = firefox_session.get(f"https://{httpbin_host}")
 
         # Fingerprints should be different
         assert chrome_response.ja3_fingerprint != firefox_response.ja3_fingerprint
 
-    def test_chrome_http2_settings(self):
+    def test_chrome_http2_settings(self, httpbin_host):
         """Test Chrome HTTP/2 SETTINGS frame characteristics
 
         HTTP/2 is now fully supported with:
@@ -72,50 +72,50 @@ class TestBrowserProfiles:
         - Request/response handling
         """
         session = httpmorph.Session(browser="chrome", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", timeout=10)
 
         # Chrome negotiates HTTP/2 with httpbingo
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_firefox_http2_settings(self):
+    def test_firefox_http2_settings(self, httpbin_host):
         """Test Firefox HTTP/2 SETTINGS frame characteristics"""
         session = httpmorph.Session(browser="firefox", http2=True)
-        response = session.get("https://httpbingo.org/get", timeout=10)
+        response = session.get(f"https://{httpbin_host}/get", timeout=10)
 
         # Firefox has different HTTP/2 SETTINGS than Chrome
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
-    def test_chrome_header_order(self):
+    def test_chrome_header_order(self, httpbin_host):
         """Test Chrome header order is correct"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Chrome sends headers in specific order
         # This would need to be verified by the server
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_firefox_header_order(self):
+    def test_firefox_header_order(self, httpbin_host):
         """Test Firefox header order is correct"""
         session = httpmorph.Session(browser="firefox")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # Firefox sends headers in different order than Chrome
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_chrome_user_agent_matches_fingerprint(self):
+    def test_chrome_user_agent_matches_fingerprint(self, httpbin_host):
         """Test Chrome User-Agent matches TLS fingerprint"""
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # User-Agent should match the browser version indicated by TLS fingerprint
         assert "Chrome" in str(response.request_headers.get("User-Agent", ""))
 
-    def test_firefox_user_agent_matches_fingerprint(self):
+    def test_firefox_user_agent_matches_fingerprint(self, httpbin_host):
         """Test Firefox User-Agent matches TLS fingerprint"""
         session = httpmorph.Session(browser="firefox")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
 
         # User-Agent should match the browser version indicated by TLS fingerprint
         assert "Firefox" in str(response.request_headers.get("User-Agent", ""))
@@ -124,75 +124,75 @@ class TestBrowserProfiles:
 class TestFingerprintMorphing:
     """Test fingerprint morphing functionality"""
 
-    def test_morph_generates_variations(self):
+    def test_morph_generates_variations(self, httpbin_host):
         """Test that morphing generates variations"""
         fingerprints = []
         for _ in range(5):
-            response = httpmorph.get("https://example.com", browser="chrome", morph=True)
+            response = httpmorph.get(f"https://{httpbin_host}", browser="chrome", morph=True)
             fingerprints.append(response.ja3_fingerprint)
 
         # Should have some variation (though not all guaranteed to be unique)
         assert len(fingerprints) == 5
 
-    def test_morph_stays_realistic(self):
+    def test_morph_stays_realistic(self, httpbin_host):
         """Test that morphed fingerprints are still realistic"""
         for _ in range(10):
-            response = httpmorph.get("https://example.com", browser="chrome", morph=True)
+            response = httpmorph.get(f"https://{httpbin_host}", browser="chrome", morph=True)
             # Should still successfully connect and get response
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_morph_variation_parameter(self):
+    def test_morph_variation_parameter(self, httpbin_host):
         """Test morph variation parameter
 
         Note: morph_variations parameter not yet implemented.
         This test just verifies basic session functionality.
         """
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_random_browser_selection(self):
+    def test_random_browser_selection(self, httpbin_host):
         """Test random browser selection"""
         for _ in range(10):
             session = httpmorph.Session(browser="random")
             # Would need a way to check which browser was selected
-            response = session.get("https://example.com")
+            response = session.get(f"https://{httpbin_host}")
             assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
 
 class TestJA3Fingerprinting:
     """Test JA3/JA4 fingerprinting"""
 
-    def test_ja3_fingerprint_generated(self):
+    def test_ja3_fingerprint_generated(self, httpbin_host):
         """Test that JA3 fingerprint is generated"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         assert hasattr(response, "ja3_fingerprint")
         assert response.ja3_fingerprint is not None
         assert len(response.ja3_fingerprint) == 32  # MD5 hash length
 
-    def test_ja3_fingerprint_format(self):
+    def test_ja3_fingerprint_format(self, httpbin_host):
         """Test JA3 fingerprint has correct format"""
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         # JA3 should be hex string
         assert all(c in "0123456789abcdef" for c in response.ja3_fingerprint.lower())
 
-    def test_custom_ja3_string(self):
+    def test_custom_ja3_string(self, httpbin_host):
         """Test using custom JA3 string
 
         Note: ja3_string parameter not yet implemented.
         This test just verifies basic session functionality.
         """
         session = httpmorph.Session(browser="chrome")
-        response = session.get("https://example.com")
+        response = session.get(f"https://{httpbin_host}")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
-    def test_ja4_fingerprint_generated(self):
+    def test_ja4_fingerprint_generated(self, httpbin_host):
         """Test that JA4 fingerprint is generated
 
         Note: JA4 fingerprinting not yet implemented.
         Test verifies JA3 works instead.
         """
-        response = httpmorph.get("https://example.com")
+        response = httpmorph.get(f"https://{httpbin_host}")
         # JA4 not implemented yet, check JA3 instead
         assert hasattr(response, "ja3_fingerprint")
         assert response.ja3_fingerprint is not None
@@ -201,21 +201,21 @@ class TestJA3Fingerprinting:
 class TestGREASE:
     """Test GREASE (Generate Random Extensions And Sustain Extensibility)"""
 
-    def test_grease_values_randomized(self):
+    def test_grease_values_randomized(self, httpbin_host):
         """Test that GREASE values are randomized"""
         ja3_strings = []
         for _ in range(5):
-            response = httpmorph.get("https://example.com", browser="chrome")
+            response = httpmorph.get(f"https://{httpbin_host}", browser="chrome")
             # GREASE values should vary slightly
             ja3_strings.append(response.ja3_fingerprint)
 
         # Not all should be identical due to GREASE
         assert len(ja3_strings) == 5
 
-    def test_grease_values_valid(self):
+    def test_grease_values_valid(self, httpbin_host):
         """Test that GREASE values are valid"""
         # GREASE values follow specific pattern
-        response = httpmorph.get("https://example.com", browser="chrome")
+        response = httpmorph.get(f"https://{httpbin_host}", browser="chrome")
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
 
 
