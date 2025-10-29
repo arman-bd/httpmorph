@@ -5,8 +5,6 @@ This demonstrates the async I/O capabilities without thread pool overhead.
 Full asyncio integration will be added in future iterations.
 """
 
-import asyncio
-from typing import Optional, Callable, Any
 
 class TrueAsyncClient:
     """

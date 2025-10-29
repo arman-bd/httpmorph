@@ -43,8 +43,8 @@ HAS_C_EXTENSION = False
 
 # Import C extension using importlib to avoid circular import
 try:
-    import importlib.util
     import glob
+    import importlib.util
 
     # Find the .so file in current directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
