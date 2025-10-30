@@ -193,11 +193,7 @@ class TestHTTP2Features:
         data = {"test": "data", "number": 42}
 
         # Use httpbingo.org which supports HTTP/2
-        response = client.post(
-            f"https://{httpbin_host}/post",
-            json=data,
-            timeout=10
-        )
+        response = client.post(f"https://{httpbin_host}/post", json=data, timeout=10)
         assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
         assert response.http_version == "2.0"
 
@@ -251,7 +247,9 @@ class TestHTTP2EdgeCases:
             responses = [f.result() for f in futures]
 
             # All should succeed with HTTP/2
-            assert all(r.status_code in [200, 402] for r in responses)  # httpbingo returns 402 for HTTP/2
+            assert all(
+                r.status_code in [200, 402] for r in responses
+            )  # httpbingo returns 402 for HTTP/2
             assert all(r.http_version == "2.0" for r in responses)
 
 

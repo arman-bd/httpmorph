@@ -1,6 +1,6 @@
 # httpmorph Benchmark Results
 
-**Version:** 0.1.3 | **Generated:** 2025-10-29
+**Version:** 0.1.3 | **Generated:** 2025-10-30
 
 ## System Information
 
@@ -14,7 +14,7 @@
 
 ## Test Configuration
 
-- **Sequential Requests:** 25 (warmup: 5)
+- **Sequential Requests:** 3 (warmup: 1)
 - **Concurrent Requests:** 25 (workers: 10)
 
 ## Library Versions
@@ -37,20 +37,20 @@ Mean response time in milliseconds
 | Library | Local HTTP | Proxy HTTP | Proxy HTTP2 | Proxy HTTPs | Remote HTTP | Remote HTTP2 | Remote HTTPs |
 |---------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|
 | **curl_cffi** | 0.44ms | 1040.16ms | 1810.87ms | 1671.19ms | 733.70ms | 489.66ms | 479.26ms |
-| **httpmorph** | 0.25ms | 1131.36ms | 1858.79ms | 1883.12ms | 303.26ms | 420.41ms | 470.90ms |
+| **httpmorph** | 0.48ms | 2427.23ms | 1412.93ms | 1324.66ms | 386.36ms | 578.78ms | 578.64ms |
 | **httpx** | 1.17ms | 496.56ms | 341.03ms | 404.35ms | 377.08ms | 593.54ms | 502.31ms |
 | **pycurl** | 0.28ms | 1600.39ms | 1826.00ms | 1655.31ms | 372.68ms | 471.06ms | 545.76ms |
 | **requests** | 1.22ms | 349.83ms | N/A | 796.37ms | 357.36ms | N/A | 218.44ms |
-| **urllib** | 23.08ms | N/A | N/A | N/A | 450.51ms | N/A | 644.28ms |
+| **urllib** | 16.02ms | 1527.74ms | N/A | 2092.11ms | 380.66ms | N/A | 595.02ms |
 | **urllib3** | 0.39ms | 1000.17ms | N/A | 362.56ms | 207.11ms | N/A | 201.98ms |
 
 **Winners (Sequential):**
-- Local HTTP: **httpmorph** (0.25ms)
+- Local HTTP: **pycurl** (0.28ms)
 - Proxy HTTP: **requests** (349.83ms)
 - Proxy HTTP2: **httpx** (341.03ms)
 - Proxy HTTPs: **urllib3** (362.56ms)
 - Remote HTTP: **urllib3** (207.11ms)
-- Remote HTTP2: **httpmorph** (420.41ms)
+- Remote HTTP2: **pycurl** (471.06ms)
 - Remote HTTPs: **urllib3** (201.98ms)
 
 ## Concurrent Tests (Higher is Better)
@@ -60,15 +60,15 @@ Throughput in requests per second
 | Library | Local HTTP | Proxy HTTP | Proxy HTTP2 | Proxy HTTPs | Remote HTTP | Remote HTTP2 | Remote HTTPs |
 |---------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|
 | **curl_cffi** | 595.04 | 3.33 | 4.05 | 3.01 | 16.57 | 18.12 | 17.33 |
-| **httpmorph** | 217.61 | 13.35 | 3.07 | 2.96 | 5.57 | 7.46 | 20.62 |
+| **httpmorph** | 718.78 | 3.81 | 2.75 | 2.64 | 21.70 | 14.24 | 14.36 |
 | **httpx** | 426.61 | 14.10 | 4.32 | 9.91 | 7.04 | 19.28 | 20.71 |
 | **pycurl** | 645.53 | 3.30 | 2.22 | 3.54 | 5.60 | 6.11 | 5.15 |
 | **requests** | 491.44 | 4.48 | N/A | 9.84 | 36.93 | N/A | 14.27 |
-| **urllib** | 11.95 | 4.11 | N/A | N/A | 7.13 | N/A | 8.01 |
+| **urllib** | 15.29 | 2.32 | N/A | 2.15 | 19.74 | N/A | 8.93 |
 | **urllib3** | 686.51 | 4.44 | N/A | 10.16 | 8.66 | N/A | 4.98 |
 
 **Winners (Concurrent):**
-- Local HTTP: **urllib3** (686.51 req/s)
+- Local HTTP: **httpmorph** (718.78 req/s)
 - Proxy HTTP: **httpx** (14.10 req/s)
 - Proxy HTTP2: **httpx** (4.32 req/s)
 - Proxy HTTPs: **urllib3** (10.16 req/s)
@@ -82,15 +82,15 @@ Throughput in requests per second
 
 | Library | Local HTTP | Proxy HTTP | Proxy HTTP2 | Proxy HTTPs | Remote HTTP | Remote HTTP2 | Remote HTTPs |
 |---------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|
-| **aiohttp** | 137.71 | N/A | N/A | 4.04 | 52.91 | N/A | 40.76 |
-| **httpmorph** | 569.36 | 2.75 | 3.06 | 3.62 | 13.19 | 32.02 | 13.66 |
+| **aiohttp** | 190.15 | 4.32 | N/A | 3.94 | 49.14 | N/A | 12.91 |
+| **httpmorph** | 143.45 | 60.57 | 15.51 | 15.41 | 48.48 | 15.53 | 15.54 |
 | **httpx** | 123.21 | 4.42 | 3.73 | 4.13 | 58.20 | 41.63 | 51.25 |
 
 **Winners (Async):**
-- Local HTTP: **httpmorph** (569.36 req/s)
-- Proxy HTTP: **httpx** (4.42 req/s)
-- Proxy HTTP2: **httpx** (3.73 req/s)
-- Proxy HTTPs: **httpx** (4.13 req/s)
+- Local HTTP: **aiohttp** (190.15 req/s)
+- Proxy HTTP: **httpmorph** (60.57 req/s)
+- Proxy HTTP2: **httpmorph** (15.51 req/s)
+- Proxy HTTPs: **httpmorph** (15.41 req/s)
 - Remote HTTP: **httpx** (58.20 req/s)
 - Remote HTTP2: **httpx** (41.63 req/s)
 - Remote HTTPs: **httpx** (51.25 req/s)
@@ -101,16 +101,16 @@ Throughput in requests per second
 
 | Test | httpmorph | requests | Speedup |
 |------|----------:|---------:|--------:|
-| Local HTTP | 217.61 req/s | 491.44 req/s | 0.44x slower |
-| Proxy HTTP | 13.35 req/s | 4.48 req/s | **2.98x** faster |
-| Proxy HTTPs | 2.96 req/s | 9.84 req/s | 0.30x slower |
-| Remote HTTP | 5.57 req/s | 36.93 req/s | 0.15x slower |
-| Remote HTTPs | 20.62 req/s | 14.27 req/s | **1.44x** faster |
-| Local HTTP | 0.25ms | 1.22ms | **4.85x** faster |
-| Proxy HTTP | 1131.36ms | 349.83ms | 0.31x slower |
-| Proxy HTTPs | 1883.12ms | 796.37ms | 0.42x slower |
-| Remote HTTP | 303.26ms | 357.36ms | **1.18x** faster |
-| Remote HTTPs | 470.90ms | 218.44ms | 0.46x slower |
+| Local HTTP | 718.78 req/s | 491.44 req/s | **1.46x** faster |
+| Proxy HTTP | 3.81 req/s | 4.48 req/s | 0.85x slower |
+| Proxy HTTPs | 2.64 req/s | 9.84 req/s | 0.27x slower |
+| Remote HTTP | 21.70 req/s | 36.93 req/s | 0.59x slower |
+| Remote HTTPs | 14.36 req/s | 14.27 req/s | **1.01x** faster |
+| Local HTTP | 0.48ms | 1.22ms | **2.57x** faster |
+| Proxy HTTP | 2427.23ms | 349.83ms | 0.14x slower |
+| Proxy HTTPs | 1324.66ms | 796.37ms | 0.60x slower |
+| Remote HTTP | 386.36ms | 357.36ms | 0.92x slower |
+| Remote HTTPs | 578.64ms | 218.44ms | 0.38x slower |
 
 ---
 *Generated by httpmorph benchmark suite*

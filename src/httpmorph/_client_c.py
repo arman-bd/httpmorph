@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 # Try to import orjson for faster JSON encoding (2-3x faster than stdlib)
 try:
     import orjson
+
     HAS_ORJSON = True
 except ImportError:
     HAS_ORJSON = False
@@ -48,7 +49,7 @@ try:
 
     # Find the .so file in current directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    so_files = glob.glob(os.path.join(current_dir, '_httpmorph*.so'))
+    so_files = glob.glob(os.path.join(current_dir, "_httpmorph*.so"))
 
     if not so_files:
         raise ImportError(f"C extension not found in {current_dir}")
@@ -58,7 +59,7 @@ try:
     if spec and spec.loader:
         _httpmorph = importlib.util.module_from_spec(spec)
         # Add to sys.modules to make it available for other imports
-        sys.modules['_httpmorph'] = _httpmorph
+        sys.modules["_httpmorph"] = _httpmorph
         spec.loader.exec_module(_httpmorph)
         HAS_C_EXTENSION = True
     else:
@@ -641,14 +642,14 @@ class Session:
 
     def __del__(self):
         """Cleanup C resources when Session is garbage collected"""
-        if hasattr(self, '_session') and self._session is not None:
+        if hasattr(self, "_session") and self._session is not None:
             # The C Session object will be automatically freed by Cython
             # but we should explicitly clear the reference
             self._session = None
 
     def close(self):
         """Explicitly close the session and free resources"""
-        if hasattr(self, '_session') and self._session is not None:
+        if hasattr(self, "_session") and self._session is not None:
             self._session = None
             # Don't force gc.collect() - let Python handle cleanup naturally
             # Aggressive GC can cause double-free issues with C extensions
@@ -924,7 +925,7 @@ _default_sessions = threading.local()
 
 def get_default_session():
     """Get or create thread-local default session (thread-safe)"""
-    if not hasattr(_default_sessions, 'session') or _default_sessions.session is None:
+    if not hasattr(_default_sessions, "session") or _default_sessions.session is None:
         _default_sessions.session = Session()
     return _default_sessions.session
 
@@ -975,13 +976,14 @@ def cleanup():
     # In parallel test mode (pytest-xdist), skip cleanup to avoid race conditions
     # The OS will clean up resources when worker processes exit
     import sys
-    if 'xdist' in sys.modules or 'PYTEST_XDIST_WORKER' in os.environ:
+
+    if "xdist" in sys.modules or "PYTEST_XDIST_WORKER" in os.environ:
         # Running in pytest-xdist worker - skip cleanup
         return
 
     # Explicitly close thread-local default session before clearing
     try:
-        if hasattr(_default_sessions, 'session') and _default_sessions.session is not None:
+        if hasattr(_default_sessions, "session") and _default_sessions.session is not None:
             # Just clear the reference, don't call close() during cleanup
             # The C extension will handle cleanup when the process exits
             _default_sessions.session = None

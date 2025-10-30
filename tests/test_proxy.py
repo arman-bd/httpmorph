@@ -83,7 +83,10 @@ class TestProxyWithAuth:
         """Test HTTPS via proxy with authentication"""
         with MockProxyServer(username="testuser", password="testpass") as proxy:
             response = httpmorph.get(
-                "https://example.com", proxy=proxy.url, proxy_auth=("testuser", "testpass"), timeout=10
+                "https://example.com",
+                proxy=proxy.url,
+                proxy_auth=("testuser", "testpass"),
+                timeout=10,
             )
             assert response.status_code in [200, 301, 302]
 
@@ -241,8 +244,9 @@ class TestRealProxyIntegration:
             # Check if proxy is offline
             if test_response.status_code == 407:
                 pytest.skip("Proxy authentication failed - proxy may be offline")
-            if test_response.text and ("offline" in test_response.text.lower() or
-                                      "busy" in test_response.text.lower()):
+            if test_response.text and (
+                "offline" in test_response.text.lower() or "busy" in test_response.text.lower()
+            ):
                 pytest.skip(f"Proxy is offline or busy: {test_response.text[:100]}")
         except httpmorph.ConnectionError as e:
             if "Proxy CONNECT failed" in str(e):
@@ -443,8 +447,7 @@ class TestRealProxyIntegration:
         assert response.status_code == 200
         response_data = response.json()
         # httpbin may return 'authenticated' or 'authorized'
-        assert (response_data.get("authenticated") is True or
-                response_data.get("authorized") is True)
+        assert response_data.get("authenticated") is True or response_data.get("authorized") is True
         assert response_data.get("user") == "user"
 
     def test_https_verify_ssl_via_real_proxy(self, httpbin_host, real_proxy_url):

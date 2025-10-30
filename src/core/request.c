@@ -48,6 +48,11 @@ httpmorph_request_t* httpmorph_request_create(httpmorph_method_t method,
     request->http2_priority_weight = 16;       /* Default weight (middle priority) */
     request->http2_priority_exclusive = false; /* Non-exclusive */
 
+    /* TLS configuration defaults */
+    request->verify_ssl = true;        /* Verify SSL certificates by default */
+    request->min_tls_version = 0;      /* Use library default (TLS 1.2+) */
+    request->max_tls_version = 0;      /* Use library default (TLS 1.3) */
+
     /* Pre-allocate headers array for better cache locality */
     request->header_capacity = INITIAL_HEADER_CAPACITY;
     request->headers = (httpmorph_header_t*)malloc(request->header_capacity * sizeof(httpmorph_header_t));
@@ -240,4 +245,32 @@ void httpmorph_request_set_http2_priority(httpmorph_request_t *request,
     request->http2_stream_dependency = stream_dependency;
     request->http2_priority_weight = weight;
     request->http2_priority_exclusive = exclusive;
+}
+
+/**
+ * Set SSL verification mode for request
+ *
+ * @param request Request to configure
+ * @param verify Whether to verify SSL certificates
+ */
+void httpmorph_request_set_verify_ssl(httpmorph_request_t *request, bool verify) {
+    if (request) {
+        request->verify_ssl = verify;
+    }
+}
+
+/**
+ * Set TLS version range for request
+ *
+ * @param request Request to configure
+ * @param min_version Minimum TLS version (0 for default)
+ * @param max_version Maximum TLS version (0 for default)
+ */
+void httpmorph_request_set_tls_version(httpmorph_request_t *request,
+                                       uint16_t min_version,
+                                       uint16_t max_version) {
+    if (request) {
+        request->min_tls_version = min_version;
+        request->max_tls_version = max_version;
+    }
 }

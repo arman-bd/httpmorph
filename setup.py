@@ -371,7 +371,6 @@ if IS_WINDOWS:
     # BoringSSL and nghttp2 library names on Windows (without .lib extension)
     # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
     # Detect which zlib we're using
-    import os
     vendor_dir = Path("vendor").resolve()
     vendor_zlib = vendor_dir / "zlib"
     if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
@@ -383,6 +382,7 @@ if IS_WINDOWS:
 else:
     # Production optimized build
     import platform
+
     EXT_COMPILE_ARGS = [
         "-std=c11",
         "-O3",
@@ -473,6 +473,31 @@ extensions = [
         extra_compile_args=EXT_COMPILE_ARGS,
         extra_link_args=EXT_LINK_ARGS,
         language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+    ),
+    # Async I/O extension (new!)
+    Extension(
+        "httpmorph._async",
+        sources=[
+            str(BINDINGS_DIR / "_async.pyx"),
+            # Core async I/O modules (already compiled in main extension, but needed here too)
+            str(CORE_DIR / "io_engine.c"),
+            str(CORE_DIR / "async_request.c"),
+            str(CORE_DIR / "async_request_manager.c"),
+            # Dependencies needed by async modules
+            str(CORE_DIR / "util.c"),
+            str(CORE_DIR / "url.c"),
+            str(CORE_DIR / "network.c"),
+            str(CORE_DIR / "tls.c"),
+            str(CORE_DIR / "request.c"),
+            str(CORE_DIR / "response.c"),
+            str(TLS_DIR / "browser_profiles.c"),
+        ],
+        include_dirs=INCLUDE_DIRS,
+        library_dirs=LIBRARY_DIRS,
+        libraries=EXT_LIBRARIES,
+        extra_compile_args=EXT_COMPILE_ARGS,
+        extra_link_args=EXT_LINK_ARGS,
+        language="c++" if IS_WINDOWS else "c",
     ),
 ]
 

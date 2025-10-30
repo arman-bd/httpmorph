@@ -6,9 +6,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+/* OpenSSL */
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
 /* Initial capacity for request array */
 #define INITIAL_CAPACITY 16
+
+/* Forward declarations */
+static void cleanup_completed_requests(async_request_manager_t *mgr);
 
 /**
  * Create a new async request manager
@@ -26,10 +34,23 @@ async_request_manager_t* async_manager_create(void) {
         return NULL;
     }
 
+    /* Create SSL context */
+    mgr->ssl_ctx = SSL_CTX_new(TLS_client_method());
+    if (!mgr->ssl_ctx) {
+        io_engine_destroy(mgr->io_engine);
+        free(mgr);
+        return NULL;
+    }
+
+    /* Configure SSL context */
+    SSL_CTX_set_verify(mgr->ssl_ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_default_verify_paths(mgr->ssl_ctx);
+
     /* Allocate request array */
     mgr->request_capacity = INITIAL_CAPACITY;
     mgr->requests = calloc(mgr->request_capacity, sizeof(async_request_t*));
     if (!mgr->requests) {
+        SSL_CTX_free(mgr->ssl_ctx);
         io_engine_destroy(mgr->io_engine);
         free(mgr);
         return NULL;
@@ -41,7 +62,7 @@ async_request_manager_t* async_manager_create(void) {
     /* Initialize ID counter */
     mgr->next_request_id = 1;
 
-    printf("[async_manager] Created with I/O engine\n");
+    printf("[async_manager] Created with I/O engine and SSL context\n");
     return mgr;
 }
 
@@ -58,15 +79,66 @@ void async_manager_destroy(async_request_manager_t *mgr) {
         async_manager_stop_event_loop(mgr);
     }
 
-    /* Clean up all requests */
+    printf("[async_manager] Graceful shutdown: waiting for %zu active requests\n", mgr->request_count);
+
+    /* Graceful shutdown: Wait for all active requests to complete or timeout */
     pthread_mutex_lock(&mgr->mutex);
-    for (size_t i = 0; i < mgr->request_count; i++) {
-        if (mgr->requests[i]) {
-            async_request_unref(mgr->requests[i]);
+    int wait_iterations = 0;
+    const int max_wait_iterations = 100;  /* 10 seconds max (100 * 100ms) */
+
+    while (mgr->request_count > 0 && wait_iterations < max_wait_iterations) {
+        pthread_mutex_unlock(&mgr->mutex);
+
+        /* Give requests time to complete */
+        struct timespec ts = {0, 100000000};  /* 100ms */
+        nanosleep(&ts, NULL);
+
+        /* Step all requests to allow them to complete */
+        pthread_mutex_lock(&mgr->mutex);
+        for (size_t i = 0; i < mgr->request_count; i++) {
+            if (mgr->requests[i]) {
+                async_request_state_t state = async_request_get_state(mgr->requests[i]);
+
+                /* For requests still in progress, step them */
+                if (state != ASYNC_STATE_COMPLETE && state != ASYNC_STATE_ERROR) {
+                    async_request_step(mgr->requests[i]);
+                }
+            }
+        }
+
+        /* Clean up completed requests */
+        cleanup_completed_requests(mgr);
+
+        wait_iterations++;
+
+        if (mgr->request_count > 0 && wait_iterations % 10 == 0) {
+            printf("[async_manager] Still waiting for %zu requests (iteration %d)\n",
+                   mgr->request_count, wait_iterations);
         }
     }
+
+    /* Force cleanup of any remaining requests */
+    if (mgr->request_count > 0) {
+        printf("[async_manager] Force cleanup of %zu remaining requests\n", mgr->request_count);
+        for (size_t i = 0; i < mgr->request_count; i++) {
+            if (mgr->requests[i]) {
+                /* Set error state for incomplete requests */
+                async_request_state_t state = async_request_get_state(mgr->requests[i]);
+                if (state != ASYNC_STATE_COMPLETE && state != ASYNC_STATE_ERROR) {
+                    async_request_set_error(mgr->requests[i], -1, "Manager shutdown");
+                }
+                async_request_unref(mgr->requests[i]);
+            }
+        }
+    }
+
     free(mgr->requests);
     pthread_mutex_unlock(&mgr->mutex);
+
+    /* Destroy SSL context */
+    if (mgr->ssl_ctx) {
+        SSL_CTX_free(mgr->ssl_ctx);
+    }
 
     /* Destroy I/O engine */
     io_engine_destroy(mgr->io_engine);
@@ -118,6 +190,7 @@ uint64_t async_manager_submit_request(
     async_request_t *req = async_request_create(
         request,
         mgr->io_engine,
+        mgr->ssl_ctx,
         timeout_ms,
         callback,
         user_data

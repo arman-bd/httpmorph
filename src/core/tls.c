@@ -325,3 +325,74 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
 
     return ja3_hash;
 }
+
+/**
+ * Configure SSL context TLS version range
+ */
+int httpmorph_set_tls_version_range(SSL_CTX *ctx, uint16_t min_version, uint16_t max_version) {
+    if (!ctx) {
+        return -1;
+    }
+
+    /* Map our version constants to OpenSSL constants */
+    int ssl_min_version = 0;  /* 0 means use default */
+    int ssl_max_version = 0;
+
+    /* TLS version mapping (matching browser_profiles.h tls_version_t) */
+    switch (min_version) {
+        case 0x0301: ssl_min_version = TLS1_VERSION; break;     /* TLS 1.0 */
+        case 0x0302: ssl_min_version = TLS1_1_VERSION; break;   /* TLS 1.1 */
+        case 0x0303: ssl_min_version = TLS1_2_VERSION; break;   /* TLS 1.2 */
+        case 0x0304: ssl_min_version = TLS1_3_VERSION; break;   /* TLS 1.3 */
+        case 0:      ssl_min_version = 0; break;                /* Default */
+        default:     ssl_min_version = TLS1_2_VERSION; break;   /* Fallback to TLS 1.2 */
+    }
+
+    switch (max_version) {
+        case 0x0301: ssl_max_version = TLS1_VERSION; break;
+        case 0x0302: ssl_max_version = TLS1_1_VERSION; break;
+        case 0x0303: ssl_max_version = TLS1_2_VERSION; break;
+        case 0x0304: ssl_max_version = TLS1_3_VERSION; break;
+        case 0:      ssl_max_version = 0; break;                /* Default */
+        default:     ssl_max_version = TLS1_3_VERSION; break;   /* Fallback to TLS 1.3 */
+    }
+
+    /* Set TLS version range */
+    if (ssl_min_version > 0) {
+        if (!SSL_CTX_set_min_proto_version(ctx, ssl_min_version)) {
+            return -1;
+        }
+    }
+
+    if (ssl_max_version > 0) {
+        if (!SSL_CTX_set_max_proto_version(ctx, ssl_max_version)) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Configure SSL verification mode
+ */
+int httpmorph_set_ssl_verification(SSL_CTX *ctx, bool verify) {
+    if (!ctx) {
+        return -1;
+    }
+
+    if (verify) {
+        /* Enable certificate verification */
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+
+        /* Set default verification paths (system CA certificates) */
+        if (!SSL_CTX_set_default_verify_paths(ctx)) {
+            return -1;
+        }
+    } else {
+        /* Disable certificate verification */
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    }
+
+    return 0;
+}

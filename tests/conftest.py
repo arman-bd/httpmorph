@@ -69,7 +69,7 @@ def chrome_session():
         session = httpmorph.Session(browser="chrome")
         yield session
         # Explicitly cleanup session resources
-        if hasattr(session, 'close'):
+        if hasattr(session, "close"):
             session.close()
         del session
     except (NotImplementedError, AttributeError):
@@ -83,7 +83,7 @@ def firefox_session():
         session = httpmorph.Session(browser="firefox")
         yield session
         # Explicitly cleanup session resources
-        if hasattr(session, 'close'):
+        if hasattr(session, "close"):
             session.close()
         del session
     except (NotImplementedError, AttributeError):
@@ -97,7 +97,7 @@ def safari_session():
         session = httpmorph.Session(browser="safari")
         yield session
         # Explicitly cleanup session resources
-        if hasattr(session, 'close'):
+        if hasattr(session, "close"):
             session.close()
         del session
     except (NotImplementedError, AttributeError):
@@ -156,4 +156,5 @@ def pytest_collection_modifyitems(config, items):
 def pytest_runtest_teardown(item, nextitem):
     """Force garbage collection after each test to prevent resource accumulation"""
     import gc
+
     gc.collect()

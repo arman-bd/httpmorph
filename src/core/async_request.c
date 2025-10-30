@@ -66,6 +66,7 @@ const char* async_request_state_name(async_request_state_t state) {
 async_request_t* async_request_create(
     const httpmorph_request_t *request,
     io_engine_t *io_engine,
+    SSL_CTX *ssl_ctx,
     uint32_t timeout_ms,
     async_request_callback_t callback,
     void *user_data)
@@ -87,6 +88,10 @@ async_request_t* async_request_create(
     req->sockfd = -1;
     req->ssl = NULL;
     req->refcount = 1;
+    req->dns_resolved = false;
+
+    /* Determine if HTTPS first (needed before creating SSL) */
+    req->is_https = request->use_tls;
 
     /* Timing */
     req->start_time_us = get_time_us();
@@ -117,8 +122,46 @@ async_request_t* async_request_create(
     req->on_complete = callback;
     req->user_data = user_data;
 
-    /* Determine if HTTPS */
-    req->is_https = false;  /* TODO: Parse from request URL */
+    /* Parse URL to extract hostname and port if not already set */
+    if (!request->host && request->url) {
+        char *scheme = NULL, *host = NULL, *path = NULL;
+        uint16_t port = 0;
+
+        extern int httpmorph_parse_url(const char *url, char **scheme, char **host, uint16_t *port, char **path);
+
+        if (httpmorph_parse_url(request->url, &scheme, &host, &port, &path) == 0) {
+            /* Store parsed values in request structure */
+            ((httpmorph_request_t*)request)->host = host;  /* Transfer ownership */
+            ((httpmorph_request_t*)request)->port = port;
+            ((httpmorph_request_t*)request)->use_tls = (scheme && strcmp(scheme, "https") == 0);
+            req->is_https = ((httpmorph_request_t*)request)->use_tls;
+
+            /* Free scheme and path as we don't need them */
+            free(scheme);
+            free(path);
+        }
+    }
+
+    /* Create SSL object for HTTPS requests */
+    if (req->is_https && ssl_ctx) {
+        req->ssl = SSL_new(ssl_ctx);
+        if (!req->ssl) {
+            /* Cleanup and return NULL */
+            free(req->send_buf);
+            free(req->recv_buf);
+            free(req);
+            return NULL;
+        }
+
+        /* Set SNI hostname if available */
+        if (request->host) {
+            SSL_set_tlsext_host_name(req->ssl, request->host);
+        }
+
+        /* Set SSL to non-blocking mode (will be done when socket is created) */
+        printf("[async_request] Created SSL object for HTTPS (id=%lu)\n",
+               (unsigned long)req->id);
+    }
 
     return req;
 }
@@ -155,7 +198,8 @@ void async_request_destroy(async_request_t *req) {
 
     /* Free response if allocated */
     if (req->response) {
-        /* TODO: Free response structure */
+        httpmorph_response_destroy(req->response);
+        req->response = NULL;
     }
 
     free(req);
@@ -229,14 +273,75 @@ httpmorph_response_t* async_request_get_response(async_request_t *req) {
 }
 
 /**
+ * Get error message
+ */
+const char* async_request_get_error_message(const async_request_t *req) {
+    if (!req || req->error_msg[0] == '\0') {
+        return "No error message";
+    }
+    return req->error_msg;
+}
+
+/**
  * State: DNS lookup
  */
 static int step_dns_lookup(async_request_t *req) {
-    /* TODO: Implement async DNS resolution */
-    /* For now, this is a placeholder that moves to next state */
+    /* Check if already resolved */
+    if (req->dns_resolved) {
+        req->state = ASYNC_STATE_CONNECTING;
+        return ASYNC_STATUS_IN_PROGRESS;
+    }
 
-    printf("[async_request] DNS lookup not implemented yet (id=%lu)\n",
-           (unsigned long)req->id);
+    /* Perform blocking DNS lookup (for now) */
+    /* Note: In production, this should use async DNS (getaddrinfo_a or thread pool) */
+    const char *hostname = req->request->host;
+    uint16_t port = req->request->port;
+
+    if (!hostname) {
+        async_request_set_error(req, -1, "No hostname specified");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    printf("[async_request] Resolving %s:%u (id=%lu)\n",
+           hostname, port, (unsigned long)req->id);
+
+    /* Setup hints for getaddrinfo */
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;     /* Allow IPv4 or IPv6 */
+    hints.ai_socktype = SOCK_STREAM; /* TCP socket */
+    hints.ai_flags = AI_ADDRCONFIG;  /* Only return addresses we can use */
+
+    /* Convert port to string */
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%u", port);
+
+    /* Perform DNS lookup */
+    struct addrinfo *result = NULL;
+    int ret = getaddrinfo(hostname, port_str, &hints, &result);
+
+    if (ret != 0) {
+        char error_buf[256];
+        snprintf(error_buf, sizeof(error_buf), "DNS lookup failed: %s", gai_strerror(ret));
+        async_request_set_error(req, ret, error_buf);
+        return ASYNC_STATUS_ERROR;
+    }
+
+    if (!result) {
+        async_request_set_error(req, -1, "DNS lookup returned no results");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Store the first result */
+    memcpy(&req->addr, result->ai_addr, result->ai_addrlen);
+    req->addr_len = result->ai_addrlen;
+    req->dns_resolved = true;
+
+    printf("[async_request] DNS resolved for %s:%u (id=%lu)\n",
+           hostname, port, (unsigned long)req->id);
+
+    /* Free the result */
+    freeaddrinfo(result);
 
     /* Move to connecting state */
     req->state = ASYNC_STATE_CONNECTING;
@@ -247,10 +352,19 @@ static int step_dns_lookup(async_request_t *req) {
  * State: Connecting
  */
 static int step_connecting(async_request_t *req) {
-    /* If socket not created yet, create it */
+    /* Verify DNS was resolved */
+    if (!req->dns_resolved) {
+        async_request_set_error(req, -1, "DNS not resolved before connect");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* If socket not created yet, create it and initiate connection */
     if (req->sockfd < 0) {
+        /* Get address family from resolved address */
+        int af = ((struct sockaddr*)&req->addr)->sa_family;
+
         /* Create non-blocking socket */
-        req->sockfd = io_socket_create_nonblocking(AF_INET, SOCK_STREAM, 0);
+        req->sockfd = io_socket_create_nonblocking(af, SOCK_STREAM, 0);
         if (req->sockfd < 0) {
             async_request_set_error(req, errno, "Failed to create socket");
             return ASYNC_STATUS_ERROR;
@@ -259,18 +373,45 @@ static int step_connecting(async_request_t *req) {
         /* Set performance options */
         io_socket_set_performance_opts(req->sockfd);
 
-        /* TODO: Get address from DNS lookup */
-        /* For now, this is incomplete - need DNS resolution first */
-        printf("[async_request] Connecting on fd=%d (id=%lu)\n",
-               req->sockfd, (unsigned long)req->id);
-    }
+        printf("[async_request] Connecting to %s:%u on fd=%d (id=%lu)\n",
+               req->request->host, req->request->port, req->sockfd, (unsigned long)req->id);
 
-    /* Attempt non-blocking connect */
-    /* Note: This is a simplified version - real implementation needs */
-    /* actual address from DNS lookup */
+        /* Attempt non-blocking connect */
+        int ret = connect(req->sockfd, (struct sockaddr*)&req->addr, req->addr_len);
+
+        if (ret == 0) {
+            /* Connected immediately (rare for non-blocking) */
+            printf("[async_request] Connected immediately (id=%lu)\n",
+                   (unsigned long)req->id);
+
+            /* Move to next state */
+            if (req->is_https) {
+                req->state = ASYNC_STATE_TLS_HANDSHAKE;
+            } else {
+                req->state = ASYNC_STATE_SENDING_REQUEST;
+            }
+            return ASYNC_STATUS_IN_PROGRESS;
+        }
 
 #ifndef _WIN32
-    /* Check if connect completed (for subsequent calls) */
+        if (errno == EINPROGRESS) {
+            /* Connection in progress, wait for writable */
+            return ASYNC_STATUS_NEED_WRITE;
+        }
+#else
+        if (WSAGetLastError() == WSAEWOULDBLOCK) {
+            /* Connection in progress, wait for writable */
+            return ASYNC_STATUS_NEED_WRITE;
+        }
+#endif
+
+        /* Connect failed immediately */
+        async_request_set_error(req, errno, "Connection failed");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Socket already exists, check if connect completed */
+#ifndef _WIN32
     int error = 0;
     socklen_t len = sizeof(error);
     if (getsockopt(req->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
@@ -284,6 +425,8 @@ static int step_connecting(async_request_t *req) {
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
             } else {
                 req->state = ASYNC_STATE_SENDING_REQUEST;
+                /* For plain HTTP, wait for socket to be writable before sending */
+                return ASYNC_STATUS_NEED_WRITE;
             }
             return ASYNC_STATUS_IN_PROGRESS;
         } else if (error == EINPROGRESS || error == EALREADY) {
@@ -291,14 +434,15 @@ static int step_connecting(async_request_t *req) {
             return ASYNC_STATUS_NEED_WRITE;
         } else {
             /* Connection failed */
-            async_request_set_error(req, error, "Connection failed");
+            char error_buf[256];
+            snprintf(error_buf, sizeof(error_buf), "Connection failed: %s", strerror(error));
+            async_request_set_error(req, error, error_buf);
             return ASYNC_STATUS_ERROR;
         }
     }
 #endif
 
-    /* First connect attempt or waiting for completion */
-    /* Register for write event (connect completes when writable) */
+    /* Waiting for connection to complete */
     return ASYNC_STATUS_NEED_WRITE;
 }
 
@@ -306,16 +450,22 @@ static int step_connecting(async_request_t *req) {
  * State: TLS handshake
  */
 static int step_tls_handshake(async_request_t *req) {
-    /* Create SSL context if not exists */
+    /* SSL object should exist for HTTPS */
     if (!req->ssl) {
-        /* TODO: Get SSL_CTX from client */
-        /* For now, create a minimal SSL object */
-        printf("[async_request] TLS handshake needs SSL_CTX (id=%lu)\n",
-               (unsigned long)req->id);
+        async_request_set_error(req, -1, "No SSL object for HTTPS");
+        return ASYNC_STATUS_ERROR;
+    }
 
-        /* Skip TLS for now until we integrate with client's SSL context */
-        req->state = ASYNC_STATE_SENDING_REQUEST;
-        return ASYNC_STATUS_IN_PROGRESS;
+    /* Bind SSL to socket if not already done */
+    if (SSL_get_fd(req->ssl) != req->sockfd) {
+        if (SSL_set_fd(req->ssl, req->sockfd) != 1) {
+            async_request_set_error(req, -1, "Failed to bind SSL to socket");
+            return ASYNC_STATUS_ERROR;
+        }
+        /* Set connect state (client mode) */
+        SSL_set_connect_state(req->ssl);
+        printf("[async_request] SSL bound to socket fd=%d (id=%lu)\n",
+               req->sockfd, (unsigned long)req->id);
     }
 
     /* Perform non-blocking handshake */
@@ -347,9 +497,99 @@ static int step_tls_handshake(async_request_t *req) {
 
         default:
             /* Other error */
-            async_request_set_error(req, err, "TLS handshake failed");
+            {
+                char err_buf[256];
+                ERR_error_string_n(ERR_get_error(), err_buf, sizeof(err_buf));
+                snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: %s", err_buf);
+                req->state = ASYNC_STATE_ERROR;
+            }
             return ASYNC_STATUS_ERROR;
     }
+}
+
+/**
+ * Build HTTP request from httpmorph_request_t structure
+ */
+static int build_http_request(async_request_t *req) {
+    httpmorph_request_t *request = req->request;
+
+    /* Method string mapping */
+    const char *method_str;
+    switch (request->method) {
+        case HTTPMORPH_GET:     method_str = "GET"; break;
+        case HTTPMORPH_POST:    method_str = "POST"; break;
+        case HTTPMORPH_PUT:     method_str = "PUT"; break;
+        case HTTPMORPH_DELETE:  method_str = "DELETE"; break;
+        case HTTPMORPH_HEAD:    method_str = "HEAD"; break;
+        case HTTPMORPH_OPTIONS: method_str = "OPTIONS"; break;
+        case HTTPMORPH_PATCH:   method_str = "PATCH"; break;
+        default:               method_str = "GET"; break;
+    }
+
+    /* Extract path from URL (simple extraction) */
+    const char *path = strchr(request->url, '/');
+    if (path && path[0] == '/' && path[1] == '/') {
+        /* Skip scheme (http:// or https://) */
+        path = strchr(path + 2, '/');
+    }
+    if (!path || path[0] != '/') {
+        path = "/";
+    }
+
+    /* Build request line: METHOD path HTTP/1.1\r\n */
+    char *buf = (char *)req->send_buf;
+    int written = snprintf(buf, SEND_BUFFER_SIZE,
+                          "%s %s HTTP/1.1\r\n", method_str, path);
+    if (written < 0 || written >= (int)SEND_BUFFER_SIZE) {
+        return -1;
+    }
+
+    /* Add Host header */
+    written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
+                       "Host: %s\r\n", request->host ? request->host : "localhost");
+    if (written >= (int)SEND_BUFFER_SIZE) {
+        return -1;
+    }
+
+    /* Add custom headers */
+    for (size_t i = 0; i < request->header_count; i++) {
+        written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
+                           "%s: %s\r\n",
+                           request->headers[i].key,
+                           request->headers[i].value);
+        if (written >= (int)SEND_BUFFER_SIZE) {
+            return -1;
+        }
+    }
+
+    /* Add Content-Length if body present */
+    if (request->body && request->body_len > 0) {
+        written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
+                           "Content-Length: %zu\r\n", request->body_len);
+        if (written >= (int)SEND_BUFFER_SIZE) {
+            return -1;
+        }
+    }
+
+    /* End of headers */
+    written += snprintf(buf + written, SEND_BUFFER_SIZE - written, "\r\n");
+    if (written >= (int)SEND_BUFFER_SIZE) {
+        return -1;
+    }
+
+    /* Add body if present */
+    if (request->body && request->body_len > 0) {
+        if (written + request->body_len >= SEND_BUFFER_SIZE) {
+            return -1;  /* Body too large */
+        }
+        memcpy(buf + written, request->body, request->body_len);
+        written += request->body_len;
+    }
+
+    req->send_len = written;
+    req->send_pos = 0;
+
+    return 0;
 }
 
 /**
@@ -358,16 +598,15 @@ static int step_tls_handshake(async_request_t *req) {
 static int step_sending_request(async_request_t *req) {
     /* Build request if not already done */
     if (req->send_len == 0) {
-        /* TODO: Build HTTP request from req->request */
-        /* For now, just a placeholder */
         printf("[async_request] Building HTTP request (id=%lu)\n",
                (unsigned long)req->id);
 
-        /* Placeholder request */
-        const char *placeholder = "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
-        req->send_len = strlen(placeholder);
-        memcpy(req->send_buf, placeholder, req->send_len);
-        req->send_pos = 0;
+        if (build_http_request(req) < 0) {
+            async_request_set_error(req, HTTPMORPH_ERROR_MEMORY,
+                                   "Failed to build HTTP request");
+            req->state = ASYNC_STATE_ERROR;
+            return ASYNC_STATUS_ERROR;
+        }
     }
 
     /* Send data */
@@ -498,9 +737,95 @@ static int step_receiving_headers(async_request_t *req) {
                 printf("[async_request] Headers received (%zu bytes) (id=%lu)\n",
                        req->headers_end_pos, (unsigned long)req->id);
 
-                /* TODO: Parse Content-Length, Transfer-Encoding, etc. */
-                req->content_length = 0;  /* Placeholder */
+                /* Parse headers for Content-Length and Transfer-Encoding */
+                req->content_length = 0;
                 req->chunked_encoding = false;
+
+                /* Search for Content-Length header (case-insensitive) */
+                char *headers_start = (char *)req->recv_buf;
+                char *headers_end = headers_start + req->headers_end_pos;
+
+                /* Look for "Content-Length:" */
+                for (char *p = headers_start; p < headers_end - 16; p++) {
+                    if ((p[0] == 'C' || p[0] == 'c') &&
+                        (p[1] == 'o' || p[1] == 'O') &&
+                        (p[2] == 'n' || p[2] == 'N') &&
+                        (p[3] == 't' || p[3] == 'T') &&
+                        (p[4] == 'e' || p[4] == 'E') &&
+                        (p[5] == 'n' || p[5] == 'N') &&
+                        (p[6] == 't' || p[6] == 'T') &&
+                        p[7] == '-' &&
+                        (p[8] == 'L' || p[8] == 'l') &&
+                        (p[9] == 'e' || p[9] == 'E') &&
+                        (p[10] == 'n' || p[10] == 'N') &&
+                        (p[11] == 'g' || p[11] == 'G') &&
+                        (p[12] == 't' || p[12] == 'T') &&
+                        (p[13] == 'h' || p[13] == 'H') &&
+                        p[14] == ':') {
+                        /* Found Content-Length header */
+                        p += 15;
+                        /* Skip whitespace */
+                        while (p < headers_end && (*p == ' ' || *p == '\t')) p++;
+                        /* Parse number */
+                        req->content_length = 0;
+                        while (p < headers_end && *p >= '0' && *p <= '9') {
+                            req->content_length = req->content_length * 10 + (*p - '0');
+                            p++;
+                        }
+                        break;
+                    }
+                }
+
+                /* Look for "Transfer-Encoding: chunked" */
+                for (char *p = headers_start; p < headers_end - 25; p++) {
+                    if ((p[0] == 'T' || p[0] == 't') &&
+                        (p[1] == 'r' || p[1] == 'R') &&
+                        (p[2] == 'a' || p[2] == 'A') &&
+                        (p[3] == 'n' || p[3] == 'N') &&
+                        (p[4] == 's' || p[4] == 'S') &&
+                        (p[5] == 'f' || p[5] == 'F') &&
+                        (p[6] == 'e' || p[6] == 'E') &&
+                        (p[7] == 'r' || p[7] == 'R') &&
+                        p[8] == '-' &&
+                        (p[9] == 'E' || p[9] == 'e') &&
+                        (p[10] == 'n' || p[10] == 'N') &&
+                        (p[11] == 'c' || p[11] == 'C') &&
+                        (p[12] == 'o' || p[12] == 'O') &&
+                        (p[13] == 'd' || p[13] == 'D') &&
+                        (p[14] == 'i' || p[14] == 'I') &&
+                        (p[15] == 'n' || p[15] == 'N') &&
+                        (p[16] == 'g' || p[16] == 'G') &&
+                        p[17] == ':') {
+                        /* Found Transfer-Encoding header, check if chunked */
+                        p += 18;
+                        /* Skip whitespace */
+                        while (p < headers_end && (*p == ' ' || *p == '\t')) p++;
+                        /* Check for "chunked" */
+                        if (p < headers_end - 7 &&
+                            (p[0] == 'c' || p[0] == 'C') &&
+                            (p[1] == 'h' || p[1] == 'H') &&
+                            (p[2] == 'u' || p[2] == 'U') &&
+                            (p[3] == 'n' || p[3] == 'N') &&
+                            (p[4] == 'k' || p[4] == 'K') &&
+                            (p[5] == 'e' || p[5] == 'E') &&
+                            (p[6] == 'd' || p[6] == 'D')) {
+                            req->chunked_encoding = true;
+                        }
+                        break;
+                    }
+                }
+
+                printf("[async_request] Content-Length: %zu, Chunked: %d (id=%lu)\n",
+                       req->content_length, req->chunked_encoding, (unsigned long)req->id);
+
+                /* Check if we already have body data in the buffer */
+                size_t body_start = req->headers_end_pos;
+                if (body_start < req->recv_len) {
+                    /* We have some body data already */
+                    req->body_received = req->recv_len - body_start;
+                    printf("[async_request] Already received %zu bytes of body with headers (id=%lu)\n",
+                           req->body_received, (unsigned long)req->id);
+                }
 
                 req->state = ASYNC_STATE_RECEIVING_BODY;
                 return ASYNC_STATUS_IN_PROGRESS;
@@ -520,6 +845,47 @@ static int step_receiving_body(async_request_t *req) {
     if (req->content_length == 0 && !req->chunked_encoding) {
         printf("[async_request] No body to receive (id=%lu)\n",
                (unsigned long)req->id);
+
+        /* Create response object for empty body */
+        if (!req->response) {
+            req->response = calloc(1, sizeof(httpmorph_response_t));
+            if (req->response) {
+                req->response->body = NULL;
+                req->response->body_len = 0;
+                req->response->status_code = 200;  /* TODO: Parse from headers */
+                req->response->http_version = HTTPMORPH_VERSION_1_1;
+                req->response->error = HTTPMORPH_OK;
+            }
+        }
+
+        req->state = ASYNC_STATE_COMPLETE;
+        return ASYNC_STATUS_COMPLETE;
+    }
+
+    /* Check if we already have all the body data */
+    if (!req->chunked_encoding && req->body_received >= req->content_length) {
+        printf("[async_request] Body already complete (%zu bytes) (id=%lu)\n",
+               req->body_received, (unsigned long)req->id);
+
+        /* Create response object */
+        if (!req->response) {
+            req->response = calloc(1, sizeof(httpmorph_response_t));
+            if (req->response) {
+                /* Extract body from recv_buf (starts after headers) */
+                size_t body_start = req->headers_end_pos;
+                if (req->content_length > 0) {
+                    req->response->body = malloc(req->content_length);
+                    if (req->response->body) {
+                        memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
+                        req->response->body_len = req->content_length;
+                    }
+                }
+                req->response->status_code = 200;  // TODO: Parse from headers
+                req->response->http_version = HTTPMORPH_VERSION_1_1;
+                req->response->error = HTTPMORPH_OK;
+            }
+        }
+
         req->state = ASYNC_STATE_COMPLETE;
         return ASYNC_STATUS_COMPLETE;
     }
@@ -592,6 +958,26 @@ static int step_receiving_body(async_request_t *req) {
     if (req->content_length > 0 && req->body_received >= req->content_length) {
         printf("[async_request] Body received (%zu bytes) (id=%lu)\n",
                req->body_received, (unsigned long)req->id);
+
+        /* Create response object */
+        if (!req->response) {
+            req->response = calloc(1, sizeof(httpmorph_response_t));
+            if (req->response) {
+                /* Extract body from recv_buf (starts after headers) */
+                size_t body_start = req->headers_end_pos;
+                if (req->content_length > 0) {
+                    req->response->body = malloc(req->content_length);
+                    if (req->response->body) {
+                        memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
+                        req->response->body_len = req->content_length;
+                    }
+                }
+                req->response->status_code = 200;  // TODO: Parse from headers
+                req->response->http_version = HTTPMORPH_VERSION_1_1;
+                req->response->error = HTTPMORPH_OK;
+            }
+        }
+
         req->state = ASYNC_STATE_COMPLETE;
         return ASYNC_STATUS_COMPLETE;
     }

@@ -116,6 +116,11 @@ struct httpmorph_request {
     /* TLS fingerprinting */
     char *ja3_string;
     char *user_agent;
+
+    /* TLS configuration */
+    bool verify_ssl;              /* Verify SSL certificates (default: true) */
+    uint16_t min_tls_version;     /* Minimum TLS version (0 = default) */
+    uint16_t max_tls_version;     /* Maximum TLS version (0 = default) */
 };
 
 /* Response structure */
@@ -281,6 +286,30 @@ void httpmorph_request_set_http2_priority(
     int32_t stream_dependency,
     int32_t weight,
     bool exclusive
+);
+
+/**
+ * Set SSL certificate verification mode
+ *
+ * @param request Request to configure
+ * @param verify Whether to verify SSL certificates (default: true)
+ */
+void httpmorph_request_set_verify_ssl(
+    httpmorph_request_t *request,
+    bool verify
+);
+
+/**
+ * Set TLS version range
+ *
+ * @param request Request to configure
+ * @param min_version Minimum TLS version (0x0301-0x0304, 0 for default)
+ * @param max_version Maximum TLS version (0x0301-0x0304, 0 for default)
+ */
+void httpmorph_request_set_tls_version(
+    httpmorph_request_t *request,
+    uint16_t min_version,
+    uint16_t max_version
 );
 
 /* Response helpers */

@@ -15,12 +15,18 @@
 extern "C" {
 #endif
 
+/* Forward declaration for SSL_CTX */
+typedef struct ssl_ctx_st SSL_CTX;
+
 /**
  * Request manager structure
  */
 typedef struct async_request_manager {
     /* I/O engine for event-driven I/O */
     io_engine_t *io_engine;
+
+    /* SSL/TLS context */
+    SSL_CTX *ssl_ctx;
 
     /* Request tracking */
     async_request_t **requests;

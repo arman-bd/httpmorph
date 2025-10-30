@@ -100,6 +100,8 @@ cdef extern from "../include/httpmorph.h":
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
     void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
     void httpmorph_request_set_http2(httpmorph_request_t *request, bint enabled) nogil
+    void httpmorph_request_set_verify_ssl(httpmorph_request_t *request, bint verify) nogil
+    void httpmorph_request_set_tls_version(httpmorph_request_t *request, uint16_t min_version, uint16_t max_version) nogil
     httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool_t *pool) nogil
     httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client) nogil
 
@@ -201,6 +203,25 @@ cdef class Client:
             # Set HTTP/2 flag if provided (default is False)
             http2 = kwargs.get('http2', False)
             httpmorph_request_set_http2(req, http2)
+
+            # Set SSL verification (default is True)
+            verify_ssl = kwargs.get('verify', kwargs.get('verify_ssl', True))
+            httpmorph_request_set_verify_ssl(req, verify_ssl)
+
+            # Set TLS version range if provided
+            tls_version = kwargs.get('tls_version')
+            if tls_version:
+                if isinstance(tls_version, str):
+                    # Map string version to hex value
+                    version_map = {
+                        '1.0': 0x0301, '1.1': 0x0302, '1.2': 0x0303, '1.3': 0x0304,
+                        'TLS1.0': 0x0301, 'TLS1.1': 0x0302, 'TLS1.2': 0x0303, 'TLS1.3': 0x0304,
+                    }
+                    tls_hex = version_map.get(tls_version, 0)
+                    httpmorph_request_set_tls_version(req, tls_hex, tls_hex)
+                elif isinstance(tls_version, tuple) and len(tls_version) == 2:
+                    min_ver, max_ver = tls_version
+                    httpmorph_request_set_tls_version(req, min_ver, max_ver)
 
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')
@@ -433,6 +454,25 @@ cdef class Session:
             # Set HTTP/2 flag if provided (default is False)
             http2 = kwargs.get('http2', False)
             httpmorph_request_set_http2(req, http2)
+
+            # Set SSL verification (default is True)
+            verify_ssl = kwargs.get('verify', kwargs.get('verify_ssl', True))
+            httpmorph_request_set_verify_ssl(req, verify_ssl)
+
+            # Set TLS version range if provided
+            tls_version = kwargs.get('tls_version')
+            if tls_version:
+                if isinstance(tls_version, str):
+                    # Map string version to hex value
+                    version_map = {
+                        '1.0': 0x0301, '1.1': 0x0302, '1.2': 0x0303, '1.3': 0x0304,
+                        'TLS1.0': 0x0301, 'TLS1.1': 0x0302, 'TLS1.2': 0x0303, 'TLS1.3': 0x0304,
+                    }
+                    tls_hex = version_map.get(tls_version, 0)
+                    httpmorph_request_set_tls_version(req, tls_hex, tls_hex)
+                elif isinstance(tls_version, tuple) and len(tls_version) == 2:
+                    min_ver, max_ver = tls_version
+                    httpmorph_request_set_tls_version(req, min_ver, max_ver)
 
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')

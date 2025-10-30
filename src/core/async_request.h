@@ -76,6 +76,11 @@ struct async_request {
     SSL *ssl;
     bool is_https;
 
+    /* DNS resolution result */
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
+    bool dns_resolved;
+
     /* I/O operation tracking */
     io_operation_t *current_op;
     io_engine_t *io_engine;
@@ -116,12 +121,16 @@ struct async_request {
     int refcount;
 };
 
+/* Forward declaration for SSL_CTX */
+typedef struct ssl_ctx_st SSL_CTX;
+
 /**
  * Create a new async request
  */
 async_request_t* async_request_create(
     const httpmorph_request_t *request,
     io_engine_t *io_engine,
+    SSL_CTX *ssl_ctx,
     uint32_t timeout_ms,
     async_request_callback_t callback,
     void *user_data
@@ -182,6 +191,11 @@ void async_request_set_error(async_request_t *req, int error_code, const char *e
  * Get response (only valid after completion)
  */
 httpmorph_response_t* async_request_get_response(async_request_t *req);
+
+/**
+ * Get error message
+ */
+const char* async_request_get_error_message(const async_request_t *req);
 
 #ifdef __cplusplus
 }

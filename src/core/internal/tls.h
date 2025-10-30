@@ -17,6 +17,25 @@
 int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile);
 
 /**
+ * Configure SSL context TLS version range
+ *
+ * @param ctx SSL context to configure
+ * @param min_version Minimum TLS version (0 for default)
+ * @param max_version Maximum TLS version (0 for default)
+ * @return 0 on success, -1 on error
+ */
+int httpmorph_set_tls_version_range(SSL_CTX *ctx, uint16_t min_version, uint16_t max_version);
+
+/**
+ * Configure SSL verification mode
+ *
+ * @param ctx SSL context to configure
+ * @param verify Whether to verify SSL certificates
+ * @return 0 on success, -1 on error
+ */
+int httpmorph_set_ssl_verification(SSL_CTX *ctx, bool verify);
+
+/**
  * Establish TLS connection on existing socket
  *
  * @param ctx SSL context

@@ -45,9 +45,10 @@ class TestRealHTTPSIntegration:
         # Should return an IP address if successful
         if response.status_code == 200:
             import re
+
             # IPv4 or IPv6 pattern
-            ip_pattern = r'(\d{1,3}\.){3}\d{1,3}|([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}'
-            assert re.search(ip_pattern, response.body.decode('utf-8'))
+            ip_pattern = r"(\d{1,3}\.){3}\d{1,3}|([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}"
+            assert re.search(ip_pattern, response.body.decode("utf-8"))
 
     def test_httpbin_get(self):
         """Test local mock server GET endpoint"""
