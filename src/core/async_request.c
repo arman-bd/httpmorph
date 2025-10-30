@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <sys/time.h>
 
 /* SSL/TLS support */
 #include <openssl/ssl.h>
@@ -24,6 +23,7 @@
     #include <sys/socket.h>
     #include <netinet/in.h>
     #include <netdb.h>
+    #include <sys/time.h>
 #endif
 
 /* Default buffer sizes */
@@ -37,9 +37,29 @@ static uint64_t next_request_id = 1;
  * Get current time in microseconds
  */
 static uint64_t get_time_us(void) {
+#ifdef _WIN32
+    FILETIME ft;
+    ULARGE_INTEGER uli;
+
+    /* Get current time as FILETIME (100-nanosecond intervals since 1601-01-01) */
+    GetSystemTimeAsFileTime(&ft);
+
+    /* Convert to 64-bit integer */
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    /* Convert to microseconds since Unix epoch (1970-01-01) */
+    /* FILETIME epoch is 1601-01-01, Unix epoch is 1970-01-01 */
+    /* Difference is 11644473600 seconds */
+    uint64_t microseconds = uli.QuadPart / 10; /* Convert 100-ns to microseconds */
+    microseconds -= 11644473600ULL * 1000000ULL; /* Adjust to Unix epoch */
+
+    return microseconds;
+#else
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)tv.tv_sec * 1000000 + (uint64_t)tv.tv_usec;
+#endif
 }
 
 /**

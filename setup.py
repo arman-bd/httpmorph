@@ -490,6 +490,8 @@ extensions = [
             str(CORE_DIR / "tls.c"),
             str(CORE_DIR / "request.c"),
             str(CORE_DIR / "response.c"),
+            str(CORE_DIR / "buffer_pool.c"),
+            str(CORE_DIR / "string_intern.c"),
             str(TLS_DIR / "browser_profiles.c"),
         ],
         include_dirs=INCLUDE_DIRS,

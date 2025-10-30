@@ -12,7 +12,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <pthread.h>
+#ifndef _WIN32
+    #include <pthread.h>
+#endif
 #include <nghttp2/nghttp2.h>
 #include <openssl/ssl.h>
 

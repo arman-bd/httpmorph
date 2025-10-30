@@ -21,6 +21,7 @@ static INIT_ONCE init_once_control = INIT_ONCE_STATIC_INIT;
 #endif
 
 static bool httpmorph_init_status = false;
+static bool httpmorph_ever_initialized = false;  /* Track if init ever succeeded */
 static io_engine_t *default_io_engine = NULL;
 
 /* Mutex for SSL_CTX configuration (BoringSSL SSL_CTX_* functions are not thread-safe) */
@@ -73,6 +74,7 @@ static BOOL CALLBACK httpmorph_init_internal(PINIT_ONCE InitOnce, PVOID Paramete
     }
 
     httpmorph_init_status = true;
+    httpmorph_ever_initialized = true;
 #ifdef _WIN32
     return TRUE;
 #endif
@@ -90,7 +92,9 @@ int httpmorph_init(void) {
     InitOnceExecuteOnce(&init_once_control, httpmorph_init_internal, NULL, NULL);
 #endif
 
-    return httpmorph_init_status ? HTTPMORPH_OK : HTTPMORPH_ERROR_MEMORY;
+    /* Return success if initialization ever succeeded (even after cleanup)
+     * This makes init() idempotent and allows tests to call it multiple times */
+    return httpmorph_ever_initialized ? HTTPMORPH_OK : HTTPMORPH_ERROR_MEMORY;
 }
 
 /**

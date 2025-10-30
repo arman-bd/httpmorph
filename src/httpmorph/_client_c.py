@@ -47,9 +47,12 @@ try:
     import glob
     import importlib.util
 
-    # Find the .so file in current directory
+    # Find the .so/.pyd file in current directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     so_files = glob.glob(os.path.join(current_dir, "_httpmorph*.so"))
+    if not so_files:
+        # On Windows, look for .pyd files
+        so_files = glob.glob(os.path.join(current_dir, "_httpmorph*.pyd"))
 
     if not so_files:
         raise ImportError(f"C extension not found in {current_dir}")

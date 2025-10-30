@@ -4,7 +4,9 @@
 
 #include "string_intern.h"
 #include <string.h>
-#include <strings.h>
+#ifndef _WIN32
+    #include <strings.h>
+#endif
 
 /* Common HTTP header names (case-insensitive) */
 static const char* COMMON_HEADERS[] = {

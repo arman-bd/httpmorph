@@ -9,7 +9,10 @@
 #include "io_engine.h"
 #include <stdint.h>
 #include <stdbool.h>
-#include <pthread.h>
+
+#ifndef _WIN32
+    #include <pthread.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
