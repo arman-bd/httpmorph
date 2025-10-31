@@ -36,11 +36,21 @@ WORKDIR /workspace
 # Copy project files
 COPY . .
 
+# Copy .env file for test credentials
+COPY .env .env
+
+# Clean any macOS compiled binaries to prevent conflicts
+RUN find src -name "*.so" -type f -delete && \
+    find src -name "*.dylib" -type f -delete
+
 # Setup vendor dependencies
 RUN chmod +x scripts/setup_vendors.sh && ./scripts/setup_vendors.sh
 
 # Install Python package in development mode
 RUN pip install -e ".[dev]"
+
+# Install python-dotenv for .env file support in tests
+RUN pip install python-dotenv
 
 # Default command: run tests
 CMD ["pytest", "tests/", "-v"]
