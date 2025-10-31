@@ -149,7 +149,8 @@ fi
 
 cd nghttp2
 
-if [ ! -f "lib/.libs/libnghttp2.a" ]; then
+# Check if nghttp2 is properly installed (not just built)
+if [ ! -f "install/lib/libnghttp2.a" ]; then
     echo "Building nghttp2..."
 
     # Clean up install directory if it exists as a file
@@ -169,7 +170,7 @@ if [ ! -f "lib/.libs/libnghttp2.a" ]; then
     make -j$(nproc)
     make install
 
-    echo "✓ nghttp2 built successfully"
+    echo "✓ nghttp2 built and installed successfully"
 else
     echo "✓ nghttp2 already built"
 fi
