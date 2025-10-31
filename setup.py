@@ -449,6 +449,7 @@ extensions = [
             str(CORE_DIR / "request_builder.c"),
             str(CORE_DIR / "string_intern.c"),
             str(CORE_DIR / "io_engine.c"),
+            str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
             str(CORE_DIR / "async_request.c"),
             str(CORE_DIR / "async_request_manager.c"),
             str(TLS_DIR / "browser_profiles.c"),
@@ -481,6 +482,7 @@ extensions = [
             str(BINDINGS_DIR / "_async.pyx"),
             # Core async I/O modules (already compiled in main extension, but needed here too)
             str(CORE_DIR / "io_engine.c"),
+            str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
             str(CORE_DIR / "async_request.c"),
             str(CORE_DIR / "async_request_manager.c"),
             # Dependencies needed by async modules

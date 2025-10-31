@@ -8,6 +8,17 @@
 #include <string.h>
 #include <inttypes.h>  /* for PRIu64 */
 
+/* Debug output control */
+#ifdef HTTPMORPH_DEBUG
+    #define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+    #define DEBUG_PRINT(...) ((void)0)
+#endif
+
+#ifdef _WIN32
+#include "iocp_dispatcher.h"
+#endif
+
 /* Platform-specific headers */
 #ifdef _WIN32
     #include <winsock2.h>
@@ -63,6 +74,7 @@ const char* io_engine_type_name(io_engine_type_t type) {
         case IO_ENGINE_URING:  return "io_uring";
         case IO_ENGINE_EPOLL:  return "epoll";
         case IO_ENGINE_KQUEUE: return "kqueue";
+        case IO_ENGINE_IOCP:   return "iocp";
         default:               return "unknown";
     }
 }
@@ -120,6 +132,43 @@ static io_engine_t* io_engine_create_kqueue(void) {
 #endif
 }
 
+/**
+ * Create IOCP-based engine (Windows)
+ */
+static io_engine_t* io_engine_create_iocp(void) {
+#ifdef _WIN32
+    io_engine_t *engine = calloc(1, sizeof(io_engine_t));
+    if (!engine) {
+        return NULL;
+    }
+
+    engine->type = IO_ENGINE_IOCP;
+
+    /* Create I/O completion port */
+    engine->iocp_handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+
+    if (engine->iocp_handle == NULL) {
+        free(engine);
+        return NULL;
+    }
+
+    /* Start the IOCP completion dispatcher thread */
+    if (iocp_dispatcher_start(engine) != 0) {
+        DEBUG_PRINT("[io_engine] Failed to start IOCP dispatcher\n");
+        CloseHandle((HANDLE)engine->iocp_handle);
+        free(engine);
+        return NULL;
+    }
+
+    engine->engine_fd = -1;  /* IOCP doesn't use traditional fd */
+    DEBUG_PRINT("[io_engine] IOCP engine created with dispatcher thread\n");
+    return engine;
+#else
+    /* Not supported on non-Windows */
+    return NULL;
+#endif
+}
+
 #ifdef HAVE_IO_URING
 /**
  * Create io_uring-based engine
@@ -168,28 +217,35 @@ io_engine_t* io_engine_create(uint32_t queue_depth) {
     if (io_engine_has_uring()) {
         io_engine_t *engine = io_engine_create_uring(queue_depth);
         if (engine) {
-            printf("[io_engine] Using io_uring (queue_depth=%u)\n", queue_depth);
+            DEBUG_PRINT("[io_engine] Using io_uring (queue_depth=%u)\n", queue_depth);
             return engine;
         }
     }
 #endif
 
-    /* Try epoll on Linux */
-    io_engine_t *engine = io_engine_create_epoll();
+    /* Try IOCP on Windows */
+    io_engine_t *engine = io_engine_create_iocp();
     if (engine) {
-        printf("[io_engine] Using epoll\n");
+        DEBUG_PRINT("[io_engine] Using IOCP (Windows)\n");
+        return engine;
+    }
+
+    /* Try epoll on Linux */
+    engine = io_engine_create_epoll();
+    if (engine) {
+        DEBUG_PRINT("[io_engine] Using epoll\n");
         return engine;
     }
 
     /* Try kqueue on macOS */
     engine = io_engine_create_kqueue();
     if (engine) {
-        printf("[io_engine] Using kqueue\n");
+        DEBUG_PRINT("[io_engine] Using kqueue\n");
         return engine;
     }
 
     /* Basic fallback - synchronous I/O */
-    printf("[io_engine] Using synchronous I/O (no epoll/kqueue/io_uring available)\n");
+    DEBUG_PRINT("[io_engine] Using synchronous I/O (no IOCP/epoll/kqueue/io_uring available)\n");
     engine = calloc(1, sizeof(io_engine_t));
     if (engine) {
         engine->type = IO_ENGINE_EPOLL;  /* Placeholder */
@@ -211,6 +267,17 @@ void io_engine_destroy(io_engine_t *engine) {
         io_uring_queue_exit(engine->ring);
         free(engine->ring);
         engine->ring = NULL;
+    }
+#endif
+
+#ifdef _WIN32
+    if (engine->type == IO_ENGINE_IOCP && engine->iocp_handle) {
+        /* Stop the dispatcher thread first */
+        iocp_dispatcher_stop(engine);
+
+        /* Then close the IOCP handle */
+        CloseHandle(engine->iocp_handle);
+        engine->iocp_handle = NULL;
     }
 #endif
 
@@ -297,6 +364,20 @@ static int io_engine_submit_kqueue(io_engine_t *engine, io_operation_t *op) {
 #endif
 
 /**
+ * Submit an I/O operation - IOCP implementation
+ * Note: Current implementation is a placeholder for readiness-based polling.
+ * Full IOCP requires overlapped I/O operations which need architectural changes.
+ */
+#ifdef _WIN32
+static int io_engine_submit_iocp(io_engine_t *engine, io_operation_t *op) {
+    /* For now, just track the operation without actually submitting to IOCP */
+    /* This allows the async code to use the polling fallback mechanism */
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
+
+/**
  * Submit an I/O operation
  */
 int io_engine_submit(io_engine_t *engine, io_operation_t *op) {
@@ -312,6 +393,10 @@ int io_engine_submit(io_engine_t *engine, io_operation_t *op) {
 #ifdef __APPLE__
         case IO_ENGINE_KQUEUE:
             return io_engine_submit_kqueue(engine, op);
+#endif
+#ifdef _WIN32
+        case IO_ENGINE_IOCP:
+            return io_engine_submit_iocp(engine, op);
 #endif
         default:
             return -1;
@@ -423,6 +508,21 @@ static int kqueue_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
 #endif
 
 /**
+ * Wait for I/O completions - IOCP implementation
+ * Note: Returns immediately as we're using polling-based approach with WSAGetOverlappedResult
+ * The Python async code uses asyncio.sleep() for polling and calls async_request_step()
+ */
+#ifdef _WIN32
+static int iocp_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    /* Return immediately - using polling approach */
+    /* The async_request_step() function checks completion status using WSAGetOverlappedResult */
+    (void)engine;  /* Unused */
+    (void)timeout_ms;  /* Unused */
+    return 0;  /* No events to process here */
+}
+#endif
+
+/**
  * Wait for I/O completions
  */
 int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
@@ -438,6 +538,10 @@ int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
 #ifdef __APPLE__
         case IO_ENGINE_KQUEUE:
             return kqueue_wait_events(engine, timeout_ms);
+#endif
+#ifdef _WIN32
+        case IO_ENGINE_IOCP:
+            return iocp_wait_events(engine, timeout_ms);
 #endif
         default:
             return -1;

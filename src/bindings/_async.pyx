@@ -345,26 +345,32 @@ cdef class AsyncRequestManager:
                     fd = async_request_get_fd(req)
 
                     if fd >= 0 and self._loop:
-                        if status == ASYNC_STATUS_NEED_READ:
-                            # Wait for socket to be readable
-                            read_event = asyncio.Event()
-                            self._loop.add_reader(fd, read_event.set)
-                            try:
-                                await asyncio.wait_for(read_event.wait(), timeout=0.1)
-                            except asyncio.TimeoutError:
-                                pass  # Continue polling
-                            finally:
-                                self._loop.remove_reader(fd)
-                        else:  # ASYNC_STATUS_NEED_WRITE
-                            # Wait for socket to be writable
-                            write_event = asyncio.Event()
-                            self._loop.add_writer(fd, write_event.set)
-                            try:
-                                await asyncio.wait_for(write_event.wait(), timeout=0.1)
-                            except asyncio.TimeoutError:
-                                pass  # Continue polling
-                            finally:
-                                self._loop.remove_writer(fd)
+                        try:
+                            # Try to use efficient event loop integration (Unix: epoll/kqueue)
+                            if status == ASYNC_STATUS_NEED_READ:
+                                # Wait for socket to be readable
+                                read_event = asyncio.Event()
+                                self._loop.add_reader(fd, read_event.set)
+                                try:
+                                    await asyncio.wait_for(read_event.wait(), timeout=0.1)
+                                except asyncio.TimeoutError:
+                                    pass  # Continue polling
+                                finally:
+                                    self._loop.remove_reader(fd)
+                            else:  # ASYNC_STATUS_NEED_WRITE
+                                # Wait for socket to be writable
+                                write_event = asyncio.Event()
+                                self._loop.add_writer(fd, write_event.set)
+                                try:
+                                    await asyncio.wait_for(write_event.wait(), timeout=0.1)
+                                except asyncio.TimeoutError:
+                                    pass  # Continue polling
+                                finally:
+                                    self._loop.remove_writer(fd)
+                        except NotImplementedError:
+                            # Windows ProactorEventLoop doesn't support add_reader/add_writer
+                            # Fall back to polling with short sleep
+                            await asyncio.sleep(0.001)
                     else:
                         # FD not ready yet, short sleep
                         await asyncio.sleep(0.001)

@@ -119,6 +119,18 @@ struct async_request {
 
     /* Reference counting */
     int refcount;
+
+    /* Windows IOCP support */
+#ifdef _WIN32
+    void *overlapped_connect;   /* OVERLAPPED* for ConnectEx */
+    void *overlapped_send;      /* OVERLAPPED* for WSASend */
+    void *overlapped_recv;      /* OVERLAPPED* for WSARecv */
+    bool iocp_operation_pending; /* True if an IOCP operation is in progress */
+    int iocp_last_error;        /* Last Windows error code */
+    uint32_t iocp_bytes_transferred; /* Bytes transferred in last completion */
+    void *iocp_completion_event; /* HANDLE to event signaled on completion */
+    void (*iocp_completion_callback)(struct async_request *request, uint32_t bytes, uint32_t error); /* Completion callback */
+#endif
 };
 
 /* Forward declaration for SSL_CTX */

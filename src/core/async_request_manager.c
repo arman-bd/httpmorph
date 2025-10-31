@@ -12,6 +12,13 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+/* Debug output control */
+#ifdef HTTPMORPH_DEBUG
+    #define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+    #define DEBUG_PRINT(...) ((void)0)
+#endif
+
 /* Initial capacity for request array */
 #define INITIAL_CAPACITY 16
 
@@ -62,7 +69,7 @@ async_request_manager_t* async_manager_create(void) {
     /* Initialize ID counter */
     mgr->next_request_id = 1;
 
-    printf("[async_manager] Created with I/O engine and SSL context\n");
+    DEBUG_PRINT("[async_manager] Created with I/O engine and SSL context\n");
     return mgr;
 }
 
@@ -79,7 +86,7 @@ void async_manager_destroy(async_request_manager_t *mgr) {
         async_manager_stop_event_loop(mgr);
     }
 
-    printf("[async_manager] Graceful shutdown: waiting for %zu active requests\n", mgr->request_count);
+    DEBUG_PRINT("[async_manager] Graceful shutdown: waiting for %zu active requests\n", mgr->request_count);
 
     /* Graceful shutdown: Wait for all active requests to complete or timeout */
     pthread_mutex_lock(&mgr->mutex);
@@ -112,14 +119,14 @@ void async_manager_destroy(async_request_manager_t *mgr) {
         wait_iterations++;
 
         if (mgr->request_count > 0 && wait_iterations % 10 == 0) {
-            printf("[async_manager] Still waiting for %zu requests (iteration %d)\n",
+            DEBUG_PRINT("[async_manager] Still waiting for %zu requests (iteration %d)\n",
                    mgr->request_count, wait_iterations);
         }
     }
 
     /* Force cleanup of any remaining requests */
     if (mgr->request_count > 0) {
-        printf("[async_manager] Force cleanup of %zu remaining requests\n", mgr->request_count);
+        DEBUG_PRINT("[async_manager] Force cleanup of %zu remaining requests\n", mgr->request_count);
         for (size_t i = 0; i < mgr->request_count; i++) {
             if (mgr->requests[i]) {
                 /* Set error state for incomplete requests */
@@ -146,7 +153,7 @@ void async_manager_destroy(async_request_manager_t *mgr) {
     /* Destroy mutex */
     pthread_mutex_destroy(&mgr->mutex);
 
-    printf("[async_manager] Destroyed\n");
+    DEBUG_PRINT("[async_manager] Destroyed\n");
     free(mgr);
 }
 
@@ -220,7 +227,7 @@ uint64_t async_manager_submit_request(
 
     pthread_mutex_unlock(&mgr->mutex);
 
-    printf("[async_manager] Submitted request id=%lu\n", (unsigned long)request_id);
+    DEBUG_PRINT("[async_manager] Submitted request id=%lu\n", (unsigned long)request_id);
     return request_id;
 }
 
@@ -380,13 +387,13 @@ size_t async_manager_get_active_count(const async_request_manager_t *mgr) {
 static void* event_loop_thread(void *arg) {
     async_request_manager_t *mgr = (async_request_manager_t*)arg;
 
-    printf("[async_manager] Event loop thread started\n");
+    DEBUG_PRINT("[async_manager] Event loop thread started\n");
 
     while (!mgr->shutdown) {
         async_manager_poll(mgr, 100);  /* 100ms timeout */
     }
 
-    printf("[async_manager] Event loop thread stopped\n");
+    DEBUG_PRINT("[async_manager] Event loop thread stopped\n");
     return NULL;
 }
 

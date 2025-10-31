@@ -13,10 +13,22 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+/* Debug output control */
+#ifdef HTTPMORPH_DEBUG
+    #define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+    #define DEBUG_PRINT(...) ((void)0)
+#endif
+
 /* Platform-specific headers */
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <mswsock.h>   /* For ConnectEx, AcceptEx, etc. */
+
+    /* Extension function pointers (loaded dynamically) */
+    static LPFN_CONNECTEX pfnConnectEx = NULL;
+    static bool wsa_extensions_loaded = false;
 #else
     #include <unistd.h>
     #include <errno.h>
@@ -61,6 +73,53 @@ static uint64_t get_time_us(void) {
     return (uint64_t)tv.tv_sec * 1000000 + (uint64_t)tv.tv_usec;
 #endif
 }
+
+/**
+ * Initialize Windows Socket Extensions (ConnectEx, etc.)
+ */
+#ifdef _WIN32
+static int init_wsa_extensions(int sockfd) {
+    if (wsa_extensions_loaded) {
+        return 0;  /* Already loaded */
+    }
+
+    GUID guid_connectex = WSAID_CONNECTEX;
+    DWORD bytes = 0;
+
+    /* Load ConnectEx function pointer */
+    if (WSAIoctl(sockfd, SIO_GET_EXTENSION_FUNCTION_POINTER,
+                 &guid_connectex, sizeof(guid_connectex),
+                 &pfnConnectEx, sizeof(pfnConnectEx),
+                 &bytes, NULL, NULL) == SOCKET_ERROR) {
+        DEBUG_PRINT("[async_request] Failed to load ConnectEx: %d\n", WSAGetLastError());
+        return -1;
+    }
+
+    wsa_extensions_loaded = true;
+    DEBUG_PRINT("[async_request] WSA extensions loaded successfully\n");
+    return 0;
+}
+
+/**
+ * Allocate and initialize OVERLAPPED structure for IOCP
+ * Note: For IOCP, hEvent should be NULL as IOCP uses completion ports
+ */
+static void* alloc_overlapped(void) {
+    OVERLAPPED *ov = (OVERLAPPED*)calloc(1, sizeof(OVERLAPPED));
+    /* For IOCP, don't create an event - IOCP uses the completion port */
+    /* hEvent is already NULL from calloc */
+    return ov;
+}
+
+/**
+ * Free OVERLAPPED structure
+ */
+static void free_overlapped(void *overlapped) {
+    if (overlapped) {
+        free(overlapped);
+    }
+}
+#endif
 
 /**
  * Get state name for debugging
@@ -142,6 +201,26 @@ async_request_t* async_request_create(
     req->on_complete = callback;
     req->user_data = user_data;
 
+    /* Initialize Windows-specific fields */
+#ifdef _WIN32
+    req->overlapped_connect = NULL;
+    req->overlapped_send = NULL;
+    req->overlapped_recv = NULL;
+    req->iocp_operation_pending = false;
+    req->iocp_last_error = 0;
+    req->iocp_bytes_transferred = 0;
+    req->iocp_completion_callback = NULL;
+
+    /* Create completion event (manual-reset, initially non-signaled) */
+    req->iocp_completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!req->iocp_completion_event) {
+        DEBUG_PRINT("[async_request] Failed to create completion event\n");
+        free(req->recv_buf);
+        free(req);
+        return NULL;
+    }
+#endif
+
     /* Parse URL to extract hostname and port if not already set */
     if (!request->host && request->url) {
         char *scheme = NULL, *host = NULL, *path = NULL;
@@ -179,7 +258,7 @@ async_request_t* async_request_create(
         }
 
         /* Set SSL to non-blocking mode (will be done when socket is created) */
-        printf("[async_request] Created SSL object for HTTPS (id=%lu)\n",
+        DEBUG_PRINT("[async_request] Created SSL object for HTTPS (id=%lu)\n",
                (unsigned long)req->id);
     }
 
@@ -200,9 +279,29 @@ void async_request_destroy(async_request_t *req) {
         req->current_op = NULL;
     }
 
+    /* Clean up Windows OVERLAPPED structures and event */
+#ifdef _WIN32
+    free_overlapped(req->overlapped_connect);
+    free_overlapped(req->overlapped_send);
+    free_overlapped(req->overlapped_recv);
+    req->overlapped_connect = NULL;
+    req->overlapped_send = NULL;
+    req->overlapped_recv = NULL;
+
+    /* Close completion event */
+    if (req->iocp_completion_event) {
+        CloseHandle((HANDLE)req->iocp_completion_event);
+        req->iocp_completion_event = NULL;
+    }
+#endif
+
     /* Close socket (but never close stdin/stdout/stderr) */
     if (req->sockfd > 2) {
+#ifdef _WIN32
+        closesocket(req->sockfd);
+#else
         close(req->sockfd);
+#endif
         req->sockfd = -1;
     }
 
@@ -322,7 +421,7 @@ static int step_dns_lookup(async_request_t *req) {
         return ASYNC_STATUS_ERROR;
     }
 
-    printf("[async_request] Resolving %s:%u (id=%lu)\n",
+    DEBUG_PRINT("[async_request] Resolving %s:%u (id=%lu)\n",
            hostname, port, (unsigned long)req->id);
 
     /* Setup hints for getaddrinfo */
@@ -357,7 +456,7 @@ static int step_dns_lookup(async_request_t *req) {
     req->addr_len = result->ai_addrlen;
     req->dns_resolved = true;
 
-    printf("[async_request] DNS resolved for %s:%u (id=%lu)\n",
+    DEBUG_PRINT("[async_request] DNS resolved for %s:%u (id=%lu)\n",
            hostname, port, (unsigned long)req->id);
 
     /* Free the result */
@@ -393,15 +492,100 @@ static int step_connecting(async_request_t *req) {
         /* Set performance options */
         io_socket_set_performance_opts(req->sockfd);
 
-        printf("[async_request] Connecting to %s:%u on fd=%d (id=%lu)\n",
+        DEBUG_PRINT("[async_request] Connecting to %s:%u on fd=%d (id=%lu)\n",
                req->request->host, req->request->port, req->sockfd, (unsigned long)req->id);
 
-        /* Attempt non-blocking connect */
+#ifdef _WIN32
+        /* Windows IOCP path with ConnectEx */
+        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+            /* Initialize WSA extensions if needed */
+            if (init_wsa_extensions(req->sockfd) < 0) {
+                async_request_set_error(req, -1, "Failed to load WSA extensions");
+                return ASYNC_STATUS_ERROR;
+            }
+
+            /* ConnectEx requires socket to be bound first */
+            struct sockaddr_storage local_addr;
+            memset(&local_addr, 0, sizeof(local_addr));
+            local_addr.ss_family = af;
+
+            if (bind(req->sockfd, (struct sockaddr*)&local_addr,
+                    af == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) == SOCKET_ERROR) {
+                req->iocp_last_error = WSAGetLastError();
+                char error_buf[256];
+                snprintf(error_buf, sizeof(error_buf), "Bind failed: %d", req->iocp_last_error);
+                async_request_set_error(req, req->iocp_last_error, error_buf);
+                return ASYNC_STATUS_ERROR;
+            }
+
+            /* Associate socket with IOCP, passing request pointer as completion key */
+            if (CreateIoCompletionPort((HANDLE)req->sockfd, (HANDLE)req->io_engine->iocp_handle,
+                                      (ULONG_PTR)req, 0) == NULL) {
+                req->iocp_last_error = GetLastError();
+                char error_buf[256];
+                snprintf(error_buf, sizeof(error_buf), "Failed to associate socket with IOCP: %d",
+                        req->iocp_last_error);
+                async_request_set_error(req, req->iocp_last_error, error_buf);
+                return ASYNC_STATUS_ERROR;
+            }
+            DEBUG_PRINT("[async_request] Socket fd=%d associated with IOCP, completion_key=%p (id=%lu)\n",
+                   req->sockfd, (void*)req, (unsigned long)req->id);
+
+            /* Allocate OVERLAPPED structure */
+            if (!req->overlapped_connect) {
+                req->overlapped_connect = alloc_overlapped();
+                if (!req->overlapped_connect) {
+                    async_request_set_error(req, -1, "Failed to allocate OVERLAPPED");
+                    return ASYNC_STATUS_ERROR;
+                }
+            }
+
+            /* Reset completion event before starting new operation */
+            ResetEvent((HANDLE)req->iocp_completion_event);
+
+            /* Start async connect */
+            BOOL result = pfnConnectEx(req->sockfd, (struct sockaddr*)&req->addr, req->addr_len,
+                                       NULL, 0, NULL, (OVERLAPPED*)req->overlapped_connect);
+
+            if (!result) {
+                req->iocp_last_error = WSAGetLastError();
+                if (req->iocp_last_error == ERROR_IO_PENDING) {
+                    /* Async operation started successfully */
+                    req->iocp_operation_pending = true;
+                    DEBUG_PRINT("[async_request] ConnectEx started (id=%lu)\n", (unsigned long)req->id);
+                    return ASYNC_STATUS_NEED_WRITE;
+                } else {
+                    /* Connect failed immediately */
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "ConnectEx failed: %d", req->iocp_last_error);
+                    async_request_set_error(req, req->iocp_last_error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+            }
+
+            /* Connected immediately (rare) */
+            req->iocp_operation_pending = false;
+            DEBUG_PRINT("[async_request] ConnectEx completed immediately (id=%lu)\n", (unsigned long)req->id);
+
+            /* Update socket context (required after ConnectEx) */
+            setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
+
+            /* Move to next state */
+            if (req->is_https) {
+                req->state = ASYNC_STATE_TLS_HANDSHAKE;
+            } else {
+                req->state = ASYNC_STATE_SENDING_REQUEST;
+            }
+            return ASYNC_STATUS_IN_PROGRESS;
+        }
+#endif
+
+        /* Non-Windows or non-IOCP path: standard non-blocking connect */
         int ret = connect(req->sockfd, (struct sockaddr*)&req->addr, req->addr_len);
 
         if (ret == 0) {
             /* Connected immediately (rare for non-blocking) */
-            printf("[async_request] Connected immediately (id=%lu)\n",
+            DEBUG_PRINT("[async_request] Connected immediately (id=%lu)\n",
                    (unsigned long)req->id);
 
             /* Move to next state */
@@ -431,13 +615,70 @@ static int step_connecting(async_request_t *req) {
     }
 
     /* Socket already exists, check if connect completed */
+#ifdef _WIN32
+    if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+        /* Always check the completion event (non-blocking) */
+        DWORD wait_result = WaitForSingleObject((HANDLE)req->iocp_completion_event, 0);
+
+        if (wait_result == WAIT_OBJECT_0) {
+            /* Operation completed - process result */
+            DEBUG_PRINT("[async_request] ConnectEx completed via dispatcher (error=%d, bytes=%lu, id=%lu)\n",
+                   req->iocp_last_error, (unsigned long)req->iocp_bytes_transferred, (unsigned long)req->id);
+
+            /* Reset event for next operation */
+            ResetEvent((HANDLE)req->iocp_completion_event);
+
+            /* Check socket error to get actual connection result */
+            int sock_error = 0;
+            socklen_t len = sizeof(sock_error);
+            if (getsockopt(req->sockfd, SOL_SOCKET, SO_ERROR, (char*)&sock_error, &len) == 0) {
+                if (sock_error == 0 || sock_error == ERROR_IO_PENDING) {
+                    /* Connection successful (ERROR_IO_PENDING is ok, means it's now connected) */
+                    /* Update socket context (required after ConnectEx) */
+                    setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
+
+                    /* Move to next state */
+                    if (req->is_https) {
+                        req->state = ASYNC_STATE_TLS_HANDSHAKE;
+                    } else {
+                        req->state = ASYNC_STATE_SENDING_REQUEST;
+                    }
+                    return ASYNC_STATUS_IN_PROGRESS;
+                } else {
+                    /* Connection failed */
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "ConnectEx failed: %d", sock_error);
+                    async_request_set_error(req, sock_error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+            } else {
+                /* Failed to get socket error */
+                char error_buf[256];
+                snprintf(error_buf, sizeof(error_buf), "Failed to get socket error after ConnectEx");
+                async_request_set_error(req, -1, error_buf);
+                return ASYNC_STATUS_ERROR;
+            }
+        } else if (wait_result == WAIT_TIMEOUT) {
+            /* Still pending */
+            return ASYNC_STATUS_NEED_WRITE;
+        } else {
+            /* Wait failed */
+            req->iocp_last_error = GetLastError();
+            char error_buf[256];
+            snprintf(error_buf, sizeof(error_buf), "WaitForSingleObject failed: %d", req->iocp_last_error);
+            async_request_set_error(req, req->iocp_last_error, error_buf);
+            return ASYNC_STATUS_ERROR;
+        }
+    }
+#endif
+
 #ifndef _WIN32
     int error = 0;
     socklen_t len = sizeof(error);
     if (getsockopt(req->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
         if (error == 0) {
             /* Connection successful */
-            printf("[async_request] Connected successfully (id=%lu)\n",
+            DEBUG_PRINT("[async_request] Connected successfully (id=%lu)\n",
                    (unsigned long)req->id);
 
             /* Move to next state */
@@ -484,7 +725,7 @@ static int step_tls_handshake(async_request_t *req) {
         }
         /* Set connect state (client mode) */
         SSL_set_connect_state(req->ssl);
-        printf("[async_request] SSL bound to socket fd=%d (id=%lu)\n",
+        DEBUG_PRINT("[async_request] SSL bound to socket fd=%d (id=%lu)\n",
                req->sockfd, (unsigned long)req->id);
     }
 
@@ -493,7 +734,7 @@ static int step_tls_handshake(async_request_t *req) {
 
     if (ret == 1) {
         /* Handshake complete */
-        printf("[async_request] TLS handshake complete (id=%lu)\n",
+        DEBUG_PRINT("[async_request] TLS handshake complete (id=%lu)\n",
                (unsigned long)req->id);
         req->state = ASYNC_STATE_SENDING_REQUEST;
         return ASYNC_STATUS_IN_PROGRESS;
@@ -618,7 +859,7 @@ static int build_http_request(async_request_t *req) {
 static int step_sending_request(async_request_t *req) {
     /* Build request if not already done */
     if (req->send_len == 0) {
-        printf("[async_request] Building HTTP request (id=%lu)\n",
+        DEBUG_PRINT("[async_request] Building HTTP request (id=%lu)\n",
                (unsigned long)req->id);
 
         if (build_http_request(req) < 0) {
@@ -651,38 +892,117 @@ static int step_sending_request(async_request_t *req) {
                 }
             }
         } else {
-            /* Plain TCP send */
-            sent = send(req->sockfd,
-                       req->send_buf + req->send_pos,
-                       req->send_len - req->send_pos,
-                       0);
-
-            if (sent < 0) {
 #ifdef _WIN32
-                int err = WSAGetLastError();
-                if (err == WSAEWOULDBLOCK) {
-                    return ASYNC_STATUS_NEED_WRITE;
-                }
-#else
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    return ASYNC_STATUS_NEED_WRITE;
-                }
-#endif
-                async_request_set_error(req, errno, "Send failed");
-                return ASYNC_STATUS_ERROR;
-            }
+            /* Windows IOCP path with WSASend */
+            if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+                /* Check if previous operation completed */
+                if (req->iocp_operation_pending && req->overlapped_send) {
+                    OVERLAPPED *ov = (OVERLAPPED*)req->overlapped_send;
+                    DWORD bytes_transferred = 0;
+                    DWORD flags = 0;
 
-            if (sent == 0) {
-                async_request_set_error(req, -1, "Connection closed");
-                return ASYNC_STATUS_ERROR;
+                    if (WSAGetOverlappedResult(req->sockfd, ov, &bytes_transferred, FALSE, &flags)) {
+                        /* Send completed */
+                        req->iocp_operation_pending = false;
+                        req->send_pos += bytes_transferred;
+                        DEBUG_PRINT("[async_request] WSASend completed: %lu bytes (id=%lu)\n",
+                               (unsigned long)bytes_transferred, (unsigned long)req->id);
+                        continue;  /* Try to send more */
+                    } else {
+                        req->iocp_last_error = WSAGetLastError();
+                        if (req->iocp_last_error == WSA_IO_INCOMPLETE) {
+                            /* Still pending */
+                            return ASYNC_STATUS_NEED_WRITE;
+                        } else {
+                            /* Send failed */
+                            char error_buf[256];
+                            snprintf(error_buf, sizeof(error_buf), "WSASend failed: %d", req->iocp_last_error);
+                            async_request_set_error(req, req->iocp_last_error, error_buf);
+                            return ASYNC_STATUS_ERROR;
+                        }
+                    }
+                }
+
+                /* Start new WSASend operation */
+                if (!req->overlapped_send) {
+                    req->overlapped_send = alloc_overlapped();
+                    if (!req->overlapped_send) {
+                        async_request_set_error(req, -1, "Failed to allocate OVERLAPPED for send");
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+
+                /* Reset OVERLAPPED structure */
+                OVERLAPPED *ov = (OVERLAPPED*)req->overlapped_send;
+                memset(ov, 0, sizeof(OVERLAPPED));
+
+                /* Reset completion event before starting new operation */
+                ResetEvent((HANDLE)req->iocp_completion_event);
+
+                WSABUF buf;
+                buf.buf = (char*)(req->send_buf + req->send_pos);
+                buf.len = req->send_len - req->send_pos;
+
+                DWORD bytes_sent = 0;
+                int result = WSASend(req->sockfd, &buf, 1, &bytes_sent, 0, ov, NULL);
+
+                if (result == 0) {
+                    /* Completed immediately */
+                    req->send_pos += bytes_sent;
+                    DEBUG_PRINT("[async_request] WSASend completed immediately: %lu bytes (id=%lu)\n",
+                           (unsigned long)bytes_sent, (unsigned long)req->id);
+                    continue;  /* Try to send more */
+                } else {
+                    req->iocp_last_error = WSAGetLastError();
+                    if (req->iocp_last_error == WSA_IO_PENDING) {
+                        /* Async operation started */
+                        req->iocp_operation_pending = true;
+                        DEBUG_PRINT("[async_request] WSASend pending (id=%lu)\n", (unsigned long)req->id);
+                        return ASYNC_STATUS_NEED_WRITE;
+                    } else {
+                        /* Send failed */
+                        char error_buf[256];
+                        snprintf(error_buf, sizeof(error_buf), "WSASend failed: %d", req->iocp_last_error);
+                        async_request_set_error(req, req->iocp_last_error, error_buf);
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+            } else
+#endif
+            {
+                /* Plain TCP send (non-IOCP) */
+                sent = send(req->sockfd,
+                           (const char*)(req->send_buf + req->send_pos),
+                           req->send_len - req->send_pos,
+                           0);
+
+                if (sent < 0) {
+#ifdef _WIN32
+                    int err = WSAGetLastError();
+                    if (err == WSAEWOULDBLOCK) {
+                        return ASYNC_STATUS_NEED_WRITE;
+                    }
+#else
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        return ASYNC_STATUS_NEED_WRITE;
+                    }
+#endif
+                    async_request_set_error(req, errno, "Send failed");
+                    return ASYNC_STATUS_ERROR;
+                }
+
+                if (sent == 0) {
+                    async_request_set_error(req, -1, "Connection closed");
+                    return ASYNC_STATUS_ERROR;
+                }
+
+                req->send_pos += sent;
             }
         }
-
-        req->send_pos += sent;
     }
 
     /* All data sent */
-    printf("[async_request] Request sent (%zu bytes) (id=%lu)\n",
+    DEBUG_PRINT("[async_request] Request sent (%zu bytes) (id=%lu)\n",
            req->send_len, (unsigned long)req->id);
 
     req->state = ASYNC_STATE_RECEIVING_HEADERS;
@@ -717,30 +1037,131 @@ static int step_receiving_headers(async_request_t *req) {
             }
         }
     } else {
-        /* Plain TCP receive */
-        received = recv(req->sockfd,
-                       req->recv_buf + req->recv_len,
-                       req->recv_capacity - req->recv_len,
-                       0);
-
-        if (received < 0) {
 #ifdef _WIN32
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK) {
-                return ASYNC_STATUS_NEED_READ;
-            }
-#else
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return ASYNC_STATUS_NEED_READ;
-            }
-#endif
-            async_request_set_error(req, errno, "Receive failed");
-            return ASYNC_STATUS_ERROR;
-        }
+        /* Windows IOCP path with WSARecv */
+        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+            /* Check if previous operation completed (only if we started one) */
+            if (req->overlapped_recv) {
+                /* Check if completion event was signaled */
+                DWORD wait_result = WaitForSingleObject((HANDLE)req->iocp_completion_event, 0);
 
-        if (received == 0) {
-            async_request_set_error(req, -1, "Connection closed");
-            return ASYNC_STATUS_ERROR;
+                if (wait_result == WAIT_OBJECT_0) {
+                    /* Operation completed */
+                    DEBUG_PRINT("[async_request] WSARecv (headers) completed via dispatcher (error=%d, bytes=%lu, id=%lu)\n",
+                           req->iocp_last_error, (unsigned long)req->iocp_bytes_transferred, (unsigned long)req->id);
+
+                    /* Reset event for next operation */
+                    ResetEvent((HANDLE)req->iocp_completion_event);
+
+                    if (req->iocp_last_error == 0) {
+                        /* Receive successful */
+                        received = req->iocp_bytes_transferred;
+
+                        /* Free and clear overlapped so a new operation can be started */
+                        free_overlapped(req->overlapped_recv);
+                        req->overlapped_recv = NULL;
+
+                        if (received == 0) {
+                            async_request_set_error(req, -1, "Connection closed");
+                            return ASYNC_STATUS_ERROR;
+                        }
+                    } else {
+                        /* Receive failed */
+                        char error_buf[256];
+                        snprintf(error_buf, sizeof(error_buf), "WSARecv failed: %d", req->iocp_last_error);
+                        async_request_set_error(req, req->iocp_last_error, error_buf);
+                        return ASYNC_STATUS_ERROR;
+                    }
+                } else if (wait_result == WAIT_TIMEOUT) {
+                    /* Still pending */
+                    return ASYNC_STATUS_NEED_READ;
+                } else {
+                    /* Wait failed */
+                    req->iocp_last_error = GetLastError();
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "WaitForSingleObject failed: %d", req->iocp_last_error);
+                    async_request_set_error(req, req->iocp_last_error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+            } else {
+                /* Start new WSARecv operation */
+                if (!req->overlapped_recv) {
+                    req->overlapped_recv = alloc_overlapped();
+                    if (!req->overlapped_recv) {
+                        async_request_set_error(req, -1, "Failed to allocate OVERLAPPED for recv");
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+
+                /* Reset OVERLAPPED structure */
+                OVERLAPPED *ov = (OVERLAPPED*)req->overlapped_recv;
+                memset(ov, 0, sizeof(OVERLAPPED));
+
+                /* Reset completion event before starting new operation */
+                ResetEvent((HANDLE)req->iocp_completion_event);
+
+                WSABUF buf;
+                buf.buf = (char*)(req->recv_buf + req->recv_len);
+                buf.len = req->recv_capacity - req->recv_len;
+
+                DWORD bytes_received = 0;
+                DWORD flags = 0;
+                int result = WSARecv(req->sockfd, &buf, 1, &bytes_received, &flags, ov, NULL);
+
+                if (result == 0) {
+                    /* Completed immediately */
+                    received = bytes_received;
+                    DEBUG_PRINT("[async_request] WSARecv completed immediately: %lu bytes (id=%lu)\n",
+                           (unsigned long)bytes_received, (unsigned long)req->id);
+
+                    if (received == 0) {
+                        async_request_set_error(req, -1, "Connection closed");
+                        return ASYNC_STATUS_ERROR;
+                    }
+                } else {
+                    req->iocp_last_error = WSAGetLastError();
+                    if (req->iocp_last_error == WSA_IO_PENDING) {
+                        /* Async operation started */
+                        req->iocp_operation_pending = true;
+                        DEBUG_PRINT("[async_request] WSARecv pending (id=%lu)\n", (unsigned long)req->id);
+                        return ASYNC_STATUS_NEED_READ;
+                    } else {
+                        /* Receive failed */
+                        char error_buf[256];
+                        snprintf(error_buf, sizeof(error_buf), "WSARecv failed: %d", req->iocp_last_error);
+                        async_request_set_error(req, req->iocp_last_error, error_buf);
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+            }
+        } else
+#endif
+        {
+            /* Plain TCP receive (non-IOCP) */
+            received = recv(req->sockfd,
+                           (char*)(req->recv_buf + req->recv_len),
+                           req->recv_capacity - req->recv_len,
+                           0);
+
+            if (received < 0) {
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err == WSAEWOULDBLOCK) {
+                    return ASYNC_STATUS_NEED_READ;
+                }
+#else
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    return ASYNC_STATUS_NEED_READ;
+                }
+#endif
+                async_request_set_error(req, errno, "Receive failed");
+                return ASYNC_STATUS_ERROR;
+            }
+
+            if (received == 0) {
+                async_request_set_error(req, -1, "Connection closed");
+                return ASYNC_STATUS_ERROR;
+            }
         }
     }
 
@@ -754,7 +1175,7 @@ static int step_receiving_headers(async_request_t *req) {
                 req->headers_complete = true;
                 req->headers_end_pos = i + 4;
 
-                printf("[async_request] Headers received (%zu bytes) (id=%lu)\n",
+                DEBUG_PRINT("[async_request] Headers received (%zu bytes) (id=%lu)\n",
                        req->headers_end_pos, (unsigned long)req->id);
 
                 /* Parse headers for Content-Length and Transfer-Encoding */
@@ -835,7 +1256,7 @@ static int step_receiving_headers(async_request_t *req) {
                     }
                 }
 
-                printf("[async_request] Content-Length: %zu, Chunked: %d (id=%lu)\n",
+                DEBUG_PRINT("[async_request] Content-Length: %zu, Chunked: %d (id=%lu)\n",
                        req->content_length, req->chunked_encoding, (unsigned long)req->id);
 
                 /* Check if we already have body data in the buffer */
@@ -843,7 +1264,7 @@ static int step_receiving_headers(async_request_t *req) {
                 if (body_start < req->recv_len) {
                     /* We have some body data already */
                     req->body_received = req->recv_len - body_start;
-                    printf("[async_request] Already received %zu bytes of body with headers (id=%lu)\n",
+                    DEBUG_PRINT("[async_request] Already received %zu bytes of body with headers (id=%lu)\n",
                            req->body_received, (unsigned long)req->id);
                 }
 
@@ -863,7 +1284,7 @@ static int step_receiving_headers(async_request_t *req) {
 static int step_receiving_body(async_request_t *req) {
     /* If no body expected, complete immediately */
     if (req->content_length == 0 && !req->chunked_encoding) {
-        printf("[async_request] No body to receive (id=%lu)\n",
+        DEBUG_PRINT("[async_request] No body to receive (id=%lu)\n",
                (unsigned long)req->id);
 
         /* Create response object for empty body */
@@ -884,7 +1305,7 @@ static int step_receiving_body(async_request_t *req) {
 
     /* Check if we already have all the body data */
     if (!req->chunked_encoding && req->body_received >= req->content_length) {
-        printf("[async_request] Body already complete (%zu bytes) (id=%lu)\n",
+        DEBUG_PRINT("[async_request] Body already complete (%zu bytes) (id=%lu)\n",
                req->body_received, (unsigned long)req->id);
 
         /* Create response object */
@@ -939,35 +1360,148 @@ static int step_receiving_body(async_request_t *req) {
             }
         }
     } else {
-        received = recv(req->sockfd,
-                       req->recv_buf + req->recv_len,
-                       req->recv_capacity - req->recv_len,
-                       0);
-
-        if (received < 0) {
 #ifdef _WIN32
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK) {
-                return ASYNC_STATUS_NEED_READ;
-            }
-#else
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                return ASYNC_STATUS_NEED_READ;
-            }
-#endif
-            async_request_set_error(req, errno, "Receive failed");
-            return ASYNC_STATUS_ERROR;
-        }
+        /* Windows IOCP path with WSARecv */
+        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+            /* Check if previous operation completed */
+            if (req->overlapped_recv) {
+                /* Check if completion event was signaled */
+                DWORD wait_result = WaitForSingleObject((HANDLE)req->iocp_completion_event, 0);
 
-        if (received == 0) {
-            /* Connection closed - check if we got all data */
-            if (req->content_length > 0 &&
-                req->body_received < req->content_length) {
-                async_request_set_error(req, -1, "Incomplete body");
+                if (wait_result == WAIT_OBJECT_0) {
+                    /* Operation completed */
+                    req->iocp_operation_pending = false;
+
+                    if (req->iocp_last_error == 0) {
+                        /* Receive successful */
+                        received = req->iocp_bytes_transferred;
+                        DEBUG_PRINT("[async_request] WSARecv (body) completed via dispatcher: %lu bytes (id=%lu)\n",
+                               (unsigned long)received, (unsigned long)req->id);
+
+                        /* Reset event for next operation */
+                        ResetEvent((HANDLE)req->iocp_completion_event);
+
+                        /* Free and clear overlapped so a new operation can be started */
+                        free_overlapped(req->overlapped_recv);
+                        req->overlapped_recv = NULL;
+
+                        if (received == 0) {
+                            /* Connection closed - check if we got all data */
+                            if (req->content_length > 0 && req->body_received < req->content_length) {
+                                async_request_set_error(req, -1, "Incomplete body");
+                                return ASYNC_STATUS_ERROR;
+                            }
+                            req->state = ASYNC_STATE_COMPLETE;
+                            return ASYNC_STATUS_COMPLETE;
+                        }
+                    } else {
+                        /* Receive failed */
+                        char error_buf[256];
+                        snprintf(error_buf, sizeof(error_buf), "WSARecv (body) failed: %d", req->iocp_last_error);
+                        async_request_set_error(req, req->iocp_last_error, error_buf);
+                        return ASYNC_STATUS_ERROR;
+                    }
+                } else if (wait_result == WAIT_TIMEOUT) {
+                    /* Still pending */
+                    return ASYNC_STATUS_NEED_READ;
+                } else {
+                    /* Wait failed */
+                    req->iocp_last_error = GetLastError();
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "WaitForSingleObject failed: %d", req->iocp_last_error);
+                    async_request_set_error(req, req->iocp_last_error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+            } else {
+                /* Start new WSARecv operation */
+                if (!req->overlapped_recv) {
+                    req->overlapped_recv = alloc_overlapped();
+                    if (!req->overlapped_recv) {
+                        async_request_set_error(req, -1, "Failed to allocate OVERLAPPED for recv");
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+
+                /* Reset OVERLAPPED structure */
+                OVERLAPPED *ov = (OVERLAPPED*)req->overlapped_recv;
+                memset(ov, 0, sizeof(OVERLAPPED));
+
+                /* Reset completion event before starting new operation */
+                ResetEvent((HANDLE)req->iocp_completion_event);
+
+                WSABUF buf;
+                buf.buf = (char*)(req->recv_buf + req->recv_len);
+                buf.len = req->recv_capacity - req->recv_len;
+
+                DWORD bytes_received = 0;
+                DWORD flags = 0;
+                int result = WSARecv(req->sockfd, &buf, 1, &bytes_received, &flags, ov, NULL);
+
+                if (result == 0) {
+                    /* Completed immediately */
+                    received = bytes_received;
+                    DEBUG_PRINT("[async_request] WSARecv (body) completed immediately: %lu bytes (id=%lu)\n",
+                           (unsigned long)bytes_received, (unsigned long)req->id);
+
+                    if (received == 0) {
+                        /* Connection closed - check if we got all data */
+                        if (req->content_length > 0 && req->body_received < req->content_length) {
+                            async_request_set_error(req, -1, "Incomplete body");
+                            return ASYNC_STATUS_ERROR;
+                        }
+                        req->state = ASYNC_STATE_COMPLETE;
+                        return ASYNC_STATUS_COMPLETE;
+                    }
+                } else {
+                    req->iocp_last_error = WSAGetLastError();
+                    if (req->iocp_last_error == WSA_IO_PENDING) {
+                        /* Async operation started */
+                        req->iocp_operation_pending = true;
+                        DEBUG_PRINT("[async_request] WSARecv (body) pending (id=%lu)\n", (unsigned long)req->id);
+                        return ASYNC_STATUS_NEED_READ;
+                    } else {
+                        /* Receive failed */
+                        char error_buf[256];
+                        snprintf(error_buf, sizeof(error_buf), "WSARecv (body) failed: %d", req->iocp_last_error);
+                        async_request_set_error(req, req->iocp_last_error, error_buf);
+                        return ASYNC_STATUS_ERROR;
+                    }
+                }
+            }
+        } else
+#endif
+        {
+            /* Plain TCP receive (non-IOCP) */
+            received = recv(req->sockfd,
+                           (char*)(req->recv_buf + req->recv_len),
+                           req->recv_capacity - req->recv_len,
+                           0);
+
+            if (received < 0) {
+#ifdef _WIN32
+                int err = WSAGetLastError();
+                if (err == WSAEWOULDBLOCK) {
+                    return ASYNC_STATUS_NEED_READ;
+                }
+#else
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    return ASYNC_STATUS_NEED_READ;
+                }
+#endif
+                async_request_set_error(req, errno, "Receive failed");
                 return ASYNC_STATUS_ERROR;
             }
-            req->state = ASYNC_STATE_COMPLETE;
-            return ASYNC_STATUS_COMPLETE;
+
+            if (received == 0) {
+                /* Connection closed - check if we got all data */
+                if (req->content_length > 0 &&
+                    req->body_received < req->content_length) {
+                    async_request_set_error(req, -1, "Incomplete body");
+                    return ASYNC_STATUS_ERROR;
+                }
+                req->state = ASYNC_STATE_COMPLETE;
+                return ASYNC_STATUS_COMPLETE;
+            }
         }
     }
 
@@ -976,7 +1510,7 @@ static int step_receiving_body(async_request_t *req) {
 
     /* Check if we received all data */
     if (req->content_length > 0 && req->body_received >= req->content_length) {
-        printf("[async_request] Body received (%zu bytes) (id=%lu)\n",
+        DEBUG_PRINT("[async_request] Body received (%zu bytes) (id=%lu)\n",
                req->body_received, (unsigned long)req->id);
 
         /* Create response object */
