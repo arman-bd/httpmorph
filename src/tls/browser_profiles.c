@@ -295,7 +295,74 @@ browser_profile_t* browser_profile_generate_variant(const browser_profile_t *bas
     /* Copy base profile */
     memcpy(variant, base, sizeof(browser_profile_t));
 
-    /* TODO: Add randomization */
+    /* Add randomization to make each variant slightly different */
+
+    /* Randomize GREASE values (GRE ASE - Generate Random Extensions And Sustain Extensibility)
+     * GREASE values should be different for each connection */
+    if (variant->use_grease) {
+        /* GREASE cipher suites: 0x0a0a, 0x1a1a, 0x2a2a, etc. */
+        const uint16_t grease_values[] = {
+            0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a,
+            0x5a5a, 0x6a6a, 0x7a7a, 0x8a8a, 0x9a9a,
+            0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa
+        };
+        int num_grease = sizeof(grease_values) / sizeof(grease_values[0]);
+
+        /* Pick random GREASE values */
+        variant->grease_cipher = grease_values[rand() % num_grease];
+        variant->grease_extension = grease_values[rand() % num_grease];
+        variant->grease_group = grease_values[rand() % num_grease];
+    }
+
+    /* Minor randomization of cipher suite order (swap adjacent non-critical ciphers)
+     * Only randomize the middle ciphers, keep first 2 and last 2 fixed for stability */
+    if (variant->cipher_suite_count > 6) {
+        for (int i = 2; i < variant->cipher_suite_count - 2; i++) {
+            /* 30% chance to swap with next cipher */
+            if ((rand() % 100) < 30 && i + 1 < variant->cipher_suite_count - 2) {
+                uint16_t temp = variant->cipher_suites[i];
+                variant->cipher_suites[i] = variant->cipher_suites[i + 1];
+                variant->cipher_suites[i + 1] = temp;
+                i++;  /* Skip next to avoid double-swapping */
+            }
+        }
+    }
+
+    /* Randomize extension order slightly (swap adjacent extensions, not critical ones)
+     * Keep server_name (0), supported_versions (43), and key_share (51) in their positions */
+    if (variant->extension_count > 4) {
+        for (int i = 1; i < variant->extension_count - 1; i++) {
+            uint16_t ext = variant->extensions[i];
+
+            /* Don't move critical extensions */
+            if (ext == TLS_EXT_SERVER_NAME ||
+                ext == TLS_EXT_SUPPORTED_VERSIONS ||
+                ext == TLS_EXT_KEY_SHARE) {
+                continue;
+            }
+
+            /* 25% chance to swap with next non-critical extension */
+            if ((rand() % 100) < 25 && i + 1 < variant->extension_count - 1) {
+                uint16_t next_ext = variant->extensions[i + 1];
+
+                /* Check if next is also non-critical */
+                if (next_ext != TLS_EXT_SERVER_NAME &&
+                    next_ext != TLS_EXT_SUPPORTED_VERSIONS &&
+                    next_ext != TLS_EXT_KEY_SHARE) {
+
+                    variant->extensions[i] = next_ext;
+                    variant->extensions[i + 1] = ext;
+                    i++;  /* Skip next */
+                }
+            }
+        }
+    }
+
+    /* Note: We intentionally don't invalidate the ja3_hash here because:
+     * 1. Minor cipher/extension reordering should stay within expected variance
+     * 2. GREASE values are supposed to change per-connection
+     * 3. Real browsers show similar variance in fingerprints
+     * The precomputed JA3 represents the "base" fingerprint family */
 
     return variant;
 }

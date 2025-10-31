@@ -47,6 +47,7 @@ dmypy.json
 
 # Documentation
 docs/_build/
+docs/build/
 
 # Virtual environments
 venv/
@@ -62,13 +63,7 @@ uv.lock
 # Vendor dependencies (downloaded by scripts/setup_vendors.sh)
 vendor/
 
-# Benchmarks
-benchmarks/results/
-*.prof
-
 # Environment variables
 .env
 examples/.env
-
-# Planning documents (internal)
-plan/
+.plan/

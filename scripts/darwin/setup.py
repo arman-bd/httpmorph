@@ -28,7 +28,7 @@ def get_library_paths():
 
     # Debug: list what's actually in the build directory
     if build_dir.exists():
-        print(f"\n=== BoringSSL build directory contents ===")
+        print("\n=== BoringSSL build directory contents ===")
         for item in os.listdir(build_dir):
             item_path = build_dir / item
             if item_path.is_dir():
@@ -36,11 +36,11 @@ def get_library_paths():
                 # Check for .a files in subdirectories
                 try:
                     for subitem in os.listdir(item_path):
-                        if subitem.endswith('.a'):
+                        if subitem.endswith(".a"):
                             print(f"    LIB: {subitem}")
                 except PermissionError:
                     pass
-            elif item.endswith('.a'):
+            elif item.endswith(".a"):
                 print(f"  LIB:  {item}")
         print("=" * 43 + "\n")
 

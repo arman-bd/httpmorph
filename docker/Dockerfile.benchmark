@@ -1,0 +1,70 @@
+# Benchmark Dockerfile for httpmorph
+# Includes all benchmark dependencies and libraries for comparison
+
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    cmake \
+    ninja-build \
+    libssl-dev \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    git \
+    curl \
+    build-essential \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy project files
+COPY . .
+
+# Copy .env file for benchmark credentials
+COPY .env .env
+
+# Clean any macOS compiled binaries to prevent conflicts
+RUN find src -name "*.so" -type f -delete && \
+    find src -name "*.dylib" -type f -delete
+
+# Setup vendor dependencies
+RUN chmod +x scripts/setup_vendors.sh && ./scripts/setup_vendors.sh
+
+# Install httpmorph
+RUN pip install -e .
+
+# Install benchmark dependencies
+RUN pip install \
+    matplotlib \
+    numpy \
+    python-dotenv \
+    requests \
+    httpx \
+    h2 \
+    aiohttp \
+    urllib3 \
+    pycurl \
+    curl-cffi
+
+# Create results directory for Linux benchmarks
+RUN mkdir -p /workspace/benchmarks/results/linux
+
+# Default command: run benchmarks
+CMD ["python", "benchmarks/benchmark.py", "--sequential", "25", "--concurrent", "25", "--warmup", "5"]

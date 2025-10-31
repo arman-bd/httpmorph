@@ -2,6 +2,7 @@
 Pytest configuration and fixtures for httpmorph tests
 """
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -10,6 +11,18 @@ import filelock
 import pytest
 
 import httpmorph
+
+# Load .env file for local testing
+# This allows TEST_PROXY_URL and other env vars to be loaded from .env
+try:
+    from dotenv import load_dotenv
+
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # python-dotenv not installed, skip
+    pass
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -55,6 +68,10 @@ def chrome_session():
     try:
         session = httpmorph.Session(browser="chrome")
         yield session
+        # Explicitly cleanup session resources
+        if hasattr(session, "close"):
+            session.close()
+        del session
     except (NotImplementedError, AttributeError):
         pytest.skip("Session not yet implemented")
 
@@ -65,6 +82,10 @@ def firefox_session():
     try:
         session = httpmorph.Session(browser="firefox")
         yield session
+        # Explicitly cleanup session resources
+        if hasattr(session, "close"):
+            session.close()
+        del session
     except (NotImplementedError, AttributeError):
         pytest.skip("Session not yet implemented")
 
@@ -75,6 +96,10 @@ def safari_session():
     try:
         session = httpmorph.Session(browser="safari")
         yield session
+        # Explicitly cleanup session resources
+        if hasattr(session, "close"):
+            session.close()
+        del session
     except (NotImplementedError, AttributeError):
         pytest.skip("Session not yet implemented")
 
@@ -101,6 +126,12 @@ def mock_httpbin_server():
     server.stop()
 
 
+@pytest.fixture(scope="session")
+def httpbin_host():
+    """Get HTTPBin host from environment, defaults to httpmorph-bin.bytetunnels.com"""
+    return os.environ.get("TEST_HTTPBIN_HOST", "httpmorph-bin.bytetunnels.com")
+
+
 def pytest_configure(config):
     """Configure pytest"""
     config.addinivalue_line(
@@ -120,3 +151,10 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.slow)
         if "https_server" in item.fixturenames or "ssl" in item.nodeid:
             item.add_marker(pytest.mark.ssl)
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Force garbage collection after each test to prevent resource accumulation"""
+    import gc
+
+    gc.collect()

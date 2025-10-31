@@ -3,6 +3,7 @@ Simple HTTP proxy server for testing
 """
 
 import base64
+import select
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -54,29 +55,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(200, "Connection Established")
             self.end_headers()
 
-            # Relay data between client and target
-            self.connection.setblocking(False)
-            target_sock.setblocking(False)
+            # Relay data between client and target using select()
+            sockets = [self.connection, target_sock]
+            timeout = 30  # 30 second timeout for idle connections
 
             while True:
                 try:
-                    # Client -> Target
-                    try:
-                        data = self.connection.recv(4096)
-                        if not data:
-                            break
-                        target_sock.sendall(data)
-                    except BlockingIOError:
-                        pass
+                    # Wait for data on either socket with timeout
+                    readable, _, exceptional = select.select(sockets, [], sockets, timeout)
 
-                    # Target -> Client
-                    try:
-                        data = target_sock.recv(4096)
-                        if not data:
-                            break
-                        self.connection.sendall(data)
-                    except BlockingIOError:
-                        pass
+                    # If timeout or error, close connection
+                    if not readable or exceptional:
+                        break
+
+                    # Process readable sockets
+                    for sock in readable:
+                        try:
+                            data = sock.recv(4096)
+                            if not data:
+                                # Connection closed by one side
+                                target_sock.close()
+                                return
+
+                            # Send data to the other socket
+                            if sock is self.connection:
+                                target_sock.sendall(data)
+                            else:
+                                self.connection.sendall(data)
+                        except Exception:
+                            # Error reading/writing, close connection
+                            target_sock.close()
+                            return
                 except Exception:
                     break
 

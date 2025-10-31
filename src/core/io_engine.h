@@ -32,6 +32,7 @@ typedef enum {
     IO_ENGINE_URING,    /* io_uring (Linux 5.1+) */
     IO_ENGINE_EPOLL,    /* epoll (Linux) */
     IO_ENGINE_KQUEUE,   /* kqueue (macOS/BSD) */
+    IO_ENGINE_IOCP,     /* IOCP (Windows) */
 } io_engine_type_t;
 
 /* I/O operation types */
@@ -66,11 +67,16 @@ typedef struct io_operation {
 /* I/O engine structure */
 typedef struct io_engine {
     io_engine_type_t type;
-    int engine_fd;  /* epoll fd or io_uring fd */
+    int engine_fd;  /* epoll fd or io_uring fd or kqueue fd */
 
     /* io_uring specific */
 #ifdef HAVE_IO_URING
     struct io_uring *ring;
+#endif
+
+    /* IOCP specific (Windows) */
+#ifdef _WIN32
+    void *iocp_handle;  /* HANDLE for completion port */
 #endif
 
     /* Statistics */

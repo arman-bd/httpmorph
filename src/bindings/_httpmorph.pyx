@@ -53,18 +53,23 @@ cdef extern from "../include/httpmorph.h":
     # Forward declarations
     ctypedef struct httpmorph_client_t
     ctypedef struct httpmorph_session_t
+    ctypedef struct httpmorph_pool_t
 
     # Forward declarations
     ctypedef struct httpmorph_request_t
     ctypedef httpmorph_request_t httpmorph_request
     ctypedef struct httpmorph_response_t
 
+    # Header structure for better cache locality
+    ctypedef struct httpmorph_header_t:
+        char *key
+        char *value
+
     # Response structure (match the header exactly)
     struct httpmorph_response:
         uint16_t status_code
         httpmorph_version_t http_version
-        char **header_keys
-        char **header_values
+        httpmorph_header_t *headers
         size_t header_count
         uint8_t *body
         size_t body_len
@@ -94,7 +99,11 @@ cdef extern from "../include/httpmorph.h":
     int httpmorph_request_set_body(httpmorph_request_t *request, const uint8_t *body, size_t body_len) nogil
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
     void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
-    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request) nogil
+    void httpmorph_request_set_http2(httpmorph_request_t *request, bint enabled) nogil
+    void httpmorph_request_set_verify_ssl(httpmorph_request_t *request, bint verify) nogil
+    void httpmorph_request_set_tls_version(httpmorph_request_t *request, uint16_t min_version, uint16_t max_version) nogil
+    httpmorph_response* httpmorph_request_execute(httpmorph_client_t *client, const httpmorph_request_t *request, httpmorph_pool_t *pool) nogil
+    httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client) nogil
 
     # Response API
     void httpmorph_response_destroy(httpmorph_response *response) nogil
@@ -105,6 +114,9 @@ cdef extern from "../include/httpmorph.h":
     void httpmorph_session_destroy(httpmorph_session_t *session) nogil
     httpmorph_response* httpmorph_session_request(httpmorph_session_t *session, const httpmorph_request_t *request) nogil
     size_t httpmorph_session_cookie_count(httpmorph_session_t *session) nogil
+
+    # Async I/O API
+    int httpmorph_pool_get_connection_fd(httpmorph_pool_t *pool, const char *host, uint16_t port) nogil
 
 
 # Python classes
@@ -153,6 +165,7 @@ cdef class Client:
         cdef httpmorph_response *resp
         cdef const char* c_username
         cdef const char* c_password
+        cdef httpmorph_pool_t* client_pool
 
         # Convert method string to enum
         method_upper = method.upper()
@@ -186,6 +199,29 @@ cdef class Client:
                 # Convert seconds to milliseconds
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
+
+            # Set HTTP/2 flag if provided (default is False)
+            http2 = kwargs.get('http2', False)
+            httpmorph_request_set_http2(req, http2)
+
+            # Set SSL verification (default is True)
+            verify_ssl = kwargs.get('verify', kwargs.get('verify_ssl', True))
+            httpmorph_request_set_verify_ssl(req, verify_ssl)
+
+            # Set TLS version range if provided
+            tls_version = kwargs.get('tls_version')
+            if tls_version:
+                if isinstance(tls_version, str):
+                    # Map string version to hex value
+                    version_map = {
+                        '1.0': 0x0301, '1.1': 0x0302, '1.2': 0x0303, '1.3': 0x0304,
+                        'TLS1.0': 0x0301, 'TLS1.1': 0x0302, 'TLS1.2': 0x0303, 'TLS1.3': 0x0304,
+                    }
+                    tls_hex = version_map.get(tls_version, 0)
+                    httpmorph_request_set_tls_version(req, tls_hex, tls_hex)
+                elif isinstance(tls_version, tuple) and len(tls_version) == 2:
+                    min_ver, max_ver = tls_version
+                    httpmorph_request_set_tls_version(req, min_ver, max_ver)
 
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')
@@ -225,7 +261,7 @@ cdef class Client:
 
             # Add default headers that will be added by C code if not present
             if 'User-Agent' not in request_headers:
-                request_headers['User-Agent'] = 'httpmorph/0.1.2'
+                request_headers['User-Agent'] = 'httpmorph/0.1.3'
             if 'Accept' not in request_headers:
                 request_headers['Accept'] = '*/*'
             if 'Connection' not in request_headers:
@@ -243,8 +279,10 @@ cdef class Client:
                 httpmorph_request_set_body(req, <const uint8_t*>body, len(body))
 
             # Execute request (release GIL to allow other Python threads to run)
+            # Use client's connection pool for reuse
+            client_pool = httpmorph_client_get_pool(self._client)
             with nogil:
-                resp = httpmorph_request_execute(self._client, req)
+                resp = httpmorph_request_execute(self._client, req, client_pool)
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 
@@ -268,11 +306,11 @@ cdef class Client:
 
             # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('latin-1')
+                key = resp.headers[i].key.decode('latin-1')
                 try:
-                    value = resp.header_values[i].decode('latin-1')
+                    value = resp.headers[i].value.decode('latin-1')
                 except:
-                    value = resp.header_values[i].decode('utf-8', errors='replace')
+                    value = resp.headers[i].value.decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response
@@ -282,6 +320,34 @@ cdef class Client:
 
         finally:
             httpmorph_request_destroy(req)
+
+    def get_connection_fd(self, str host, int port):
+        """Get file descriptor from connection pool for event loop integration
+
+        Returns the underlying socket file descriptor for a pooled connection.
+        This enables integration with async event loops (asyncio.add_reader/add_writer).
+
+        Args:
+            host: Target hostname
+            port: Target port number
+
+        Returns:
+            int: File descriptor (>= 0) on success, -1 if no active connection found
+
+        Example:
+            >>> client = Client()
+            >>> response = client.request('GET', 'https://example.com')
+            >>> fd = client.get_connection_fd('example.com', 443)
+            >>> if fd >= 0:
+            >>>     print(f"Socket FD: {fd}")
+        """
+        cdef httpmorph_pool_t* pool = httpmorph_client_get_pool(self._client)
+        if pool is NULL:
+            return -1
+
+        host_bytes = host.encode('utf-8')
+        cdef int fd = httpmorph_pool_get_connection_fd(pool, <const char*>host_bytes, port)
+        return fd
 
 
 cdef class Session:
@@ -385,6 +451,29 @@ cdef class Session:
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
 
+            # Set HTTP/2 flag if provided (default is False)
+            http2 = kwargs.get('http2', False)
+            httpmorph_request_set_http2(req, http2)
+
+            # Set SSL verification (default is True)
+            verify_ssl = kwargs.get('verify', kwargs.get('verify_ssl', True))
+            httpmorph_request_set_verify_ssl(req, verify_ssl)
+
+            # Set TLS version range if provided
+            tls_version = kwargs.get('tls_version')
+            if tls_version:
+                if isinstance(tls_version, str):
+                    # Map string version to hex value
+                    version_map = {
+                        '1.0': 0x0301, '1.1': 0x0302, '1.2': 0x0303, '1.3': 0x0304,
+                        'TLS1.0': 0x0301, 'TLS1.1': 0x0302, 'TLS1.2': 0x0303, 'TLS1.3': 0x0304,
+                    }
+                    tls_hex = version_map.get(tls_version, 0)
+                    httpmorph_request_set_tls_version(req, tls_hex, tls_hex)
+                elif isinstance(tls_version, tuple) and len(tls_version) == 2:
+                    min_ver, max_ver = tls_version
+                    httpmorph_request_set_tls_version(req, min_ver, max_ver)
+
             # Set proxy if provided
             proxy = kwargs.get('proxy') or kwargs.get('proxies')
             proxy_auth = kwargs.get('proxy_auth')
@@ -464,7 +553,7 @@ cdef class Session:
                 'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
                 'edge': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
             }
-            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.2')
+            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.3')
 
             # Add browser-specific User-Agent header if not already set
             has_user_agent = False
@@ -510,11 +599,11 @@ cdef class Session:
 
             # Convert headers (use latin-1 per HTTP spec, fallback to utf-8)
             for i in range(resp.header_count):
-                key = resp.header_keys[i].decode('latin-1')
+                key = resp.headers[i].key.decode('latin-1')
                 try:
-                    value = resp.header_values[i].decode('latin-1')
+                    value = resp.headers[i].value.decode('latin-1')
                 except:
-                    value = resp.header_values[i].decode('utf-8', errors='replace')
+                    value = resp.headers[i].value.decode('utf-8', errors='replace')
                 result['headers'][key] = value
 
             # Cleanup response

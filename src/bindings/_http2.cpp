@@ -7,19 +7,26 @@
             "src\\core\\http2_client.h"
         ],
         "extra_compile_args": [
-            "/TP",
             "/O2",
             "/DHAVE_NGHTTP2",
+            "/DNGHTTP2_STATICLIB",
             "/EHsc",
             "/DWIN32",
             "/D_WINDOWS",
             "/DOPENSSL_WINDOWS",
-            "/D_WIN32"
+            "/D_WIN32",
+            "/FIwindows_compat.h"
         ],
         "include_dirs": [
+            "include",
             "src\\core",
+            "src\\core\\internal",
+            "src\\tls",
+            "src\\include",
             "C:\\Users\\Administrator\\Desktop\\httpmorph\\vendor\\boringssl\\include",
-            "C:\\Users\\Administrator\\Desktop\\httpmorph\\vendor\\nghttp2\\lib\\includes"
+            "C:\\Users\\Administrator\\Desktop\\httpmorph\\vendor\\nghttp2\\lib\\includes",
+            "C:\\Users\\Administrator\\Desktop\\httpmorph\\vendor\\zlib",
+            "C:\\Users\\Administrator\\Desktop\\httpmorph\\vendor\\zlib\\build"
         ],
         "language": "c++",
         "libraries": [

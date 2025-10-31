@@ -8,7 +8,7 @@ Built from scratch in C with BoringSSL. No fallback implementations.
 
 import sys
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __author__ = "Arman Hossain"
 __license__ = "MIT"
 
@@ -58,17 +58,23 @@ if not HAS_C_EXTENSION:
 
 print("[httpmorph] Using C extension with BoringSSL", file=sys.stderr)
 
+# Import async client (C-level async I/O with kqueue/epoll)
+try:
+    from httpmorph._async_client import AsyncClient, AsyncResponse
+
+    HAS_ASYNC = True
+except ImportError:
+    AsyncClient = None
+    AsyncResponse = None
+    HAS_ASYNC = False
+
 __all__ = [
+    # Sync API
     "Client",
     "Session",
     "Response",
     "Request",
     "PreparedRequest",
-    "HTTPError",
-    "ConnectionError",
-    "Timeout",
-    "TooManyRedirects",
-    "RequestException",
     "get",
     "post",
     "put",
@@ -76,8 +82,20 @@ __all__ = [
     "head",
     "patch",
     "options",
+    # Async API
+    "AsyncClient",
+    "AsyncResponse",
+    # Exceptions
+    "HTTPError",
+    "ConnectionError",
+    "Timeout",
+    "TooManyRedirects",
+    "RequestException",
+    # Utilities
     "init",
     "cleanup",
     "version",
+    # Feature flags
     "HAS_HTTP2",
+    "HAS_ASYNC",
 ]
