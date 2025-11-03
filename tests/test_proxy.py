@@ -11,6 +11,7 @@ from tests.test_proxy_server import MockProxyServer
 from tests.test_server import MockHTTPServer
 
 
+@pytest.mark.proxy
 class TestProxyWithoutAuth:
     """Test proxy support without authentication"""
 
@@ -67,6 +68,7 @@ class TestProxyWithoutAuth:
                 pass
 
 
+@pytest.mark.proxy
 class TestProxyWithAuth:
     """Test proxy support with authentication"""
 
@@ -126,6 +128,7 @@ class TestProxyWithAuth:
                 assert response.status_code in [0, 403, 407]
 
 
+@pytest.mark.proxy
 class TestProxyEdgeCases:
     """Test edge cases for proxy support"""
 
@@ -182,6 +185,7 @@ class TestProxyEdgeCases:
             pass
 
 
+@pytest.mark.proxy
 class TestProxyDocumentation:
     """Test proxy examples from documentation"""
 
@@ -224,6 +228,7 @@ class TestProxyDocumentation:
             pass
 
 
+@pytest.mark.proxy
 class TestRealProxyIntegration:
     """Test with real proxy from environment variables
 
@@ -511,6 +516,7 @@ class TestRealProxyIntegration:
                 pytest.skip(f"Site {url} not accessible via proxy: {e}")
 
 
+@pytest.mark.proxy
 class TestAsyncProxyWithoutAuth:
     """Test async proxy support without authentication"""
 
@@ -592,6 +598,7 @@ class TestAsyncProxyWithoutAuth:
                 pass
 
 
+@pytest.mark.proxy
 class TestAsyncProxyWithAuth:
     """Test async proxy support with authentication"""
 
@@ -684,6 +691,7 @@ class TestAsyncProxyWithAuth:
                         assert "403" in str(e) or "407" in str(e) or "Forbidden" in str(e)
 
 
+@pytest.mark.proxy
 class TestAsyncProxyEdgeCases:
     """Test async edge cases for proxy support"""
 
@@ -791,6 +799,7 @@ class TestAsyncProxyEdgeCases:
                    "failed to connect" in error_str
 
 
+@pytest.mark.proxy
 class TestAsyncProxyConsistency:
     """Test async proxy behavior is consistent with sync client"""
 
@@ -864,6 +873,7 @@ class TestAsyncProxyConsistency:
         assert proxy_time < 3  # Should fail within timeout
 
 
+@pytest.mark.proxy
 class TestAsyncRealProxyIntegration:
     """Test async client with real proxy from environment variables"""
 

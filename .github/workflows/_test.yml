@@ -228,7 +228,10 @@ jobs:
       run: ruff check src/ tests/
 
     - name: Run tests
-      run: pytest tests/ -v --cov=httpmorph --cov-report=xml
+      run: |
+        # Skip proxy tests in CI to avoid external dependencies
+        # To run proxy tests locally: pytest tests/ -m "proxy"
+        pytest tests/ -v --cov=httpmorph --cov-report=xml -m "not proxy"
       env:
         TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
 

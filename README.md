@@ -406,6 +406,8 @@ pytest tests/ --cov=httpmorph --cov-report=html
 
 # Run specific test markers
 pytest tests/ -m "not slow"           # Skip slow tests
+pytest tests/ -m "not proxy"          # Skip proxy tests (default in CI)
+pytest tests/ -m proxy                # Only proxy tests
 pytest tests/ -m integration          # Only integration tests
 pytest tests/ -m fingerprint          # Only fingerprinting tests
 ```
