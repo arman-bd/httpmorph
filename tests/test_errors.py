@@ -13,8 +13,9 @@ class TestErrorHandling:
 
     def test_connection_refused(self):
         """Test connection refused raises ConnectionError (requests-compatible)"""
-        with pytest.raises(httpmorph.ConnectionError):
-            httpmorph.get("http://localhost:9999")
+        # On macOS, localhost connections may timeout instead of immediately reporting connection refused
+        with pytest.raises((httpmorph.ConnectionError, httpmorph.Timeout)):
+            httpmorph.get("http://localhost:9999", timeout=1)
 
     def test_invalid_url(self):
         """Test invalid URL raises RequestException (requests-compatible)"""

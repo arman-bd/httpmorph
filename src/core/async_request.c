@@ -673,9 +673,12 @@ static int step_connecting(async_request_t *req) {
             setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
 
             /* Move to next state */
-            if (req->using_proxy) {
-                /* Connected to proxy, establish tunnel with CONNECT */
+            if (req->using_proxy && req->is_https) {
+                /* HTTPS via proxy: establish tunnel with CONNECT */
                 req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->using_proxy && !req->is_https) {
+                /* HTTP via proxy: send request directly to proxy (no CONNECT needed) */
+                req->state = ASYNC_STATE_SENDING_REQUEST;
             } else if (req->is_https) {
                 /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
@@ -696,9 +699,12 @@ static int step_connecting(async_request_t *req) {
                    (unsigned long)req->id);
 
             /* Move to next state */
-            if (req->using_proxy) {
-                /* Connected to proxy, establish tunnel with CONNECT */
+            if (req->using_proxy && req->is_https) {
+                /* HTTPS via proxy: establish tunnel with CONNECT */
                 req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->using_proxy && !req->is_https) {
+                /* HTTP via proxy: send request directly to proxy (no CONNECT needed) */
+                req->state = ASYNC_STATE_SENDING_REQUEST;
             } else if (req->is_https) {
                 /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
@@ -752,9 +758,14 @@ static int step_connecting(async_request_t *req) {
                     setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
 
                     /* Move to next state */
-                    if (req->using_proxy) {
-                        /* Connected to proxy, establish tunnel with CONNECT */
+                    if (req->using_proxy && req->is_https) {
+                        /* HTTPS via proxy: establish tunnel with CONNECT */
                         req->state = ASYNC_STATE_PROXY_CONNECT;
+                        /* Wait one more cycle to ensure socket is fully ready */
+                        return ASYNC_STATUS_NEED_WRITE;
+                    } else if (req->using_proxy && !req->is_https) {
+                        /* HTTP via proxy: send request directly to proxy (no CONNECT needed) */
+                        req->state = ASYNC_STATE_SENDING_REQUEST;
                     } else if (req->is_https) {
                         /* Direct HTTPS connection, do TLS handshake */
                         req->state = ASYNC_STATE_TLS_HANDSHAKE;
@@ -823,9 +834,14 @@ static int step_connecting(async_request_t *req) {
                            (unsigned long)req->id);
 
                     /* Move to next state */
-                    if (req->using_proxy) {
-                        /* Connected to proxy, establish tunnel with CONNECT */
+                    if (req->using_proxy && req->is_https) {
+                        /* HTTPS via proxy: establish tunnel with CONNECT */
                         req->state = ASYNC_STATE_PROXY_CONNECT;
+                        /* Wait one more cycle to ensure socket is fully ready */
+                        return ASYNC_STATUS_NEED_WRITE;
+                    } else if (req->using_proxy && !req->is_https) {
+                        /* HTTP via proxy: send request directly (no CONNECT needed) */
+                        req->state = ASYNC_STATE_SENDING_REQUEST;
                     } else {
                         /* Direct HTTPS connection, do TLS handshake */
                         req->state = ASYNC_STATE_TLS_HANDSHAKE;
@@ -863,9 +879,14 @@ static int step_connecting(async_request_t *req) {
                    (unsigned long)req->id);
 
             /* Move to next state */
-            if (req->using_proxy) {
-                /* Connected to proxy, establish tunnel with CONNECT */
+            if (req->using_proxy && req->is_https) {
+                /* HTTPS via proxy: establish tunnel with CONNECT */
                 req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->using_proxy && !req->is_https) {
+                /* HTTP via proxy: send request directly to proxy (no CONNECT needed) */
+                req->state = ASYNC_STATE_SENDING_REQUEST;
+                /* For HTTP proxy, wait for socket to be writable before sending */
+                return ASYNC_STATUS_NEED_WRITE;
             } else if (req->is_https) {
                 /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
@@ -1921,13 +1942,17 @@ static int step_proxy_connect(async_request_t *req) {
         }
 #else
         sent = send(req->sockfd, connect_req, len, 0);
-        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOTCONN)) {
+            /* Socket not ready yet - wait and try again */
             return ASYNC_STATUS_NEED_WRITE;
         }
 #endif
 
         if (sent < 0) {
-            async_request_set_error(req, errno, "Failed to send CONNECT request to proxy");
+            char error_buf[256];
+            snprintf(error_buf, sizeof(error_buf), "Failed to send CONNECT request to proxy: %s (errno=%d)",
+                    strerror(errno), errno);
+            async_request_set_error(req, errno, error_buf);
             return ASYNC_STATUS_ERROR;
         }
 

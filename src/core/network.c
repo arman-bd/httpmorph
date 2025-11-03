@@ -355,34 +355,65 @@ int httpmorph_tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
             break;
         }
 
+#ifndef _WIN32
+        /* On Unix, check for immediate connection failure */
+        if (errno == ECONNREFUSED || errno == ENETUNREACH || errno == EHOSTUNREACH ||
+            errno == ETIMEDOUT || errno == ECONNRESET) {
+            /* Connection failed immediately - don't wait, try next address */
+            if (sockfd > 2) close(sockfd);
+            sockfd = -1;
+            continue;
+        }
+#endif
+
 #ifdef _WIN32
         if (WSAGetLastError() == WSAEWOULDBLOCK) {
 #else
         if (errno == EINPROGRESS) {
 #endif
-            /* Connection in progress - wait with select */
-            fd_set write_fds;
-            struct timeval tv;
+            /* Connection in progress - wait with select using polling approach */
+            uint64_t poll_start = httpmorph_get_time_us();
+            uint64_t poll_timeout_us = (uint64_t)timeout_ms * 1000;
+            int connected = 0;
 
-            FD_ZERO(&write_fds);
-            FD_SET(sockfd, &write_fds);
+            while (httpmorph_get_time_us() - poll_start < poll_timeout_us) {
+                fd_set write_fds, except_fds;
+                struct timeval tv;
 
-            tv.tv_sec = timeout_ms / 1000;
-            tv.tv_usec = (timeout_ms % 1000) * 1000;
+                FD_ZERO(&write_fds);
+                FD_ZERO(&except_fds);
+                FD_SET(sockfd, &write_fds);
+                FD_SET(sockfd, &except_fds);
 
-            ret = select(SELECT_NFDS(sockfd), NULL, &write_fds, NULL, &tv);
-            if (ret > 0) {
-                /* Check if connection succeeded */
+                /* Poll every 100ms to detect errors quickly */
+                tv.tv_sec = 0;
+                tv.tv_usec = 100000;  /* 100ms */
+
+                ret = select(SELECT_NFDS(sockfd), NULL, &write_fds, &except_fds, &tv);
+
+                /* Check socket error after each poll */
                 int error = 0;
                 socklen_t len = sizeof(error);
 #ifdef _WIN32
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, (int*)&len) == 0 && error == 0) {
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, (int*)&len) == 0) {
 #else
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
 #endif
-                    break;  /* Success */
+                    if (error == 0 && ret > 0 && (FD_ISSET(sockfd, &write_fds) || FD_ISSET(sockfd, &except_fds))) {
+                        /* Connection succeeded */
+                        connected = 1;
+                        break;
+                    } else if (error != 0) {
+                        /* Connection failed - don't wait, try next address */
+                        break;
+                    }
                 }
             }
+
+            if (connected) {
+                break;  /* Successfully connected */
+            }
+            /* Connection failed or timed out - try next address */
         }
 
         /* Connection failed, try next address */

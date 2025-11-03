@@ -477,14 +477,16 @@ http2_done:
         httpmorph_decompress_gzip(response);
     }
 
-        /* 6. Check if total time exceeded timeout */
-        uint64_t elapsed_us = httpmorph_get_time_us() - start_time;
-        uint64_t timeout_us = (uint64_t)request->timeout_ms * 1000;
-        if (elapsed_us > timeout_us) {
-            response->error = HTTPMORPH_ERROR_TIMEOUT;
-            response->error_message = strdup("Request timed out");
-        } else {
-            response->error = HTTPMORPH_OK;
+        /* 6. Check if total time exceeded timeout (only if no error yet) */
+        if (response->error == HTTPMORPH_OK || response->error == 0) {
+            uint64_t elapsed_us = httpmorph_get_time_us() - start_time;
+            uint64_t timeout_us = (uint64_t)request->timeout_ms * 1000;
+            if (elapsed_us > timeout_us) {
+                response->error = HTTPMORPH_ERROR_TIMEOUT;
+                response->error_message = strdup("Request timed out");
+            } else {
+                response->error = HTTPMORPH_OK;
+            }
         }
     }
 
