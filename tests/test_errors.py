@@ -35,14 +35,14 @@ class TestErrorHandling:
     def test_tls_certificate_error(self):
         """Test TLS certificate verification error
 
-        Note: verify_ssl parameter not yet implemented.
-        httpmorph currently accepts all certificates.
+        Self-signed certificates should be rejected when verify_ssl=True (default).
+        With Windows certificate store integration, certificate validation is now strict.
         """
-        # Self-signed certificate - currently accepted
+        # Self-signed certificate - should be rejected with verify_ssl=True (default)
         with MockHTTPServer(ssl_enabled=True) as server:
-            response = httpmorph.get(f"{server.url}/get")
-            # Should succeed since certificate validation not yet strict
-            assert response.status_code >= 0
+            # Should fail with TLS handshake error
+            with pytest.raises(httpmorph.RequestException):
+                httpmorph.get(f"{server.url}/get")
 
     def test_tls_certificate_skip_verification(self):
         """Test skipping TLS certificate verification"""

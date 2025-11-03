@@ -28,6 +28,7 @@ typedef enum {
     ASYNC_STATE_INIT,                /* Initial state, not started yet */
     ASYNC_STATE_DNS_LOOKUP,          /* DNS resolution in progress */
     ASYNC_STATE_CONNECTING,          /* TCP connection in progress */
+    ASYNC_STATE_PROXY_CONNECT,       /* Proxy CONNECT tunnel establishment */
     ASYNC_STATE_TLS_HANDSHAKE,       /* TLS handshake in progress */
     ASYNC_STATE_SENDING_REQUEST,     /* Sending HTTP request */
     ASYNC_STATE_RECEIVING_HEADERS,   /* Receiving response headers */
@@ -103,6 +104,19 @@ struct async_request {
     size_t content_length;
     size_t body_received;
     bool chunked_encoding;
+
+    /* Proxy configuration */
+    bool using_proxy;                /* True if request uses a proxy */
+    char *proxy_host;                /* Proxy hostname */
+    uint16_t proxy_port;             /* Proxy port */
+    char *proxy_username;            /* Proxy authentication username */
+    char *proxy_password;            /* Proxy authentication password */
+    bool proxy_use_tls;              /* True if proxy connection uses TLS */
+    char *target_host;               /* Original target host (when using proxy) */
+    uint16_t target_port;            /* Original target port (when using proxy) */
+    bool proxy_connect_sent;         /* True if CONNECT request was sent */
+    uint8_t *proxy_recv_buf;         /* Buffer for proxy CONNECT response */
+    size_t proxy_recv_len;           /* Length of received proxy response */
 
     /* Timing and timeout */
     uint64_t start_time_us;

@@ -42,13 +42,14 @@ int httpmorph_set_ssl_verification(SSL_CTX *ctx, bool verify);
  * @param sockfd Socket file descriptor
  * @param hostname Hostname for SNI
  * @param browser_profile Browser profile for fingerprinting
+ * @param http2_enabled Whether HTTP/2 is enabled
  * @param verify_cert Whether to verify server certificate
  * @param tls_time Output: TLS handshake time in microseconds
  * @return SSL* on success, NULL on error
  */
 SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
                             const browser_profile_t *browser_profile,
-                            bool verify_cert, uint64_t *tls_time);
+                            bool http2_enabled, bool verify_cert, uint64_t *tls_time);
 
 /**
  * Calculate JA3 fingerprint from SSL connection
@@ -58,5 +59,15 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
  * @return JA3 fingerprint string (caller must free) or NULL on error
  */
 char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile);
+
+#ifdef _WIN32
+/**
+ * Load CA certificates from Windows Certificate Store into SSL_CTX
+ *
+ * @param ctx SSL context to load certificates into
+ * @return 0 on success, -1 on error
+ */
+int httpmorph_load_windows_ca_certs(SSL_CTX *ctx);
+#endif
 
 #endif /* TLS_H */

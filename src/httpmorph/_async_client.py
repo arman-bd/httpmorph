@@ -237,6 +237,13 @@ class AsyncClient:
         # Get headers
         headers = kwargs.get("headers", {})
 
+        # Get verify parameter (default to True)
+        verify = kwargs.get("verify", True)
+
+        # Get proxy parameters
+        proxy = kwargs.get("proxy") or kwargs.get("proxies")
+        proxy_auth = kwargs.get("proxy_auth")
+
         # Get body
         body = kwargs.get("data") or kwargs.get("body")
 
@@ -255,7 +262,14 @@ class AsyncClient:
 
         # Submit request to manager
         response_dict = await self._manager.submit_request(
-            method=method, url=url, headers=headers, body=body, timeout_ms=timeout_ms
+            method=method,
+            url=url,
+            headers=headers,
+            body=body,
+            timeout_ms=timeout_ms,
+            verify=verify,
+            proxy=proxy,
+            proxy_auth=proxy_auth,
         )
 
         # Check for errors
@@ -263,10 +277,10 @@ class AsyncClient:
             error_msg = response_dict.get("error_message", "Request failed")
             error_code = response_dict["error"]
 
-            # Map error codes to exceptions
-            if error_code == 5:  # HTTPMORPH_ERROR_TIMEOUT
+            # Map error codes to exceptions (negative values in C)
+            if error_code == -5:  # HTTPMORPH_ERROR_TIMEOUT
                 raise asyncio.TimeoutError(error_msg)
-            elif error_code == 3:  # HTTPMORPH_ERROR_NETWORK
+            elif error_code == -3:  # HTTPMORPH_ERROR_NETWORK
                 from httpmorph._client_c import ConnectionError
 
                 raise ConnectionError(error_msg)

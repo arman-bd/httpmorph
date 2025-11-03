@@ -538,7 +538,7 @@ int pool_prewarm_connections(httpmorph_pool_t *pool,
             uint64_t tls_time = 0;
             ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host,
                                        client->browser_profile,
-                                       true, &tls_time);  /* verify_cert = true by default */
+                                       false, true, &tls_time);  /* http2_enabled = false, verify_cert = true */
             if (!ssl) {
                 if (sockfd > 2) close(sockfd);
                 continue;  /* Skip failed TLS */

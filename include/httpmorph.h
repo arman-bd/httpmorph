@@ -184,6 +184,14 @@ const char* httpmorph_version(void);
 httpmorph_client_t* httpmorph_client_create(void);
 
 /**
+ * Load CA certificates from a file (PEM format)
+ * @param client The HTTP client
+ * @param ca_file Path to CA certificate bundle file (e.g., cacert.pem)
+ * @return 0 on success, -1 on failure
+ */
+int httpmorph_client_load_ca_file(httpmorph_client_t *client, const char *ca_file);
+
+/**
  * Get the connection pool from a client
  */
 httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client);

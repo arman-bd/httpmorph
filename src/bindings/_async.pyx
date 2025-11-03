@@ -12,6 +12,9 @@ from libc.string cimport strdup
 from libc.stdio cimport printf
 
 import asyncio
+import select
+import socket
+import sys
 from typing import Optional, Dict, Any
 
 
@@ -165,6 +168,8 @@ cdef extern from "../include/httpmorph.h":
     int httpmorph_request_add_header(httpmorph_request_t *request, const char *key, const char *value) nogil
     int httpmorph_request_set_body(httpmorph_request_t *request, const uint8_t *body, size_t body_len) nogil
     void httpmorph_request_set_timeout(httpmorph_request_t *request, uint32_t timeout_ms) nogil
+    void httpmorph_request_set_verify_ssl(httpmorph_request_t *request, bint verify) nogil
+    void httpmorph_request_set_proxy(httpmorph_request_t *request, const char *proxy_url, const char *username, const char *password) nogil
 
     # Response functions
     void httpmorph_response_destroy(httpmorph_response_t *response) nogil
@@ -202,7 +207,10 @@ cdef class AsyncRequestManager:
         str url,
         dict headers=None,
         bytes body=None,
-        uint32_t timeout_ms=30000
+        uint32_t timeout_ms=30000,
+        bint verify=True,
+        proxy=None,
+        proxy_auth=None
     ):
         """Submit an async HTTP request and return a Future
 
@@ -212,6 +220,9 @@ cdef class AsyncRequestManager:
             headers: Optional dict of headers
             body: Optional request body
             timeout_ms: Timeout in milliseconds
+            verify: Whether to verify SSL certificates (default: True)
+            proxy: Proxy URL or dict
+            proxy_auth: (username, password) tuple
 
         Returns:
             dict: Response dictionary with status_code, headers, body, etc.
@@ -220,6 +231,8 @@ cdef class AsyncRequestManager:
         cdef httpmorph_method_t c_method
         cdef httpmorph_request_t *req
         cdef uint64_t request_id
+        cdef const char* c_username = NULL
+        cdef const char* c_password = NULL
 
         # Convert method to enum
         method_upper = method.upper()
@@ -250,6 +263,38 @@ cdef class AsyncRequestManager:
         try:
             # Set timeout
             httpmorph_request_set_timeout(req, timeout_ms)
+
+            # Set SSL verification
+            httpmorph_request_set_verify_ssl(req, verify)
+
+            # Set proxy if provided
+            # WARNING: Proxy support is NOT implemented in the async I/O engine yet.
+            # The proxy will be set on the request object but IGNORED during execution.
+            # See ASYNC_PROXY_BUG_REPORT.md for details and implementation plan.
+            if proxy:
+                if isinstance(proxy, dict):
+                    # Handle proxies dict like requests library: {'http': 'http://...', 'https': 'http://...'}
+                    proxy_url = proxy.get('https') if url.startswith('https') else proxy.get('http')
+                    if proxy_url:
+                        proxy = proxy_url
+
+                if isinstance(proxy, str):
+                    # Extract username/password from proxy_auth
+                    proxy_bytes = proxy.encode('utf-8')
+                    username_bytes = None
+                    password_bytes = None
+
+                    if proxy_auth and isinstance(proxy_auth, tuple) and len(proxy_auth) == 2:
+                        username, password = proxy_auth
+                        if username:
+                            username_bytes = username.encode('utf-8')
+                            c_username = <const char*>username_bytes
+                        if password:
+                            password_bytes = password.encode('utf-8')
+                            c_password = <const char*>password_bytes
+
+                    httpmorph_request_set_proxy(req, <const char*>proxy_bytes, c_username, c_password)
+                    # TODO: Raise warning or error until C-level proxy support is implemented
 
             # Add headers
             if headers:
@@ -369,7 +414,7 @@ cdef class AsyncRequestManager:
                                     self._loop.remove_writer(fd)
                         except NotImplementedError:
                             # Windows ProactorEventLoop doesn't support add_reader/add_writer
-                            # Fall back to polling with short sleep
+                            # Fall back to short sleep - select() doesn't work reliably with raw FDs on Windows
                             await asyncio.sleep(0.001)
                     else:
                         # FD not ready yet, short sleep

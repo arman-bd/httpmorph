@@ -3,6 +3,7 @@
  */
 
 #include "async_request_manager.h"
+#include "internal/tls.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +52,13 @@ async_request_manager_t* async_manager_create(void) {
 
     /* Configure SSL context */
     SSL_CTX_set_verify(mgr->ssl_ctx, SSL_VERIFY_PEER, NULL);
+#ifdef _WIN32
+    /* On Windows, load certificates from Windows Certificate Store */
+    httpmorph_load_windows_ca_certs(mgr->ssl_ctx);
+#else
+    /* On Unix-like systems, use default paths */
     SSL_CTX_set_default_verify_paths(mgr->ssl_ctx);
+#endif
 
     /* Allocate request array */
     mgr->request_capacity = INITIAL_CAPACITY;

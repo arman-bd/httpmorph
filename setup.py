@@ -489,6 +489,7 @@ extensions = [
             str(CORE_DIR / "util.c"),
             str(CORE_DIR / "url.c"),
             str(CORE_DIR / "network.c"),
+            str(CORE_DIR / "proxy.c"),  # Proxy support for async
             str(CORE_DIR / "tls.c"),
             str(CORE_DIR / "request.c"),
             str(CORE_DIR / "response.c"),

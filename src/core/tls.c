@@ -5,6 +5,12 @@
 #include "internal/tls.h"
 #include "internal/util.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <wincrypt.h>
+#pragma comment(lib, "crypt32.lib")
+#endif
+
 /**
  * Configure SSL context with browser profile
  */
@@ -106,12 +112,19 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
  */
 SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
                             const browser_profile_t *browser_profile,
-                            bool http2_enabled, uint64_t *tls_time_us) {
+                            bool http2_enabled, bool verify_cert, uint64_t *tls_time_us) {
     uint64_t start_time = httpmorph_get_time_us();
 
     SSL *ssl = SSL_new(ctx);
     if (!ssl) {
         return NULL;
+    }
+
+    /* Set SSL verification mode */
+    if (verify_cert) {
+        SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+    } else {
+        SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
     }
 
     /* Set ALPN protocols based on http2_enabled flag */
@@ -396,3 +409,79 @@ int httpmorph_set_ssl_verification(SSL_CTX *ctx, bool verify) {
 
     return 0;
 }
+
+#ifdef _WIN32
+/**
+ * Load CA certificates from Windows Certificate Store into SSL_CTX
+ * This is necessary on Windows because SSL_CTX_set_default_verify_paths()
+ * doesn't work - Windows stores certificates in the Certificate Store, not files.
+ */
+int httpmorph_load_windows_ca_certs(SSL_CTX *ctx) {
+    if (!ctx) {
+        return -1;
+    }
+
+    HCERTSTORE hStore = NULL;
+    PCCERT_CONTEXT pContext = NULL;
+    X509 *x509 = NULL;
+    X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+    int cert_count = 0;
+
+    if (!store) {
+        return -1;
+    }
+
+    /* Open the Root CA certificate store */
+    hStore = CertOpenSystemStore(0, "ROOT");
+    if (!hStore) {
+        return -1;
+    }
+
+    /* Enumerate all certificates in the store */
+    while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != NULL) {
+        /* Convert Windows certificate to OpenSSL X509 format */
+        const unsigned char *cert_data = pContext->pbCertEncoded;
+        x509 = d2i_X509(NULL, &cert_data, pContext->cbCertEncoded);
+
+        if (x509) {
+            /* Add certificate to the SSL_CTX's certificate store */
+            if (X509_STORE_add_cert(store, x509) == 1) {
+                cert_count++;
+            }
+            X509_free(x509);
+            x509 = NULL;
+        }
+    }
+
+    /* Also load from CA store (intermediate certificates) */
+    if (pContext) {
+        CertFreeCertificateContext(pContext);
+        pContext = NULL;
+    }
+    CertCloseStore(hStore, 0);
+
+    hStore = CertOpenSystemStore(0, "CA");
+    if (hStore) {
+        while ((pContext = CertEnumCertificatesInStore(hStore, pContext)) != NULL) {
+            const unsigned char *cert_data = pContext->pbCertEncoded;
+            x509 = d2i_X509(NULL, &cert_data, pContext->cbCertEncoded);
+
+            if (x509) {
+                if (X509_STORE_add_cert(store, x509) == 1) {
+                    cert_count++;
+                }
+                X509_free(x509);
+                x509 = NULL;
+            }
+        }
+
+        if (pContext) {
+            CertFreeCertificateContext(pContext);
+        }
+        CertCloseStore(hStore, 0);
+    }
+
+    /* Return success if we loaded at least one certificate */
+    return cert_count > 0 ? 0 : -1;
+}
+#endif

@@ -304,7 +304,7 @@ class Benchmark:
             print(f"Testing only: {', '.join(lib_filter)}")
 
         print("-" * 120)
-        print("📚 Library Versions:")
+        print("Library Versions:")
         for lib_name in [
             "httpmorph",
             "requests",
@@ -316,7 +316,7 @@ class Benchmark:
             "curl_cffi",
         ]:
             version = self.library_versions.get(lib_name, "unknown")
-            status = "✓" if version not in ["not installed", "unknown"] else "✗"
+            status = "[OK]" if version not in ["not installed", "unknown"] else "[--]"
             print(f"  {status} {lib_name:<12} {version}")
 
         print("=" * 120)
@@ -394,7 +394,7 @@ class Benchmark:
         print("=" * 120)
 
         # Sequential tests summary
-        print("\n📊 SEQUENTIAL TESTS (Mean Response Time)")
+        print("\nSEQUENTIAL TESTS (Mean Response Time)")
         print("-" * 120)
         print(f"{'Library':<15} {'Local':<12} {'HTTPS':<12} {'HTTP/2':<12} {'Proxy':<12}")
         print("-" * 120)
@@ -412,7 +412,7 @@ class Benchmark:
             print(row)
 
         # Concurrent tests summary
-        print("\n🚀 CONCURRENT TESTS (Throughput)")
+        print("\nCONCURRENT TESTS (Throughput)")
         print("-" * 120)
         print(f"{'Library':<15} {'Local':<15} {'HTTPS':<15} {'Proxy':<15}")
         print("-" * 120)
@@ -430,7 +430,7 @@ class Benchmark:
             print(row)
 
         # Async tests summary
-        print("\n⚡ ASYNC TESTS (Throughput)")
+        print("\nASYNC TESTS (Throughput)")
         print("-" * 120)
         print(f"{'Library':<15} {'Local':<15} {'HTTPS':<15} {'Proxy':<15}")
         print("-" * 120)
@@ -450,7 +450,7 @@ class Benchmark:
         print("\n" + "=" * 120)
 
         # Winners per category
-        print("\n🏆 WINNERS BY CATEGORY")
+        print("\nWINNERS BY CATEGORY")
         print("-" * 120)
 
         categories = {
@@ -511,10 +511,10 @@ class Benchmark:
                 with open(json_file) as f:
                     existing_data = json.load(f)
                     existing_results = existing_data.get("results", {})
-                print(f"\n📂 Loading existing results from {json_file}")
+                print(f"\nLoading existing results from {json_file}")
                 print(f"   Found results for: {', '.join(existing_results.keys())}")
             except Exception as e:
-                print(f"\n⚠️  Could not load existing results: {e}")
+                print(f"\n[WARNING] Could not load existing results: {e}")
 
         # Merge existing results with new results (new results overwrite)
         merged_results = existing_results.copy()
@@ -554,18 +554,18 @@ class Benchmark:
             graphics_dir.mkdir(exist_ok=True)
             # Use "latest" as identifier instead of timestamp
             self._generate_graphics(export_data, graphics_dir, "latest")
-            print(f"\n📊 Graphics generated: {graphics_dir}/*.png")
+            print(f"\nGraphics generated: {graphics_dir}/*.png")
 
         # Analyze within-benchmark trends (only for newly tested libraries)
         trend_data = self._analyze_trends()
         if trend_data:
-            print("\n📈 Within-Benchmark Trends:")
+            print("\nWithin-Benchmark Trends:")
             for lib_name, lib_trends in trend_data.items():
                 print(f"  {lib_name}:")
                 for test_name, trend in lib_trends.items():
                     print(f"    {test_name}: {trend}")
 
-        print("\n✅ Results exported to:")
+        print("\nResults exported to:")
         print(f"   {json_file}")
         print(f"   {md_file}")
 
@@ -589,11 +589,11 @@ class Benchmark:
                         slope = test_data["trend_slope_ms_per_req"]
                         if abs(slope) > 0.001:  # Significant trend
                             if slope > 0:
-                                trend_info.append(f"↗ +{slope:.4f}ms/req")
+                                trend_info.append(f"UP +{slope:.4f}ms/req")
                             else:
-                                trend_info.append(f"↘ {slope:.4f}ms/req")
+                                trend_info.append(f"DOWN {slope:.4f}ms/req")
                         else:
-                            trend_info.append(f"→ Stable ({slope:+.5f}ms/req)")
+                            trend_info.append(f"Stable ({slope:+.5f}ms/req)")
 
                     # Coefficient of variation (stability)
                     if "cv_pct" in test_data:
@@ -618,7 +618,7 @@ class Benchmark:
                             test_data["q3_avg_ms"],
                             test_data["q4_avg_ms"],
                         )
-                        trend_info.append(f"Q1→Q4: {q1:.2f}→{q2:.2f}→{q3:.2f}→{q4:.2f}ms")
+                        trend_info.append(f"Q1-Q4: {q1:.2f}-{q2:.2f}-{q3:.2f}-{q4:.2f}ms")
 
                     # Percentiles for sequential tests
                     if "p95_ms" in test_data and "p99_ms" in test_data:
@@ -633,7 +633,7 @@ class Benchmark:
                     trends[lib_name] = lib_trends
 
         except Exception as e:
-            print(f"\n⚠️  Trend analysis failed: {e}")
+            print(f"\n[WARNING] Trend analysis failed: {e}")
 
         return trends
 
@@ -1511,9 +1511,9 @@ class Benchmark:
             ]:
                 version = lib_versions.get(lib_name, "unknown")
                 status = (
-                    "✅ Installed"
+                    "Installed"
                     if version not in ["not installed", "unknown"]
-                    else "❌ Not Installed"
+                    else "Not Installed"
                 )
                 md.append(f"| **{lib_name}** | `{version}` | {status} |\n")
             md.append("\n")
@@ -1694,44 +1694,92 @@ class Benchmark:
         # Overall Performance Summary - httpmorph vs requests
         if "httpmorph" in results and "requests" in results:
             md.append("## Overall Performance Summary\n\n")
-            md.append("### httpmorph vs requests Speedup\n\n")
-            md.append("| Test | httpmorph | requests | Speedup |\n")
-            md.append("|------|----------:|---------:|--------:|\n")
 
             # Find common tests between httpmorph and requests
             common_tests = set(results["httpmorph"].keys()) & set(results["requests"].keys())
 
-            for test_key in sorted(common_tests):
-                hm_result = results["httpmorph"][test_key]
-                req_result = results["requests"][test_key]
+            # Separate sequential and concurrent tests
+            seq_common = sorted([t for t in common_tests if t.startswith("seq_")])
+            conc_common = sorted([t for t in common_tests if t.startswith("conc_")])
 
-                # Sequential tests (mean_ms)
-                if "mean_ms" in hm_result and "mean_ms" in req_result:
-                    hm_val = hm_result["mean_ms"]
-                    req_val = req_result["mean_ms"]
-                    speedup = req_val / hm_val if hm_val > 0 else 0
-                    speedup_str = (
-                        f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
-                    )
-                    test_name = format_test_name(test_key)
-                    md.append(
-                        f"| {test_name} | {hm_val:.2f}ms | {req_val:.2f}ms | {speedup_str} |\n"
-                    )
+            # Sequential tests speedup
+            if seq_common:
+                md.append("### Sequential Tests: httpmorph vs requests Speedup\n\n")
+                md.append("| Test | httpmorph | requests | Speedup |\n")
+                md.append("|------|----------:|---------:|--------:|\n")
 
-                # Concurrent/Async tests (req_per_sec)
-                elif "req_per_sec" in hm_result and "req_per_sec" in req_result:
-                    hm_val = hm_result["req_per_sec"]
-                    req_val = req_result["req_per_sec"]
-                    speedup = hm_val / req_val if req_val > 0 else 0
-                    speedup_str = (
-                        f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
-                    )
-                    test_name = format_test_name(test_key)
-                    md.append(
-                        f"| {test_name} | {hm_val:.2f} req/s | {req_val:.2f} req/s | {speedup_str} |\n"
-                    )
+                for test_key in seq_common:
+                    hm_result = results["httpmorph"][test_key]
+                    req_result = results["requests"][test_key]
 
-            md.append("\n")
+                    if "mean_ms" in hm_result and "mean_ms" in req_result:
+                        hm_val = hm_result["mean_ms"]
+                        req_val = req_result["mean_ms"]
+                        speedup = req_val / hm_val if hm_val > 0 else 0
+                        speedup_str = (
+                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                        )
+                        test_name = format_test_name(test_key)
+                        md.append(
+                            f"| {test_name} | {hm_val:.2f}ms | {req_val:.2f}ms | {speedup_str} |\n"
+                        )
+
+                md.append("\n")
+
+            # Concurrent tests speedup
+            if conc_common:
+                md.append("### Concurrent Tests: httpmorph vs requests Speedup\n\n")
+                md.append("| Test | httpmorph | requests | Speedup |\n")
+                md.append("|------|----------:|---------:|--------:|\n")
+
+                for test_key in conc_common:
+                    hm_result = results["httpmorph"][test_key]
+                    req_result = results["requests"][test_key]
+
+                    if "req_per_sec" in hm_result and "req_per_sec" in req_result:
+                        hm_val = hm_result["req_per_sec"]
+                        req_val = req_result["req_per_sec"]
+                        speedup = hm_val / req_val if req_val > 0 else 0
+                        speedup_str = (
+                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                        )
+                        test_name = format_test_name(test_key)
+                        md.append(
+                            f"| {test_name} | {hm_val:.2f} req/s | {req_val:.2f} req/s | {speedup_str} |\n"
+                        )
+
+                md.append("\n")
+
+        # Async Performance Summary - httpmorph vs httpx
+        if "httpmorph" in results and "httpx" in results:
+            # Find common async tests between httpmorph and httpx
+            async_common = sorted([
+                t for t in set(results["httpmorph"].keys()) & set(results["httpx"].keys())
+                if t.startswith("async_")
+            ])
+
+            if async_common:
+                md.append("### Async Tests: httpmorph vs httpx Speedup\n\n")
+                md.append("| Test | httpmorph | httpx | Speedup |\n")
+                md.append("|------|----------:|------:|--------:|\n")
+
+                for test_key in async_common:
+                    hm_result = results["httpmorph"][test_key]
+                    httpx_result = results["httpx"][test_key]
+
+                    if "req_per_sec" in hm_result and "req_per_sec" in httpx_result:
+                        hm_val = hm_result["req_per_sec"]
+                        httpx_val = httpx_result["req_per_sec"]
+                        speedup = hm_val / httpx_val if httpx_val > 0 else 0
+                        speedup_str = (
+                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                        )
+                        test_name = format_test_name(test_key)
+                        md.append(
+                            f"| {test_name} | {hm_val:.2f} req/s | {httpx_val:.2f} req/s | {speedup_str} |\n"
+                        )
+
+                md.append("\n")
 
         md.append("---\n")
         md.append("*Generated by httpmorph benchmark suite*\n")

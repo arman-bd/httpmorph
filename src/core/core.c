@@ -164,7 +164,7 @@ httpmorph_response_t* httpmorph_request_execute(
             if (proxy_use_tls) {
                 uint64_t proxy_tls_time = 0;
                 proxy_ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, proxy_host, client->browser_profile,
-                                       false, &proxy_tls_time);
+                                       false, request->verify_ssl, &proxy_tls_time);
                 if (!proxy_ssl) {
                     if (sockfd > 2) close(sockfd);
                     sockfd = -1;
@@ -257,7 +257,7 @@ httpmorph_response_t* httpmorph_request_execute(
     if (use_tls && !ssl) {
         uint64_t tls_time = 0;
         ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
-                         request->http2_enabled, &tls_time);
+                         request->http2_enabled, request->verify_ssl, &tls_time);
         if (!ssl) {
             response->error = HTTPMORPH_ERROR_TLS;
             response->error_message = strdup("TLS handshake failed");
@@ -361,7 +361,7 @@ httpmorph_response_t* httpmorph_request_execute(
             if (use_tls) {
                 uint64_t tls_time = 0;
                 ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
-                                request->http2_enabled, &tls_time);
+                                request->http2_enabled, request->verify_ssl, &tls_time);
                 if (!ssl) {
                     response->error = HTTPMORPH_ERROR_TLS;
                     response->error_message = strdup("TLS handshake failed on retry");
@@ -411,7 +411,7 @@ httpmorph_response_t* httpmorph_request_execute(
         if (use_tls) {
             uint64_t tls_time = 0;
             ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
-                             request->http2_enabled, &tls_time);
+                             request->http2_enabled, request->verify_ssl, &tls_time);
             if (!ssl) {
                 response->error = HTTPMORPH_ERROR_TLS;
                 response->error_message = strdup("TLS handshake failed");

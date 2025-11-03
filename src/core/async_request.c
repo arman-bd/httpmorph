@@ -10,6 +10,7 @@
 
 #include "async_request.h"
 #include "io_engine.h"
+#include "internal/proxy.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,6 +136,7 @@ const char* async_request_state_name(async_request_state_t state) {
         case ASYNC_STATE_INIT:              return "INIT";
         case ASYNC_STATE_DNS_LOOKUP:        return "DNS_LOOKUP";
         case ASYNC_STATE_CONNECTING:        return "CONNECTING";
+        case ASYNC_STATE_PROXY_CONNECT:     return "PROXY_CONNECT";
         case ASYNC_STATE_TLS_HANDSHAKE:     return "TLS_HANDSHAKE";
         case ASYNC_STATE_SENDING_REQUEST:   return "SENDING_REQUEST";
         case ASYNC_STATE_RECEIVING_HEADERS: return "RECEIVING_HEADERS";
@@ -247,6 +249,69 @@ async_request_t* async_request_create(
         }
     }
 
+    /* Initialize proxy fields */
+    req->using_proxy = false;
+    req->proxy_host = NULL;
+    req->proxy_port = 0;
+    req->proxy_username = NULL;
+    req->proxy_password = NULL;
+    req->proxy_use_tls = false;
+    req->target_host = NULL;
+    req->target_port = 0;
+    req->proxy_connect_sent = false;
+    req->proxy_recv_buf = NULL;
+    req->proxy_recv_len = 0;
+
+    /* Parse and configure proxy if provided */
+    if (request->proxy_url && request->proxy_url[0] != '\0') {
+        /* Parse proxy URL */
+        if (httpmorph_parse_proxy_url(
+                request->proxy_url,
+                &req->proxy_host,
+                &req->proxy_port,
+                &req->proxy_username,
+                &req->proxy_password,
+                &req->proxy_use_tls) == 0) {
+
+            req->using_proxy = true;
+
+            /* Override with explicit proxy credentials if provided */
+            if (request->proxy_username) {
+                free(req->proxy_username);
+                req->proxy_username = strdup(request->proxy_username);
+            }
+            if (request->proxy_password) {
+                free(req->proxy_password);
+                req->proxy_password = strdup(request->proxy_password);
+            }
+
+            /* Store original target host/port */
+            if (request->host) {
+                req->target_host = strdup(request->host);
+                req->target_port = request->port;
+            }
+
+            /* Allocate proxy receive buffer for CONNECT response */
+            req->proxy_recv_buf = malloc(4096);
+            if (!req->proxy_recv_buf) {
+                /* Cleanup on failure */
+                free(req->proxy_host);
+                free(req->proxy_username);
+                free(req->proxy_password);
+                free(req->target_host);
+                free(req->send_buf);
+                free(req->recv_buf);
+                free(req);
+                return NULL;
+            }
+
+            DEBUG_PRINT("[async_request] Using proxy %s:%u for target %s:%u (id=%lu)\n",
+                   req->proxy_host, req->proxy_port,
+                   req->target_host, req->target_port,
+                   (unsigned long)req->id);
+        }
+    }
+
     /* Create SSL object for HTTPS requests */
     if (req->is_https && ssl_ctx) {
         req->ssl = SSL_new(ssl_ctx);
@@ -256,6 +321,13 @@ async_request_t* async_request_create(
             free(req->recv_buf);
             free(req);
             return NULL;
+        }
+
+        /* Set SSL verification mode based on request setting */
+        if (request->verify_ssl) {
+            SSL_set_verify(req->ssl, SSL_VERIFY_PEER, NULL);
+        } else {
+            SSL_set_verify(req->ssl, SSL_VERIFY_NONE, NULL);
         }
 
         /* Set SNI hostname if available */
@@ -320,6 +392,13 @@ void async_request_destroy(async_request_t *req) {
     /* Free buffers */
     free(req->send_buf);
     free(req->recv_buf);
+
+    /* Free proxy buffers and strings */
+    free(req->proxy_host);
+    free(req->proxy_username);
+    free(req->proxy_password);
+    free(req->target_host);
+    free(req->proxy_recv_buf);
 
     /* Free response if allocated */
     if (req->response) {
@@ -419,16 +498,27 @@ static int step_dns_lookup(async_request_t *req) {
 
     /* Perform blocking DNS lookup (for now) */
     /* Note: In production, this should use async DNS (getaddrinfo_a or thread pool) */
-    const char *hostname = req->request->host;
-    uint16_t port = req->request->port;
+
+    /* If using proxy, resolve proxy hostname instead of target hostname */
+    const char *hostname;
+    uint16_t port;
+
+    if (req->using_proxy) {
+        hostname = req->proxy_host;
+        port = req->proxy_port;
+        DEBUG_PRINT("[async_request] Resolving proxy %s:%u (target: %s:%u) (id=%lu)\n",
+               hostname, port, req->target_host, req->target_port, (unsigned long)req->id);
+    } else {
+        hostname = req->request->host;
+        port = req->request->port;
+        DEBUG_PRINT("[async_request] Resolving %s:%u (id=%lu)\n",
+               hostname, port, (unsigned long)req->id);
+    }
 
     if (!hostname) {
         async_request_set_error(req, -1, "No hostname specified");
         return ASYNC_STATUS_ERROR;
     }
-
-    DEBUG_PRINT("[async_request] Resolving %s:%u (id=%lu)\n",
-           hostname, port, (unsigned long)req->id);
 
     /* Setup hints for getaddrinfo */
     struct addrinfo hints;
@@ -502,8 +592,8 @@ static int step_connecting(async_request_t *req) {
                req->request->host, req->request->port, req->sockfd, (unsigned long)req->id);
 
 #ifdef _WIN32
-        /* Windows IOCP path with ConnectEx */
-        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+        /* Windows IOCP path with ConnectEx - skip for SSL sockets */
+        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP && !req->is_https) {
             /* Initialize WSA extensions if needed */
             if (init_wsa_extensions(req->sockfd) < 0) {
                 async_request_set_error(req, -1, "Failed to load WSA extensions");
@@ -524,18 +614,24 @@ static int step_connecting(async_request_t *req) {
                 return ASYNC_STATUS_ERROR;
             }
 
-            /* Associate socket with IOCP, passing request pointer as completion key */
-            if (CreateIoCompletionPort((HANDLE)req->sockfd, (HANDLE)req->io_engine->iocp_handle,
-                                      (ULONG_PTR)req, 0) == NULL) {
-                req->iocp_last_error = GetLastError();
-                char error_buf[256];
-                snprintf(error_buf, sizeof(error_buf), "Failed to associate socket with IOCP: %d",
-                        req->iocp_last_error);
-                async_request_set_error(req, req->iocp_last_error, error_buf);
-                return ASYNC_STATUS_ERROR;
+            /* Associate socket with IOCP ONLY if NOT using SSL */
+            /* SSL sockets CANNOT use IOCP because SSL_write/SSL_read use regular I/O */
+            if (!req->is_https) {
+                if (CreateIoCompletionPort((HANDLE)req->sockfd, (HANDLE)req->io_engine->iocp_handle,
+                                          (ULONG_PTR)req, 0) == NULL) {
+                    req->iocp_last_error = GetLastError();
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "Failed to associate socket with IOCP: %d",
+                            req->iocp_last_error);
+                    async_request_set_error(req, req->iocp_last_error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+                DEBUG_PRINT("[async_request] Socket fd=%d associated with IOCP, completion_key=%p (id=%lu)\n",
+                       req->sockfd, (void*)req, (unsigned long)req->id);
+            } else {
+                DEBUG_PRINT("[async_request] Socket fd=%d NOT associated with IOCP (SSL socket) (id=%lu)\n",
+                       req->sockfd, (unsigned long)req->id);
             }
-            DEBUG_PRINT("[async_request] Socket fd=%d associated with IOCP, completion_key=%p (id=%lu)\n",
-                   req->sockfd, (void*)req, (unsigned long)req->id);
 
             /* Allocate OVERLAPPED structure */
             if (!req->overlapped_connect) {
@@ -577,9 +673,14 @@ static int step_connecting(async_request_t *req) {
             setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
 
             /* Move to next state */
-            if (req->is_https) {
+            if (req->using_proxy) {
+                /* Connected to proxy, establish tunnel with CONNECT */
+                req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->is_https) {
+                /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
             } else {
+                /* Direct HTTP connection, send request */
                 req->state = ASYNC_STATE_SENDING_REQUEST;
             }
             return ASYNC_STATUS_IN_PROGRESS;
@@ -595,9 +696,14 @@ static int step_connecting(async_request_t *req) {
                    (unsigned long)req->id);
 
             /* Move to next state */
-            if (req->is_https) {
+            if (req->using_proxy) {
+                /* Connected to proxy, establish tunnel with CONNECT */
+                req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->is_https) {
+                /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
             } else {
+                /* Direct HTTP connection, send request */
                 req->state = ASYNC_STATE_SENDING_REQUEST;
             }
             return ASYNC_STATUS_IN_PROGRESS;
@@ -622,8 +728,10 @@ static int step_connecting(async_request_t *req) {
 
     /* Socket already exists, check if connect completed */
 #ifdef _WIN32
-    if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
-        /* Always check the completion event (non-blocking) */
+    /* For HTTPS (SSL) sockets, skip IOCP and use regular getsockopt check below */
+    if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP && !req->is_https &&
+        req->overlapped_connect != NULL) {
+        /* IOCP path: check the completion event (non-blocking) */
         DWORD wait_result = WaitForSingleObject((HANDLE)req->iocp_completion_event, 0);
 
         if (wait_result == WAIT_OBJECT_0) {
@@ -644,9 +752,14 @@ static int step_connecting(async_request_t *req) {
                     setsockopt(req->sockfd, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0);
 
                     /* Move to next state */
-                    if (req->is_https) {
+                    if (req->using_proxy) {
+                        /* Connected to proxy, establish tunnel with CONNECT */
+                        req->state = ASYNC_STATE_PROXY_CONNECT;
+                    } else if (req->is_https) {
+                        /* Direct HTTPS connection, do TLS handshake */
                         req->state = ASYNC_STATE_TLS_HANDSHAKE;
                     } else {
+                        /* Direct HTTP connection, send request */
                         req->state = ASYNC_STATE_SENDING_REQUEST;
                     }
                     return ASYNC_STATUS_IN_PROGRESS;
@@ -676,6 +789,68 @@ static int step_connecting(async_request_t *req) {
             return ASYNC_STATUS_ERROR;
         }
     }
+
+    /* For Windows SSL sockets (not using IOCP), check connect completion */
+    if (req->is_https) {
+        /* Use WSAPoll to check if socket is writable (connected) */
+        WSAPOLLFD poll_fd;
+        poll_fd.fd = req->sockfd;
+        poll_fd.events = POLLOUT;  /* Check if writable */
+        poll_fd.revents = 0;
+
+        int poll_ret = WSAPoll(&poll_fd, 1, 0);  /* 0 timeout = non-blocking */
+
+        if (poll_ret > 0) {
+            /* Socket has activity */
+            if (poll_fd.revents & POLLERR) {
+                /* Socket has an error */
+                int error = 0;
+                socklen_t len = sizeof(error);
+                getsockopt(req->sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, &len);
+                char error_buf[256];
+                snprintf(error_buf, sizeof(error_buf), "Connection failed: %d", error);
+                async_request_set_error(req, error, error_buf);
+                return ASYNC_STATUS_ERROR;
+            }
+
+            if (poll_fd.revents & POLLOUT) {
+                /* Socket is writable - verify connection succeeded */
+                int error = 0;
+                socklen_t len = sizeof(error);
+                if (getsockopt(req->sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, &len) == 0 && error == 0) {
+                    /* Connection successful */
+                    DEBUG_PRINT("[async_request] Connected successfully (SSL socket) (id=%lu)\n",
+                           (unsigned long)req->id);
+
+                    /* Move to next state */
+                    if (req->using_proxy) {
+                        /* Connected to proxy, establish tunnel with CONNECT */
+                        req->state = ASYNC_STATE_PROXY_CONNECT;
+                    } else {
+                        /* Direct HTTPS connection, do TLS handshake */
+                        req->state = ASYNC_STATE_TLS_HANDSHAKE;
+                    }
+                    return ASYNC_STATUS_IN_PROGRESS;
+                } else if (error != 0) {
+                    /* Connection failed */
+                    char error_buf[256];
+                    snprintf(error_buf, sizeof(error_buf), "Connection failed: %d", error);
+                    async_request_set_error(req, error, error_buf);
+                    return ASYNC_STATUS_ERROR;
+                }
+            }
+        } else if (poll_ret < 0) {
+            /* Poll error */
+            int last_error = WSAGetLastError();
+            char error_buf[256];
+            snprintf(error_buf, sizeof(error_buf), "WSAPoll failed: %d", last_error);
+            async_request_set_error(req, last_error, error_buf);
+            return ASYNC_STATUS_ERROR;
+        }
+
+        /* Still connecting */
+        return ASYNC_STATUS_NEED_WRITE;
+    }
 #endif
 
 #ifndef _WIN32
@@ -688,9 +863,14 @@ static int step_connecting(async_request_t *req) {
                    (unsigned long)req->id);
 
             /* Move to next state */
-            if (req->is_https) {
+            if (req->using_proxy) {
+                /* Connected to proxy, establish tunnel with CONNECT */
+                req->state = ASYNC_STATE_PROXY_CONNECT;
+            } else if (req->is_https) {
+                /* Direct HTTPS connection, do TLS handshake */
                 req->state = ASYNC_STATE_TLS_HANDSHAKE;
             } else {
+                /* Direct HTTP connection, send request */
                 req->state = ASYNC_STATE_SENDING_REQUEST;
                 /* For plain HTTP, wait for socket to be writable before sending */
                 return ASYNC_STATUS_NEED_WRITE;
@@ -742,7 +922,9 @@ static int step_tls_handshake(async_request_t *req) {
         /* Handshake complete */
         DEBUG_PRINT("[async_request] TLS handshake complete (id=%lu)\n",
                (unsigned long)req->id);
+
         req->state = ASYNC_STATE_SENDING_REQUEST;
+        /* Continue immediately to sending */
         return ASYNC_STATUS_IN_PROGRESS;
     }
 
@@ -766,8 +948,21 @@ static int step_tls_handshake(async_request_t *req) {
             /* Other error */
             {
                 char err_buf[256];
-                ERR_error_string_n(ERR_get_error(), err_buf, sizeof(err_buf));
-                snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: %s", err_buf);
+                unsigned long ssl_err = ERR_get_error();
+                if (ssl_err != 0) {
+                    ERR_error_string_n(ssl_err, err_buf, sizeof(err_buf));
+                    snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: %s", err_buf);
+                } else if (err == SSL_ERROR_SYSCALL) {
+                    /* Get system error */
+                    #ifdef _WIN32
+                    int sys_err = WSAGetLastError();
+                    snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: system error %d (WSAERR)", sys_err);
+                    #else
+                    snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: system error %d (errno)", errno);
+                    #endif
+                } else {
+                    snprintf(req->error_msg, sizeof(req->error_msg), "TLS handshake failed: SSL error code %d", err);
+                }
                 req->state = ASYNC_STATE_ERROR;
             }
             return ASYNC_STATUS_ERROR;
@@ -881,7 +1076,10 @@ static int step_sending_request(async_request_t *req) {
         ssize_t sent;
 
         if (req->ssl) {
-            /* SSL send */
+            /* Clear any pending errors before SSL operation */
+            ERR_clear_error();
+
+            /* SSL send - SSL layer handles non-blocking I/O internally */
             sent = SSL_write(req->ssl,
                            req->send_buf + req->send_pos,
                            (int)(req->send_len - req->send_pos));
@@ -889,18 +1087,56 @@ static int step_sending_request(async_request_t *req) {
             if (sent <= 0) {
                 int err = SSL_get_error(req->ssl, (int)sent);
                 if (err == SSL_ERROR_WANT_WRITE) {
+                    DEBUG_PRINT("[async_request] SSL_write wants write (id=%lu)\n", (unsigned long)req->id);
                     return ASYNC_STATUS_NEED_WRITE;
                 } else if (err == SSL_ERROR_WANT_READ) {
+                    DEBUG_PRINT("[async_request] SSL_write wants read (id=%lu)\n", (unsigned long)req->id);
                     return ASYNC_STATUS_NEED_READ;
                 } else {
-                    async_request_set_error(req, err, "SSL write failed");
+                    /* Get detailed SSL error */
+                    char err_buf[256];
+                    unsigned long ssl_err = ERR_get_error();
+                    if (ssl_err != 0) {
+                        ERR_error_string_n(ssl_err, err_buf, sizeof(err_buf));
+                        snprintf(req->error_msg, sizeof(req->error_msg), "SSL write failed: %s", err_buf);
+                    } else if (err == SSL_ERROR_SYSCALL) {
+                        /* Get system error */
+                        #ifdef _WIN32
+                        int sys_err = WSAGetLastError();
+
+                        /* Handle WSAEWOULDBLOCK and WSAECONNABORTED (10053) as retriable */
+                        if (sys_err == WSAEWOULDBLOCK || sys_err == 10053) {
+                            if (sys_err == 10053) {
+                                DEBUG_PRINT("[async_request] SSL_write got WSAECONNABORTED, retrying (id=%lu)\n", (unsigned long)req->id);
+                            } else {
+                                DEBUG_PRINT("[async_request] SSL_write got WSAEWOULDBLOCK, retrying (id=%lu)\n", (unsigned long)req->id);
+                            }
+                            return ASYNC_STATUS_NEED_WRITE;
+                        }
+
+                        /* Other errors */
+                        snprintf(req->error_msg, sizeof(req->error_msg), "SSL write failed: system error %d (WSAERR)", sys_err);
+                        #else
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            return ASYNC_STATUS_NEED_WRITE;
+                        }
+                        snprintf(req->error_msg, sizeof(req->error_msg), "SSL write failed: system error %d (errno)", errno);
+                        #endif
+                    } else {
+                        snprintf(req->error_msg, sizeof(req->error_msg), "SSL write failed: error code %d", err);
+                    }
+                    req->state = ASYNC_STATE_ERROR;
+                    req->error_code = err;
                     return ASYNC_STATUS_ERROR;
                 }
             }
+
+            DEBUG_PRINT("[async_request] SSL_write sent %zd bytes (id=%lu)\n", sent, (unsigned long)req->id);
+            req->send_pos += sent;
         } else {
 #ifdef _WIN32
-            /* Windows IOCP path with WSASend */
-            if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+            /* Windows: Skip IOCP for async requests - use regular non-blocking I/O */
+            if (false && req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
                 /* Check if previous operation completed */
                 if (req->iocp_operation_pending && req->overlapped_send) {
                     OVERLAPPED *ov = (OVERLAPPED*)req->overlapped_send;
@@ -1023,7 +1259,7 @@ static int step_receiving_headers(async_request_t *req) {
     ssize_t received;
 
     if (req->ssl) {
-        /* SSL receive */
+        /* SSL receive - SSL layer handles non-blocking I/O internally */
         received = SSL_read(req->ssl,
                           req->recv_buf + req->recv_len,
                           (int)(req->recv_capacity - req->recv_len));
@@ -1035,17 +1271,57 @@ static int step_receiving_headers(async_request_t *req) {
             } else if (err == SSL_ERROR_WANT_WRITE) {
                 return ASYNC_STATUS_NEED_WRITE;
             } else if (err == SSL_ERROR_ZERO_RETURN) {
-                async_request_set_error(req, -1, "Connection closed");
+                /* SSL connection closed - check if we have complete headers */
+                if (req->recv_len >= 4) {
+                    bool has_complete_headers = false;
+                    for (size_t i = 0; i <= req->recv_len - 4; i++) {
+                        if (memcmp(req->recv_buf + i, "\r\n\r\n", 4) == 0) {
+                            has_complete_headers = true;
+                            break;
+                        }
+                    }
+                    if (has_complete_headers) {
+                        /* Have complete headers, process them */
+                        received = 0;  /* Set to 0 to skip recv_len increment below */
+                        goto ssl_process_headers;
+                    }
+                }
+                async_request_set_error(req, -1, "SSL connection closed before complete headers");
                 return ASYNC_STATUS_ERROR;
             } else {
-                async_request_set_error(req, err, "SSL read failed");
+                /* Get detailed SSL error */
+                char err_buf[256];
+                unsigned long ssl_err = ERR_get_error();
+                if (ssl_err != 0) {
+                    ERR_error_string_n(ssl_err, err_buf, sizeof(err_buf));
+                    snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: %s", err_buf);
+                } else if (err == SSL_ERROR_SYSCALL) {
+                    /* Get system error */
+                    #ifdef _WIN32
+                    int sys_err = WSAGetLastError();
+                    snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: system error %d (WSAERR)", sys_err);
+                    #else
+                    snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: system error %d (errno)", errno);
+                    #endif
+                } else {
+                    snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: error code %d", err);
+                }
+                req->state = ASYNC_STATE_ERROR;
+                req->error_code = err;
                 return ASYNC_STATUS_ERROR;
             }
         }
+
+ssl_process_headers:
+        /* Increment recv_len for SSL path (only if received > 0) */
+        if (received > 0) {
+            req->recv_len += received;
+        }
     } else {
 #ifdef _WIN32
-        /* Windows IOCP path with WSARecv */
-        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+        /* Windows: Skip IOCP for async requests - use regular non-blocking I/O instead */
+        /* IOCP has issues with immediate connection close scenarios */
+        if (false && req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
             /* Check if previous operation completed (only if we started one) */
             if (req->overlapped_recv) {
                 /* Check if completion event was signaled */
@@ -1068,7 +1344,21 @@ static int step_receiving_headers(async_request_t *req) {
                         req->overlapped_recv = NULL;
 
                         if (received == 0) {
-                            async_request_set_error(req, -1, "Connection closed");
+                            /* Connection closed - check if we have complete headers already */
+                            if (req->recv_len >= 4) {
+                                bool has_complete_headers = false;
+                                for (size_t i = 0; i <= req->recv_len - 4; i++) {
+                                    if (memcmp(req->recv_buf + i, "\r\n\r\n", 4) == 0) {
+                                        has_complete_headers = true;
+                                        break;
+                                    }
+                                }
+                                if (has_complete_headers) {
+                                    /* Have complete headers, don't increment recv_len, continue to header processing */
+                                    goto iocp_process_headers;
+                                }
+                            }
+                            async_request_set_error(req, -1, "Connection closed before complete headers (IOCP)");
                             return ASYNC_STATUS_ERROR;
                         }
                     } else {
@@ -1121,7 +1411,27 @@ static int step_receiving_headers(async_request_t *req) {
                            (unsigned long)bytes_received, (unsigned long)req->id);
 
                     if (received == 0) {
-                        async_request_set_error(req, -1, "Connection closed");
+                        /* Connection closed (or closing) - check if we have complete headers already */
+                        if (req->recv_len >= 4) {
+                            bool has_complete_headers = false;
+                            for (size_t i = 0; i <= req->recv_len - 4; i++) {
+                                if (memcmp(req->recv_buf + i, "\r\n\r\n", 4) == 0) {
+                                    has_complete_headers = true;
+                                    break;
+                                }
+                            }
+                            if (has_complete_headers) {
+                                /* Have complete headers, continue to header processing */
+                                goto iocp_process_headers;
+                            }
+                        }
+                        /* If this is the first receive (recv_len == 0), give it another chance */
+                        /* Server might be closing connection but data could still arrive */
+                        if (req->recv_len == 0) {
+                            DEBUG_PRINT("[async_request] WSARecv got 0 bytes on first recv, will retry (id=%lu)\n", (unsigned long)req->id);
+                            return ASYNC_STATUS_NEED_READ;
+                        }
+                        async_request_set_error(req, -1, "Connection closed before complete headers (WSARecv immediate)");
                         return ASYNC_STATUS_ERROR;
                     }
                 } else {
@@ -1165,14 +1475,35 @@ static int step_receiving_headers(async_request_t *req) {
             }
 
             if (received == 0) {
-                async_request_set_error(req, -1, "Connection closed");
-                return ASYNC_STATUS_ERROR;
+                /* Connection closed - this is only an error if we don't have complete headers */
+                /* If we have complete headers, we'll process them below and handle body separately */
+                if (req->recv_len < 4) {
+                    /* Not enough data for headers */
+                    async_request_set_error(req, -1, "Connection closed before headers");
+                    return ASYNC_STATUS_ERROR;
+                }
+                /* Check if we have complete headers */
+                bool has_complete_headers = false;
+                for (size_t i = 0; i <= req->recv_len - 4; i++) {
+                    if (memcmp(req->recv_buf + i, "\r\n\r\n", 4) == 0) {
+                        has_complete_headers = true;
+                        break;
+                    }
+                }
+                if (!has_complete_headers) {
+                    async_request_set_error(req, -1, "Connection closed before complete headers");
+                    return ASYNC_STATUS_ERROR;
+                }
+                /* We have complete headers, continue processing below */
+                /* Don't increment recv_len since we didn't actually receive any new data */
+            } else {
+                /* Normal receive, add to buffer */
+                req->recv_len += received;
             }
         }
     }
 
-    req->recv_len += received;
-
+iocp_process_headers:
     /* Look for end of headers (\r\n\r\n) */
     if (req->recv_len >= 4) {
         for (size_t i = 0; i <= req->recv_len - 4; i++) {
@@ -1341,6 +1672,7 @@ static int step_receiving_body(async_request_t *req) {
     ssize_t received;
 
     if (req->ssl) {
+        /* SSL receive - SSL layer handles non-blocking I/O internally */
         received = SSL_read(req->ssl,
                           req->recv_buf + req->recv_len,
                           (int)(req->recv_capacity - req->recv_len));
@@ -1367,8 +1699,9 @@ static int step_receiving_body(async_request_t *req) {
         }
     } else {
 #ifdef _WIN32
-        /* Windows IOCP path with WSARecv */
-        if (req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
+        /* Windows: Skip IOCP for async requests - use regular non-blocking I/O instead */
+        /* IOCP has issues with immediate connection close scenarios */
+        if (false && req->io_engine && req->io_engine->type == IO_ENGINE_IOCP) {
             /* Check if previous operation completed */
             if (req->overlapped_recv) {
                 /* Check if completion event was signaled */
@@ -1547,6 +1880,142 @@ static int step_receiving_body(async_request_t *req) {
 }
 
 /**
+ * Handle proxy CONNECT state (establish tunnel through proxy)
+ */
+static int step_proxy_connect(async_request_t *req) {
+    /* Send CONNECT request if not already sent */
+    if (!req->proxy_connect_sent) {
+        /* Build CONNECT request */
+        char connect_req[2048];
+        int len = snprintf(connect_req, sizeof(connect_req),
+                          "CONNECT %s:%u HTTP/1.1\r\n"
+                          "Host: %s:%u\r\n",
+                          req->target_host, req->target_port,
+                          req->target_host, req->target_port);
+
+        /* Add Proxy-Authorization if credentials provided */
+        if (req->proxy_username && req->proxy_password) {
+            char credentials[512];
+            snprintf(credentials, sizeof(credentials), "%s:%s",
+                    req->proxy_username, req->proxy_password);
+
+            /* Base64 encode credentials */
+            extern char* httpmorph_base64_encode(const char *data, size_t len);
+            char *encoded = httpmorph_base64_encode(credentials, strlen(credentials));
+            if (encoded) {
+                len += snprintf(connect_req + len, sizeof(connect_req) - len,
+                              "Proxy-Authorization: Basic %s\r\n", encoded);
+                free(encoded);
+            }
+        }
+
+        /* End headers */
+        len += snprintf(connect_req + len, sizeof(connect_req) - len, "\r\n");
+
+        /* Send CONNECT request (non-blocking) */
+        ssize_t sent;
+#ifdef _WIN32
+        sent = send(req->sockfd, connect_req, len, 0);
+        if (sent < 0 && WSAGetLastError() == WSAEWOULDBLOCK) {
+            return ASYNC_STATUS_NEED_WRITE;
+        }
+#else
+        sent = send(req->sockfd, connect_req, len, 0);
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return ASYNC_STATUS_NEED_WRITE;
+        }
+#endif
+
+        if (sent < 0) {
+            async_request_set_error(req, errno, "Failed to send CONNECT request to proxy");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        if ((size_t)sent < (size_t)len) {
+            async_request_set_error(req, -1, "Partial CONNECT send (not supported yet)");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        req->proxy_connect_sent = true;
+        DEBUG_PRINT("[async_request] Sent CONNECT to proxy %s:%u for target %s:%u (id=%lu)\n",
+               req->proxy_host, req->proxy_port,
+               req->target_host, req->target_port,
+               (unsigned long)req->id);
+    }
+
+    /* Receive CONNECT response (non-blocking) */
+    ssize_t received;
+#ifdef _WIN32
+    received = recv(req->sockfd, (char*)req->proxy_recv_buf + req->proxy_recv_len,
+                   4096 - req->proxy_recv_len - 1, 0);
+    if (received < 0 && WSAGetLastError() == WSAEWOULDBLOCK) {
+        return ASYNC_STATUS_NEED_READ;
+    }
+#else
+    received = recv(req->sockfd, req->proxy_recv_buf + req->proxy_recv_len,
+                   4096 - req->proxy_recv_len - 1, 0);
+    if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        return ASYNC_STATUS_NEED_READ;
+    }
+#endif
+
+    if (received < 0) {
+        async_request_set_error(req, errno, "Failed to receive CONNECT response from proxy");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    if (received == 0) {
+        async_request_set_error(req, -1, "Proxy closed connection during CONNECT");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    req->proxy_recv_len += received;
+    req->proxy_recv_buf[req->proxy_recv_len] = '\0';
+
+    /* Check if we have complete response (look for \r\n\r\n) */
+    if (strstr((char*)req->proxy_recv_buf, "\r\n\r\n") == NULL) {
+        /* Need more data */
+        if (req->proxy_recv_len >= 4000) {
+            async_request_set_error(req, -1, "Proxy CONNECT response too large");
+            return ASYNC_STATUS_ERROR;
+        }
+        return ASYNC_STATUS_NEED_READ;
+    }
+
+    /* Parse response: expect "HTTP/1.x 200" */
+    if (strncmp((char*)req->proxy_recv_buf, "HTTP/1.1 200", 12) != 0 &&
+        strncmp((char*)req->proxy_recv_buf, "HTTP/1.0 200", 12) != 0) {
+        /* Extract status code for error message */
+        char status_msg[256];
+        char *newline = strchr((char*)req->proxy_recv_buf, '\r');
+        if (newline) {
+            size_t status_len = newline - (char*)req->proxy_recv_buf;
+            if (status_len > sizeof(status_msg) - 1) {
+                status_len = sizeof(status_msg) - 1;
+            }
+            memcpy(status_msg, req->proxy_recv_buf, status_len);
+            status_msg[status_len] = '\0';
+            async_request_set_error(req, -1, status_msg);
+        } else {
+            async_request_set_error(req, -1, "Proxy CONNECT failed (invalid response)");
+        }
+        return ASYNC_STATUS_ERROR;
+    }
+
+    DEBUG_PRINT("[async_request] Proxy CONNECT succeeded, tunnel established (id=%lu)\n",
+           (unsigned long)req->id);
+
+    /* Proxy tunnel established, proceed to TLS if target uses HTTPS, otherwise send request */
+    if (req->is_https) {
+        req->state = ASYNC_STATE_TLS_HANDSHAKE;
+    } else {
+        req->state = ASYNC_STATE_SENDING_REQUEST;
+    }
+
+    return ASYNC_STATUS_IN_PROGRESS;
+}
+
+/**
  * Step the async request state machine
  */
 int async_request_step(async_request_t *req) {
@@ -1575,6 +2044,9 @@ int async_request_step(async_request_t *req) {
 
         case ASYNC_STATE_CONNECTING:
             return step_connecting(req);
+
+        case ASYNC_STATE_PROXY_CONNECT:
+            return step_proxy_connect(req);
 
         case ASYNC_STATE_TLS_HANDSHAKE:
             return step_tls_handshake(req);

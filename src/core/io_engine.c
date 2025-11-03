@@ -509,16 +509,18 @@ static int kqueue_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
 
 /**
  * Wait for I/O completions - IOCP implementation
- * Note: Returns immediately as we're using polling-based approach with WSAGetOverlappedResult
- * The Python async code uses asyncio.sleep() for polling and calls async_request_step()
+ * Add sleep to allow I/O operations (including SSL handshakes) to progress
  */
 #ifdef _WIN32
 static int iocp_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
-    /* Return immediately - using polling approach */
-    /* The async_request_step() function checks completion status using WSAGetOverlappedResult */
     (void)engine;  /* Unused */
-    (void)timeout_ms;  /* Unused */
-    return 0;  /* No events to process here */
+
+    /* Sleep to allow I/O operations to complete */
+    /* SSL operations especially need time for system-level I/O */
+    DWORD sleep_ms = (timeout_ms > 0 && timeout_ms < 50) ? timeout_ms : 50;
+    Sleep(sleep_ms);
+
+    return 0;  /* No specific events - requests will be stepped on next poll */
 }
 #endif
 

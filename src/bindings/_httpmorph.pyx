@@ -90,6 +90,7 @@ cdef extern from "../include/httpmorph.h":
 
     # Client API
     httpmorph_client_t* httpmorph_client_create()
+    int httpmorph_client_load_ca_file(httpmorph_client_t *client, const char *ca_file)
     void httpmorph_client_destroy(httpmorph_client_t *client)
 
     # Request API
@@ -146,6 +147,19 @@ cdef class Client:
     def __dealloc__(self):
         if self._client is not NULL:
             httpmorph_client_destroy(self._client)
+
+    def load_ca_file(self, str ca_file):
+        """Load CA certificates from a file (PEM format)
+
+        Args:
+            ca_file: Path to CA certificate bundle (e.g., from certifi.where())
+
+        Returns:
+            True on success, False on failure
+        """
+        cdef bytes ca_file_bytes = ca_file.encode('utf-8')
+        cdef int result = httpmorph_client_load_ca_file(self._client, ca_file_bytes)
+        return result == 0
 
     def request(self, str method, str url, dict headers=None, bytes body=None, **kwargs):
         """Execute an HTTP request

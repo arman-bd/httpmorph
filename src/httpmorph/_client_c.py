@@ -372,6 +372,26 @@ class Client:
         self.http2 = http2  # HTTP/2 enabled flag
         self._cookies = {}  # Cookie jar for this client
 
+        # Auto-load certifi CA bundle if available (like requests does)
+        try:
+            import certifi
+            self.load_ca_file(certifi.where())
+        except (ImportError, OSError):
+            # certifi not installed or CA file not found
+            # Fall back to system CA paths (SSL_CTX_set_default_verify_paths)
+            pass
+
+    def load_ca_file(self, ca_file):
+        """Load CA certificates from a file (PEM format)
+
+        Args:
+            ca_file: Path to CA certificate bundle (e.g., from certifi.where())
+
+        Returns:
+            True on success, False on failure
+        """
+        return self._client.load_ca_file(ca_file)
+
     def request(self, method, url, **kwargs):
         """Execute an HTTP request"""
         # Handle http2 parameter - use client default if not specified
@@ -500,12 +520,12 @@ class Client:
             error_code = result["error"]
             error_msg = result.get("error_message", "Request failed")
 
-            # Map C error codes to Python exceptions
-            # HTTPMORPH_ERROR_TIMEOUT = 5
-            if error_code == 5:
+            # Map C error codes to Python exceptions (negative values in C)
+            # HTTPMORPH_ERROR_TIMEOUT = -5
+            if error_code == -5:
                 raise Timeout(error_msg)
-            # HTTPMORPH_ERROR_NETWORK = 3
-            elif error_code == 3:
+            # HTTPMORPH_ERROR_NETWORK = -3
+            elif error_code == -3:
                 raise ConnectionError(error_msg)
             # Other errors
             elif error_code != 0:
@@ -555,11 +575,11 @@ class Client:
 
                 # Check for errors and raise appropriate exceptions
                 if result.get("error"):
-                    error_code = abs(result["error"])
+                    error_code = result["error"]
                     error_msg = result.get("error_message", "Request failed")
-                    if error_code == 5:
+                    if error_code == -5:
                         raise Timeout(error_msg)
-                    elif error_code == 3:
+                    elif error_code == -3:
                         raise ConnectionError(error_msg)
                     elif error_code != 0:
                         raise RequestException(error_msg)
@@ -858,11 +878,11 @@ class Session:
 
                 # Check for errors and raise appropriate exceptions
                 if result.get("error"):
-                    error_code = abs(result["error"])
+                    error_code = result["error"]
                     error_msg = result.get("error_message", "Request failed")
-                    if error_code == 5:
+                    if error_code == -5:
                         raise Timeout(error_msg)
-                    elif error_code == 3:
+                    elif error_code == -3:
                         raise ConnectionError(error_msg)
                     elif error_code != 0:
                         raise RequestException(error_msg)

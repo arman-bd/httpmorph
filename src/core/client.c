@@ -199,6 +199,15 @@ httpmorph_client_t* httpmorph_client_create(void) {
         return NULL;
     }
 
+    /* Load system CA certificates for verify=True support */
+#ifdef _WIN32
+    /* On Windows, load certificates from Windows Certificate Store */
+    httpmorph_load_windows_ca_certs(client->ssl_ctx);
+#else
+    /* On Unix-like systems, use default paths */
+    SSL_CTX_set_default_verify_paths(client->ssl_ctx);
+#endif
+
     /* Disable SSL session caching to avoid BoringSSL state issues */
     SSL_CTX_set_session_cache_mode(client->ssl_ctx, SSL_SESS_CACHE_OFF);
 
@@ -249,6 +258,22 @@ httpmorph_client_t* httpmorph_client_create(void) {
     }
 
     return client;
+}
+
+/**
+ * Load CA certificates from a file
+ */
+int httpmorph_client_load_ca_file(httpmorph_client_t *client, const char *ca_file) {
+    if (!client || !client->ssl_ctx || !ca_file) {
+        return -1;
+    }
+
+    /* Load CA file */
+    if (SSL_CTX_load_verify_locations(client->ssl_ctx, ca_file, NULL) != 1) {
+        return -1;
+    }
+
+    return 0;
 }
 
 /**
