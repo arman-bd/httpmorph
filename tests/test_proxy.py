@@ -431,7 +431,9 @@ class TestRealProxyIntegration:
         except httpmorph.ConnectionError as e:
             # Connection issues can happen with external proxies (timeout, network issues, etc.)
             # This is acceptable for this test - the main goal is to test timeout functionality
-            pytest.skip(f"Connection failed with external proxy (may be timeout or network issue): {e}")
+            pytest.skip(
+                f"Connection failed with external proxy (may be timeout or network issue): {e}"
+            )
         except Exception as e:
             # Other timeout-related exceptions are acceptable
             if "timeout" in str(e).lower() or "timed out" in str(e).lower():
@@ -614,7 +616,7 @@ class TestAsyncProxyWithAuth:
                         f"{server.url}/get",
                         proxy=proxy.url,
                         proxy_auth=("testuser", "testpass"),
-                        timeout=10
+                        timeout=10,
                     )
                     assert response.status_code in [200, 402]
 
@@ -682,7 +684,7 @@ class TestAsyncProxyWithAuth:
                             f"{server.url}/get",
                             proxy=proxy.url,
                             proxy_auth=("wronguser", "wrongpass"),
-                            timeout=5
+                            timeout=5,
                         )
                         # Should fail with 407 Proxy Authentication Required or connection error
                         assert response.status_code in [0, 403, 407]
@@ -751,7 +753,9 @@ class TestAsyncProxyEdgeCases:
 
         try:
             async with AsyncClient() as client:
-                response = await client.get("http://example.com", proxy="not-a-valid-url", timeout=0.5)
+                response = await client.get(
+                    "http://example.com", proxy="not-a-valid-url", timeout=0.5
+                )
                 # Should either fail with parse error or connection error
                 assert response.status_code == 0
                 assert response.error != 0
@@ -767,14 +771,21 @@ class TestAsyncProxyEdgeCases:
         try:
             async with AsyncClient() as client:
                 # Port 9 is typically not used and will refuse connection
-                response = await client.get("http://example.com", proxy="http://localhost:9", timeout=2)
+                response = await client.get(
+                    "http://example.com", proxy="http://localhost:9", timeout=2
+                )
                 # Should get connection error
                 assert response.status_code == 0 or response.error != 0
         except Exception as e:
             # Connection error or timeout is expected (depends on OS behavior)
             error_msg = str(e).lower()
-            assert ("connect" in error_msg or "refused" in error_msg or
-                    "failed" in error_msg or "timeout" in error_msg or "timed out" in error_msg)
+            assert (
+                "connect" in error_msg
+                or "refused" in error_msg
+                or "failed" in error_msg
+                or "timeout" in error_msg
+                or "timed out" in error_msg
+            )
 
     @pytest.mark.asyncio
     async def test_async_proxy_timeout(self):
@@ -785,18 +796,20 @@ class TestAsyncProxyEdgeCases:
             async with AsyncClient() as client:
                 # Use a very short timeout
                 response = await client.get(
-                    "http://example.com",
-                    proxy="http://localhost:9999",
-                    timeout=0.1
+                    "http://example.com", proxy="http://localhost:9999", timeout=0.1
                 )
                 # Should timeout
                 assert response.status_code == 0 or response.error != 0
         except Exception as e:
             # Timeout or connection refused exception is expected
             error_str = str(e).lower()
-            assert "timeout" in error_str or "timed out" in error_str or \
-                   "connection refused" in error_str or "connection failed" in error_str or \
-                   "failed to connect" in error_str
+            assert (
+                "timeout" in error_str
+                or "timed out" in error_str
+                or "connection refused" in error_str
+                or "connection failed" in error_str
+                or "failed to connect" in error_str
+            )
 
 
 @pytest.mark.proxy
@@ -814,9 +827,7 @@ class TestAsyncProxyConsistency:
         sync_error = None
         try:
             sync_response = httpmorph.get(
-                "http://example.com",
-                proxy="http://localhost:9999",
-                timeout=1
+                "http://example.com", proxy="http://localhost:9999", timeout=1
             )
             sync_status = sync_response.status_code
         except Exception as e:
@@ -828,9 +839,7 @@ class TestAsyncProxyConsistency:
             try:
                 async with AsyncClient() as client:
                     response = await client.get(
-                        "http://example.com",
-                        proxy="http://localhost:9999",
-                        timeout=1
+                        "http://example.com", proxy="http://localhost:9999", timeout=1
                     )
                     return response.status_code, None
             except Exception as e:
@@ -860,9 +869,7 @@ class TestAsyncProxyConsistency:
         try:
             async with AsyncClient() as client:
                 _ = await client.get(
-                    "https://example.com",
-                    proxy="http://localhost:9999",
-                    timeout=2
+                    "https://example.com", proxy="http://localhost:9999", timeout=2
                 )
         except Exception:
             pass
@@ -881,6 +888,7 @@ class TestAsyncRealProxyIntegration:
     def real_proxy_url(self):
         """Get real proxy URL from environment and verify it's available"""
         import os
+
         proxy_url = os.environ.get("TEST_PROXY_URL")
         if not proxy_url:
             pytest.skip("TEST_PROXY_URL environment variable not set")
@@ -894,14 +902,13 @@ class TestAsyncRealProxyIntegration:
             try:
                 async with AsyncClient() as client:
                     test_response = await client.get(
-                        "http://example.com",
-                        proxy=proxy_url,
-                        timeout=10
+                        "http://example.com", proxy=proxy_url, timeout=10
                     )
                     if test_response.status_code == 407:
                         pytest.skip("Proxy authentication failed - proxy may be offline")
                     if test_response.text and (
-                        "offline" in test_response.text.lower() or "busy" in test_response.text.lower()
+                        "offline" in test_response.text.lower()
+                        or "busy" in test_response.text.lower()
                     ):
                         pytest.skip(f"Proxy is offline or busy: {test_response.text[:100]}")
             except Exception as e:
@@ -936,7 +943,9 @@ class TestAsyncRealProxyIntegration:
         from httpmorph import AsyncClient
 
         async with AsyncClient() as client:
-            response = await client.get(f"https://{httpbin_host}/ip", proxy=real_proxy_url, timeout=30)
+            response = await client.get(
+                f"https://{httpbin_host}/ip", proxy=real_proxy_url, timeout=30
+            )
             assert response.status_code == 200
             # Response should contain the proxy's IP, not our IP
             assert "origin" in response.json()
@@ -961,7 +970,9 @@ class TestAsyncRealProxyIntegration:
 
                 # Accept rate limiting from external services
                 if response.status_code in [429, 403]:
-                    pytest.skip(f"Rate limited or blocked by external service: {response.status_code}")
+                    pytest.skip(
+                        f"Rate limited or blocked by external service: {response.status_code}"
+                    )
                 assert response.status_code in [200, 301, 302]
 
     @pytest.mark.asyncio

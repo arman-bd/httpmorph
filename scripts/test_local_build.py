@@ -61,14 +61,14 @@ def test_c_extensions():
     try:
         # Try to import C extension modules
         try:
-            from httpmorph import _httpmorph
+            from httpmorph import _httpmorph  # noqa: F401
 
             print("[OK] C extension '_httpmorph' loaded successfully")
         except ImportError as e:
             print(f"[SKIP] C extension '_httpmorph' not available: {e}")
 
         try:
-            from httpmorph import _http2
+            from httpmorph import _http2  # noqa: F401
 
             print("[OK] C extension '_http2' loaded successfully")
         except ImportError as e:

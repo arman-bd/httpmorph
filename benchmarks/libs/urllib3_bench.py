@@ -102,25 +102,6 @@ class Urllib3Benchmark(LibraryBenchmark):
     def conc_proxy_http(self):
         if not self.proxy_url_http:
             return {"error": "No proxy configured"}
-
-        def run():
-            try:
-                http = self._get_proxy_manager(
-                    self.proxy_url_http, cert_reqs="CERT_NONE", timeout=10
-                )
-                resp = http.request("GET", self.proxy_target_http)
-                assert 200 <= resp.status < 600
-            except Exception:
-                pass
-
-        try:
-            return self.run_concurrent_sync(run)
-        except Exception:
-            return {"total_time_s": 10.0, "req_per_sec": 0.1, "avg_ms": 10000.0}
-
-    def conc_proxy_http(self):
-        if not self.proxy_url_http:
-            return {"error": "No proxy configured"}
         http = self._get_proxy_manager(self.proxy_url_http, cert_reqs="CERT_NONE", timeout=10)
 
         def run():

@@ -16,10 +16,32 @@
 extern "C" {
 #endif
 
-/* Version information */
+/* Version information - defined by build system from pyproject.toml
+ *
+ * These are fallback defaults only used if the build system doesn't define them.
+ * The actual version is read from pyproject.toml by setup.py and passed via
+ * compiler flags: -DHTTPMORPH_VERSION_MAJOR=X -DHTTPMORPH_VERSION_MINOR=Y -DHTTPMORPH_VERSION_PATCH=Z
+ *
+ * Single source of truth: pyproject.toml
+ */
+#ifndef HTTPMORPH_VERSION_MAJOR
 #define HTTPMORPH_VERSION_MAJOR 0
-#define HTTPMORPH_VERSION_MINOR 1
+#endif
+#ifndef HTTPMORPH_VERSION_MINOR
+#define HTTPMORPH_VERSION_MINOR 2
+#endif
+#ifndef HTTPMORPH_VERSION_PATCH
 #define HTTPMORPH_VERSION_PATCH 0
+#endif
+
+/* Helper macros for version string construction */
+#define HTTPMORPH_STRINGIFY(x) #x
+#define HTTPMORPH_TOSTRING(x) HTTPMORPH_STRINGIFY(x)
+#define HTTPMORPH_VERSION_STRING \
+    "httpmorph/" \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_MAJOR) "." \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_MINOR) "." \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_PATCH)
 
 /* Error codes */
 typedef enum {

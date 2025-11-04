@@ -12,6 +12,15 @@ from libc.stdlib cimport malloc, free
 from libc.string cimport strdup
 from libc.stdio cimport printf
 
+# Helper to get version for User-Agent strings
+def _get_httpmorph_version():
+    """Get httpmorph version from package metadata"""
+    try:
+        from importlib.metadata import version as _get_version
+    except ImportError:
+        from importlib_metadata import version as _get_version
+    return _get_version("httpmorph")
+
 # External C declarations
 cdef extern from "../include/httpmorph.h":
     # Error codes
@@ -275,7 +284,7 @@ cdef class Client:
 
             # Add default headers that will be added by C code if not present
             if 'User-Agent' not in request_headers:
-                request_headers['User-Agent'] = 'httpmorph/0.1.3'
+                request_headers['User-Agent'] = f'httpmorph/{_get_httpmorph_version()}'
             if 'Accept' not in request_headers:
                 request_headers['Accept'] = '*/*'
             if 'Connection' not in request_headers:
@@ -567,7 +576,7 @@ cdef class Session:
                 'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
                 'edge': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
             }
-            default_ua = browser_user_agents.get(self._browser, 'httpmorph/0.1.3')
+            default_ua = browser_user_agents.get(self._browser, f'httpmorph/{_get_httpmorph_version()}')
 
             # Add browser-specific User-Agent header if not already set
             has_user_agent = False

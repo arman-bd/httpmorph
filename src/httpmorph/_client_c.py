@@ -375,6 +375,7 @@ class Client:
         # Auto-load certifi CA bundle if available (like requests does)
         try:
             import certifi
+
             self.load_ca_file(certifi.where())
         except (ImportError, OSError):
             # certifi not installed or CA file not found
@@ -1024,6 +1025,11 @@ def cleanup():
 
 def version():
     """Get library version"""
-    if HAS_C_EXTENSION:
-        return _httpmorph.version()
-    return "0.1.3"
+    # Read version from package metadata (single source of truth: pyproject.toml)
+    try:
+        from importlib.metadata import version as _get_version
+    except ImportError:
+        # Python < 3.8
+        from importlib_metadata import version as _get_version
+
+    return _get_version("httpmorph")

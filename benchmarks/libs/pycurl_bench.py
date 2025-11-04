@@ -1,7 +1,7 @@
 """pycurl benchmark implementations"""
 
 try:
-    from io import BytesIO
+    from io import BytesIO  # noqa: F401
 
     import pycurl
 

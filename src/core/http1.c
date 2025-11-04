@@ -176,7 +176,7 @@ int httpmorph_send_http_request(SSL *ssl, int sockfd, const httpmorph_request_t 
 
     /* Add default headers if missing */
     if (!has_user_agent) {
-        const char *user_agent = request->user_agent ? request->user_agent : "httpmorph/0.1.3";
+        const char *user_agent = request->user_agent ? request->user_agent : HTTPMORPH_VERSION_STRING;
         request_builder_append_header(builder, "User-Agent", 10, user_agent, strlen(user_agent));
     }
     if (!has_accept) {

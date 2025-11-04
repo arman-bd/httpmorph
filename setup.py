@@ -11,8 +11,18 @@ This setup.py configures:
 import platform
 from pathlib import Path
 
+import tomllib
 from Cython.Build import cythonize
 from setuptools import Extension, setup
+
+# Read version from pyproject.toml (single source of truth)
+with open("pyproject.toml", "rb") as f:
+    pyproject = tomllib.load(f)
+    version_string = pyproject["project"]["version"]
+    version_parts = version_string.split(".")
+    VERSION_MAJOR = int(version_parts[0])
+    VERSION_MINOR = int(version_parts[1])
+    VERSION_PATCH = int(version_parts[2]) if len(version_parts) > 2 else 0
 
 # Detect platform
 IS_LINUX = platform.system() == "Linux"
@@ -48,6 +58,10 @@ if IS_WINDOWS:
         "/W3",  # Warning level 3
         "/D_WIN32",
         "/D_CRT_SECURE_NO_WARNINGS",
+        # Version information from pyproject.toml
+        f"/DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+        f"/DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+        f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
     ]
     # Note: /std:c11 is only available in VS 2019 16.8+ (MSVC 19.28+)
     # For older versions, MSVC uses C89 with C99/C11 extensions by default
@@ -63,6 +77,10 @@ else:
         "-Wall",  # All warnings
         "-Wextra",  # Extra warnings
         "-std=c11",  # C11 standard
+        # Version information from pyproject.toml
+        f"-DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+        f"-DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+        f"-DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
     ]
     EXTRA_LINK_ARGS = ["-fsanitize=address"]
 
@@ -367,6 +385,10 @@ if IS_WINDOWS:
         "/D_WIN32",
         # Force include windows_compat.h to define ssize_t properly for all compilation units
         "/FIwindows_compat.h",
+        # Version information from pyproject.toml
+        f"/DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+        f"/DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+        f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
     ]
     # BoringSSL and nghttp2 library names on Windows (without .lib extension)
     # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
@@ -389,6 +411,10 @@ else:
         "-march=native" if platform.machine() in ["x86_64", "AMD64"] else "-mcpu=native",
         "-ffast-math",
         "-DHAVE_NGHTTP2",
+        # Version information from pyproject.toml
+        f"-DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+        f"-DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+        f"-DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
     ]
     EXT_LINK_ARGS = []
 

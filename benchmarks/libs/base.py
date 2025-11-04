@@ -86,7 +86,7 @@ class LibraryBenchmark(ABC):
                 denominator = sum((x_vals[i] - x_mean) ** 2 for i in range(n))
 
                 trend_slope_ms = numerator / denominator if denominator != 0 else 0
-            except:
+            except Exception:
                 trend_slope_ms = 0
 
             # Stability metric (coefficient of variation)
@@ -158,7 +158,7 @@ class LibraryBenchmark(ABC):
                 denominator = sum((x_vals[i] - x_mean) ** 2 for i in range(n))
 
                 trend_slope_ms = numerator / denominator if denominator != 0 else 0
-            except:
+            except Exception:
                 trend_slope_ms = 0
 
             mean_val = statistics.mean(completion_times)
@@ -232,7 +232,7 @@ class LibraryBenchmark(ABC):
                 denominator = sum((x_vals[i] - x_mean) ** 2 for i in range(n))
 
                 trend_slope_ms = numerator / denominator if denominator != 0 else 0
-            except:
+            except Exception:
                 trend_slope_ms = 0
 
             mean_val = statistics.mean(completion_times)

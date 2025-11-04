@@ -1,7 +1,7 @@
 """curl_cffi benchmark implementations"""
 
 try:
-    from curl_cffi import requests as curl_requests
+    from curl_cffi import requests as curl_requests  # noqa: F401
 
     AVAILABLE = True
 except ImportError:

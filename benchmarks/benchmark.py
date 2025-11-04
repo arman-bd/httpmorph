@@ -1511,9 +1511,7 @@ class Benchmark:
             ]:
                 version = lib_versions.get(lib_name, "unknown")
                 status = (
-                    "Installed"
-                    if version not in ["not installed", "unknown"]
-                    else "Not Installed"
+                    "Installed" if version not in ["not installed", "unknown"] else "Not Installed"
                 )
                 md.append(f"| **{lib_name}** | `{version}` | {status} |\n")
             md.append("\n")
@@ -1717,7 +1715,9 @@ class Benchmark:
                         req_val = req_result["mean_ms"]
                         speedup = req_val / hm_val if hm_val > 0 else 0
                         speedup_str = (
-                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                            f"**{speedup:.2f}x** faster"
+                            if speedup > 1
+                            else f"{speedup:.2f}x slower"
                         )
                         test_name = format_test_name(test_key)
                         md.append(
@@ -1741,7 +1741,9 @@ class Benchmark:
                         req_val = req_result["req_per_sec"]
                         speedup = hm_val / req_val if req_val > 0 else 0
                         speedup_str = (
-                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                            f"**{speedup:.2f}x** faster"
+                            if speedup > 1
+                            else f"{speedup:.2f}x slower"
                         )
                         test_name = format_test_name(test_key)
                         md.append(
@@ -1753,10 +1755,13 @@ class Benchmark:
         # Async Performance Summary - httpmorph vs httpx
         if "httpmorph" in results and "httpx" in results:
             # Find common async tests between httpmorph and httpx
-            async_common = sorted([
-                t for t in set(results["httpmorph"].keys()) & set(results["httpx"].keys())
-                if t.startswith("async_")
-            ])
+            async_common = sorted(
+                [
+                    t
+                    for t in set(results["httpmorph"].keys()) & set(results["httpx"].keys())
+                    if t.startswith("async_")
+                ]
+            )
 
             if async_common:
                 md.append("### Async Tests: httpmorph vs httpx Speedup\n\n")
@@ -1772,7 +1777,9 @@ class Benchmark:
                         httpx_val = httpx_result["req_per_sec"]
                         speedup = hm_val / httpx_val if httpx_val > 0 else 0
                         speedup_str = (
-                            f"**{speedup:.2f}x** faster" if speedup > 1 else f"{speedup:.2f}x slower"
+                            f"**{speedup:.2f}x** faster"
+                            if speedup > 1
+                            else f"{speedup:.2f}x slower"
                         )
                         test_name = format_test_name(test_key)
                         md.append(
