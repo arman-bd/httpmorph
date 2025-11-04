@@ -16,10 +16,32 @@
 extern "C" {
 #endif
 
-/* Version information */
+/* Version information - defined by build system from pyproject.toml
+ *
+ * These are fallback defaults only used if the build system doesn't define them.
+ * The actual version is read from pyproject.toml by setup.py and passed via
+ * compiler flags: -DHTTPMORPH_VERSION_MAJOR=X -DHTTPMORPH_VERSION_MINOR=Y -DHTTPMORPH_VERSION_PATCH=Z
+ *
+ * Single source of truth: pyproject.toml
+ */
+#ifndef HTTPMORPH_VERSION_MAJOR
 #define HTTPMORPH_VERSION_MAJOR 0
-#define HTTPMORPH_VERSION_MINOR 1
+#endif
+#ifndef HTTPMORPH_VERSION_MINOR
+#define HTTPMORPH_VERSION_MINOR 2
+#endif
+#ifndef HTTPMORPH_VERSION_PATCH
 #define HTTPMORPH_VERSION_PATCH 0
+#endif
+
+/* Helper macros for version string construction */
+#define HTTPMORPH_STRINGIFY(x) #x
+#define HTTPMORPH_TOSTRING(x) HTTPMORPH_STRINGIFY(x)
+#define HTTPMORPH_VERSION_STRING \
+    "httpmorph/" \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_MAJOR) "." \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_MINOR) "." \
+    HTTPMORPH_TOSTRING(HTTPMORPH_VERSION_PATCH)
 
 /* Error codes */
 typedef enum {
@@ -70,6 +92,12 @@ typedef struct httpmorph_response httpmorph_response_t;
 typedef struct httpmorph_session httpmorph_session_t;
 typedef struct httpmorph_pool httpmorph_pool_t;
 
+/* Header structure - stores key-value pairs together for better cache locality */
+typedef struct {
+    char *key;
+    char *value;
+} httpmorph_header_t;
+
 /* Request structure */
 struct httpmorph_request {
     httpmorph_method_t method;
@@ -78,10 +106,10 @@ struct httpmorph_request {
     uint16_t port;
     bool use_tls;
 
-    /* Headers */
-    char **header_keys;
-    char **header_values;
+    /* Headers - optimized for cache locality */
+    httpmorph_header_t *headers;
     size_t header_count;
+    size_t header_capacity;  /* Pre-allocated header capacity */
 
     /* Body */
     uint8_t *body;
@@ -99,9 +127,22 @@ struct httpmorph_request {
     char *proxy_username;
     char *proxy_password;
 
+    /* HTTP/2 control */
+    bool http2_enabled;
+
+    /* HTTP/2 priority (RFC 7540 Section 5.3) */
+    int32_t http2_stream_dependency;  /* Parent stream ID (0 = no dependency) */
+    int32_t http2_priority_weight;    /* Priority weight: 1-256 (default: 16) */
+    bool http2_priority_exclusive;    /* Exclusive dependency flag */
+
     /* TLS fingerprinting */
     char *ja3_string;
     char *user_agent;
+
+    /* TLS configuration */
+    bool verify_ssl;              /* Verify SSL certificates (default: true) */
+    uint16_t min_tls_version;     /* Minimum TLS version (0 = default) */
+    uint16_t max_tls_version;     /* Maximum TLS version (0 = default) */
 };
 
 /* Response structure */
@@ -109,15 +150,19 @@ struct httpmorph_response {
     uint16_t status_code;
     httpmorph_version_t http_version;
 
-    /* Headers */
-    char **header_keys;
-    char **header_values;
+    /* Headers - optimized for cache locality */
+    httpmorph_header_t *headers;
     size_t header_count;
+    size_t header_capacity;  /* Pre-allocated header capacity */
 
     /* Body */
     uint8_t *body;
     size_t body_len;
     size_t body_capacity;
+
+    /* Internal: Buffer pool tracking (do not access directly) */
+    void *_buffer_pool;  /* httpmorph_buffer_pool_t* */
+    size_t _body_actual_size;  /* Actual allocated size (for pool return) */
 
     /* Timing */
     uint64_t connect_time_us;
@@ -161,16 +206,31 @@ const char* httpmorph_version(void);
 httpmorph_client_t* httpmorph_client_create(void);
 
 /**
+ * Load CA certificates from a file (PEM format)
+ * @param client The HTTP client
+ * @param ca_file Path to CA certificate bundle file (e.g., cacert.pem)
+ * @return 0 on success, -1 on failure
+ */
+int httpmorph_client_load_ca_file(httpmorph_client_t *client, const char *ca_file);
+
+/**
+ * Get the connection pool from a client
+ */
+httpmorph_pool_t* httpmorph_client_get_pool(httpmorph_client_t *client);
+
+/**
  * Destroy an HTTP client
  */
 void httpmorph_client_destroy(httpmorph_client_t *client);
 
 /**
  * Execute a synchronous HTTP request
+ * @param pool Optional connection pool for connection reuse (pass NULL if not using pooling)
  */
 httpmorph_response_t* httpmorph_request_execute(
     httpmorph_client_t *client,
-    const httpmorph_request_t *request
+    const httpmorph_request_t *request,
+    httpmorph_pool_t *pool
 );
 
 /* Request helpers */
@@ -224,6 +284,64 @@ void httpmorph_request_set_proxy(
     const char *password
 );
 
+/**
+ * Set HTTP/2 enabled flag for request
+ */
+void httpmorph_request_set_http2(
+    httpmorph_request_t *request,
+    bool enabled
+);
+
+/**
+ * Set HTTP/2 priority for request (RFC 7540 Section 5.3)
+ *
+ * Priority allows control over resource loading order:
+ * - Higher weight = more important
+ * - Stream dependency creates parent-child relationships
+ * - Exclusive flag makes this stream the only child of parent
+ *
+ * Common weight values:
+ * - 256: Highest priority (critical resources like HTML)
+ * - 128: High priority (CSS, fonts)
+ * - 16:  Default/medium priority
+ * - 1:   Lowest priority (images, analytics)
+ *
+ * @param request Request to configure
+ * @param stream_dependency Parent stream ID (0 for no dependency)
+ * @param weight Priority weight: 1-256 (higher = more important)
+ * @param exclusive Whether to make this stream exclusive child of parent
+ */
+void httpmorph_request_set_http2_priority(
+    httpmorph_request_t *request,
+    int32_t stream_dependency,
+    int32_t weight,
+    bool exclusive
+);
+
+/**
+ * Set SSL certificate verification mode
+ *
+ * @param request Request to configure
+ * @param verify Whether to verify SSL certificates (default: true)
+ */
+void httpmorph_request_set_verify_ssl(
+    httpmorph_request_t *request,
+    bool verify
+);
+
+/**
+ * Set TLS version range
+ *
+ * @param request Request to configure
+ * @param min_version Minimum TLS version (0x0301-0x0304, 0 for default)
+ * @param max_version Maximum TLS version (0x0301-0x0304, 0 for default)
+ */
+void httpmorph_request_set_tls_version(
+    httpmorph_request_t *request,
+    uint16_t min_version,
+    uint16_t max_version
+);
+
 /* Response helpers */
 
 /**
@@ -265,6 +383,27 @@ httpmorph_response_t* httpmorph_session_request(
  * Get cookie count for session
  */
 size_t httpmorph_session_cookie_count(httpmorph_session_t *session);
+
+/* Async I/O API */
+
+/**
+ * Get file descriptor from connection pool
+ * Retrieves the underlying socket file descriptor from a pooled connection
+ * for integration with event loops (asyncio, etc.)
+ *
+ * Note: This requires access to internal pool connection structure
+ * Use with caution - for advanced async I/O integration only
+ *
+ * @param pool Connection pool
+ * @param host Target host
+ * @param port Target port
+ * @return File descriptor (>= 0) on success, -1 if no active connection found
+ */
+int httpmorph_pool_get_connection_fd(
+    httpmorph_pool_t *pool,
+    const char *host,
+    uint16_t port
+);
 
 #ifdef __cplusplus
 }

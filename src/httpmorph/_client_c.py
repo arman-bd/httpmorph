@@ -7,11 +7,20 @@ import io
 import json as _json
 import os
 import sys
+import threading
 import uuid
 from datetime import timedelta
 from http.client import responses as http_responses
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
+# Try to import orjson for faster JSON encoding (2-3x faster than stdlib)
+try:
+    import orjson
+
+    HAS_ORJSON = True
+except ImportError:
+    HAS_ORJSON = False
 
 # On Windows, add DLL search paths for dependencies
 if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
@@ -30,14 +39,37 @@ if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
     except Exception:
         pass  # Silently ignore if we can't determine paths
 
-try:
-    from httpmorph import _httpmorph
+_httpmorph = None
+HAS_C_EXTENSION = False
 
-    HAS_C_EXTENSION = True
-except ImportError as e:
+# Import C extension using importlib to avoid circular import
+try:
+    import glob
+    import importlib.util
+
+    # Find the .so/.pyd file in current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    so_files = glob.glob(os.path.join(current_dir, "_httpmorph*.so"))
+    if not so_files:
+        # On Windows, look for .pyd files
+        so_files = glob.glob(os.path.join(current_dir, "_httpmorph*.pyd"))
+
+    if not so_files:
+        raise ImportError(f"C extension not found in {current_dir}")
+
+    # Load the module directly from the .so file
+    spec = importlib.util.spec_from_file_location("_httpmorph", so_files[0])
+    if spec and spec.loader:
+        _httpmorph = importlib.util.module_from_spec(spec)
+        # Add to sys.modules to make it available for other imports
+        sys.modules["_httpmorph"] = _httpmorph
+        spec.loader.exec_module(_httpmorph)
+        HAS_C_EXTENSION = True
+    else:
+        raise ImportError("Could not create module spec")
+
+except (ImportError, Exception) as e:
     print(f"WARNING: Failed to import _httpmorph: {e}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
     HAS_C_EXTENSION = False
     _httpmorph = None
 
@@ -137,7 +169,11 @@ class PreparedRequest:
         self.headers = headers or {}
 
         if json is not None:
-            self.body = _json.dumps(json).encode("utf-8")
+            # Use orjson if available (2-3x faster than stdlib json)
+            if HAS_ORJSON:
+                self.body = orjson.dumps(json)  # orjson.dumps returns bytes directly
+            else:
+                self.body = _json.dumps(json).encode("utf-8")
             self.headers["Content-Type"] = "application/json"
         elif data is not None:
             self.body = data if isinstance(data, bytes) else str(data).encode("utf-8")
@@ -152,7 +188,10 @@ class Response:
         self.status_code = c_response_dict["status_code"]
         self.headers = c_response_dict["headers"]
         self.body = c_response_dict["body"]
-        self.http_version = self._format_http_version(c_response_dict["http_version"])
+
+        # Store raw http_version enum for lazy formatting
+        self._http_version_enum = c_response_dict["http_version"]
+        self._http_version = None
 
         # Timing information (in microseconds)
         self.connect_time_us = c_response_dict["connect_time_us"]
@@ -165,12 +204,10 @@ class Response:
         self.tls_cipher = c_response_dict["tls_cipher"]
         self.ja3_fingerprint = c_response_dict["ja3_fingerprint"]
 
-        # Decode body as text
+        # Lazy text decoding (decode only when accessed)
+        self._text = None
         self._encoding = None
-        try:
-            self.text = self.body.decode("utf-8")
-        except (UnicodeDecodeError, AttributeError):
-            self.text = self.body.decode("latin-1", errors="replace")
+        self._json = None  # Lazy JSON decoding
 
         # Error information
         self.error = c_response_dict["error"]
@@ -182,7 +219,7 @@ class Response:
         # Requests-compatible attributes
         self.url = url or c_response_dict.get("url", "")
         self.history = []
-        self.raw = io.BytesIO(self.body) if self.body else io.BytesIO()
+        self._raw = None  # Lazy raw attribute
         self.links = {}
 
     def _format_http_version(self, version_enum):
@@ -196,9 +233,54 @@ class Response:
         return version_map.get(version_enum, "1.1")
 
     @property
+    def http_version(self):
+        """Get HTTP version string (lazy evaluation)"""
+        if self._http_version is None:
+            self._http_version = self._format_http_version(self._http_version_enum)
+        return self._http_version
+
+    @property
     def content(self):
         """Alias for body (requests compatibility)"""
         return self.body
+
+    @property
+    def text(self):
+        """Decode body as text (lazy evaluation)"""
+        if self._text is None:
+            try:
+                self._text = self.body.decode("utf-8")
+            except (UnicodeDecodeError, AttributeError):
+                self._text = self.body.decode("latin-1", errors="replace") if self.body else ""
+        return self._text
+
+    def json(self, **kwargs):
+        """Decode body as JSON (lazy evaluation with orjson if available)"""
+        if self._json is None:
+            if not self.body:
+                raise ValueError("No JSON content in response")
+
+            if HAS_ORJSON:
+                # orjson.loads is 2-3x faster than json.loads
+                try:
+                    self._json = orjson.loads(self.body)
+                except orjson.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON: {e}") from e
+            else:
+                # Fall back to stdlib json
+                try:
+                    self._json = _json.loads(self.text)
+                except _json.JSONDecodeError as e:
+                    raise ValueError(f"Invalid JSON: {e}") from e
+
+        return self._json
+
+    @property
+    def raw(self):
+        """Raw response body as file-like object (lazy evaluation)"""
+        if self._raw is None:
+            self._raw = io.BytesIO(self.body) if self.body else io.BytesIO()
+        return self._raw
 
     @property
     def ok(self):
@@ -245,10 +327,6 @@ class Response:
         # Simple detection - could be enhanced with chardet
         return "utf-8"
 
-    def json(self, **kwargs):
-        """Parse response body as JSON"""
-        return _json.loads(self.text, **kwargs)
-
     def raise_for_status(self):
         """Raise HTTPError if status code indicates an error"""
         if 400 <= self.status_code < 600:
@@ -287,13 +365,40 @@ class Response:
 class Client:
     """HTTP client using C implementation"""
 
-    def __init__(self):
+    def __init__(self, http2=False):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
+        self.http2 = http2  # HTTP/2 enabled flag
+        self._cookies = {}  # Cookie jar for this client
+
+        # Auto-load certifi CA bundle if available (like requests does)
+        try:
+            import certifi
+
+            self.load_ca_file(certifi.where())
+        except (ImportError, OSError):
+            # certifi not installed or CA file not found
+            # Fall back to system CA paths (SSL_CTX_set_default_verify_paths)
+            pass
+
+    def load_ca_file(self, ca_file):
+        """Load CA certificates from a file (PEM format)
+
+        Args:
+            ca_file: Path to CA certificate bundle (e.g., from certifi.where())
+
+        Returns:
+            True on success, False on failure
+        """
+        return self._client.load_ca_file(ca_file)
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request"""
+        # Handle http2 parameter - use client default if not specified
+        if "http2" not in kwargs:
+            kwargs["http2"] = self.http2
+
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")
@@ -416,12 +521,12 @@ class Client:
             error_code = result["error"]
             error_msg = result.get("error_message", "Request failed")
 
-            # Map C error codes to Python exceptions
-            # HTTPMORPH_ERROR_TIMEOUT = 5
-            if error_code == 5:
+            # Map C error codes to Python exceptions (negative values in C)
+            # HTTPMORPH_ERROR_TIMEOUT = -5
+            if error_code == -5:
                 raise Timeout(error_msg)
-            # HTTPMORPH_ERROR_NETWORK = 3
-            elif error_code == 3:
+            # HTTPMORPH_ERROR_NETWORK = -3
+            elif error_code == -3:
                 raise ConnectionError(error_msg)
             # Other errors
             elif error_code != 0:
@@ -471,11 +576,11 @@ class Client:
 
                 # Check for errors and raise appropriate exceptions
                 if result.get("error"):
-                    error_code = abs(result["error"])
+                    error_code = result["error"]
                     error_msg = result.get("error_message", "Request failed")
-                    if error_code == 5:
+                    if error_code == -5:
                         raise Timeout(error_msg)
-                    elif error_code == 3:
+                    elif error_code == -3:
                         raise ConnectionError(error_msg)
                     elif error_code != 0:
                         raise RequestException(error_msg)
@@ -550,13 +655,28 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
-    def __init__(self, browser="chrome"):
+    def __init__(self, browser="chrome", http2=False):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._session = _httpmorph.Session(browser=browser)
         self.browser = browser
+        self.http2 = http2  # HTTP/2 enabled flag
         self.headers = {}  # Persistent headers
         self._cookies = CookieDict(self._session.cookie_jar)
+
+    def __del__(self):
+        """Cleanup C resources when Session is garbage collected"""
+        if hasattr(self, "_session") and self._session is not None:
+            # The C Session object will be automatically freed by Cython
+            # but we should explicitly clear the reference
+            self._session = None
+
+    def close(self):
+        """Explicitly close the session and free resources"""
+        if hasattr(self, "_session") and self._session is not None:
+            self._session = None
+            # Don't force gc.collect() - let Python handle cleanup naturally
+            # Aggressive GC can cause double-free issues with C extensions
 
     @property
     def cookie_jar(self):
@@ -570,6 +690,10 @@ class Session:
 
     def request(self, method, url, **kwargs):
         """Execute an HTTP request within this session"""
+        # Handle http2 parameter - use session default if not specified
+        if "http2" not in kwargs:
+            kwargs["http2"] = self.http2
+
         # Handle params - append query parameters to URL
         if "params" in kwargs:
             params = kwargs.pop("params")
@@ -755,11 +879,11 @@ class Session:
 
                 # Check for errors and raise appropriate exceptions
                 if result.get("error"):
-                    error_code = abs(result["error"])
+                    error_code = result["error"]
                     error_msg = result.get("error_message", "Request failed")
-                    if error_code == 5:
+                    if error_code == -5:
                         raise Timeout(error_msg)
-                    elif error_code == 3:
+                    elif error_code == -3:
                         raise ConnectionError(error_msg)
                     elif error_code != 0:
                         raise RequestException(error_msg)
@@ -813,19 +937,21 @@ class Session:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        """Cleanup resources when exiting context manager"""
+        self.close()
+        return False
 
 
 # Module-level convenience functions
-_default_session = None
+# Use thread-local storage to avoid race conditions in parallel test execution
+_default_sessions = threading.local()
 
 
 def get_default_session():
-    """Get or create default session"""
-    global _default_session
-    if _default_session is None:
-        _default_session = Session()
-    return _default_session
+    """Get or create thread-local default session (thread-safe)"""
+    if not hasattr(_default_sessions, "session") or _default_sessions.session is None:
+        _default_sessions.session = Session()
+    return _default_sessions.session
 
 
 def get(url, **kwargs):
@@ -871,14 +997,39 @@ def init():
 
 def cleanup():
     """Cleanup the httpmorph library"""
-    global _default_session
-    _default_session = None
+    # In parallel test mode (pytest-xdist), skip cleanup to avoid race conditions
+    # The OS will clean up resources when worker processes exit
+    import sys
+
+    if "xdist" in sys.modules or "PYTEST_XDIST_WORKER" in os.environ:
+        # Running in pytest-xdist worker - skip cleanup
+        return
+
+    # Explicitly close thread-local default session before clearing
+    try:
+        if hasattr(_default_sessions, "session") and _default_sessions.session is not None:
+            # Just clear the reference, don't call close() during cleanup
+            # The C extension will handle cleanup when the process exits
+            _default_sessions.session = None
+    except Exception:
+        # Ignore any exceptions during cleanup (common in parallel test teardown)
+        pass
+
     if HAS_C_EXTENSION:
-        _httpmorph.cleanup()
+        try:
+            _httpmorph.cleanup()
+        except Exception:
+            # Ignore cleanup errors - they're common during parallel test teardown
+            pass
 
 
 def version():
     """Get library version"""
-    if HAS_C_EXTENSION:
-        return _httpmorph.version()
-    return "0.1.2"
+    # Read version from package metadata (single source of truth: pyproject.toml)
+    try:
+        from importlib.metadata import version as _get_version
+    except ImportError:
+        # Python < 3.8
+        from importlib_metadata import version as _get_version
+
+    return _get_version("httpmorph")

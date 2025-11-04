@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  benchmark:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.benchmark
+    volumes:
+      # Mount benchmarks/results to persist results on host
+      - ../benchmarks/results:/workspace/benchmarks/results
+      # Mount .env for live updates (optional)
+      - ../.env:/workspace/.env:ro
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    # Override command to customize benchmark parameters
+    # Example: docker-compose -f docker/docker-compose.benchmark.yml run benchmark python benchmarks/benchmark.py --libraries httpmorph --sequential 3
+    command: python benchmarks/benchmark.py --sequential 10 --concurrent 25 --warmup 3
