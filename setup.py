@@ -8,6 +8,7 @@ This setup.py configures:
 3. Platform-specific optimizations (io_uring on Linux 5.1+)
 """
 
+import os
 import platform
 import sys
 from pathlib import Path
@@ -18,8 +19,14 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-from Cython.Build import cythonize
 from setuptools import Extension, setup
+
+# Detect if we're building on Read the Docs
+ON_READTHEDOCS = os.environ.get('READTHEDOCS') == 'True'
+
+# Skip C extensions on Read the Docs (docs don't need them)
+if not ON_READTHEDOCS:
+    from Cython.Build import cythonize
 
 # Read version from pyproject.toml (single source of truth)
 with open("pyproject.toml", "rb") as f:
@@ -366,108 +373,110 @@ def get_library_paths():
         }
 
 
-LIB_PATHS = get_library_paths()
+if not ON_READTHEDOCS:
+    LIB_PATHS = get_library_paths()
 
-# Debug output
-print("\nLibrary paths detected:")
-print(f"  BoringSSL include: {LIB_PATHS['openssl_include']}")
-print(f"  BoringSSL lib: {LIB_PATHS['openssl_lib']}")
-print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
-print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
-print()
+    # Debug output
+    print("\nLibrary paths detected:")
+    print(f"  BoringSSL include: {LIB_PATHS['openssl_include']}")
+    print(f"  BoringSSL lib: {LIB_PATHS['openssl_lib']}")
+    print(f"  nghttp2 include: {LIB_PATHS['nghttp2_include']}")
+    print(f"  nghttp2 lib: {LIB_PATHS['nghttp2_lib']}")
+    print()
 
-# Platform-specific compile args and libraries for extensions
-if IS_WINDOWS:
-    # Use /TP to compile as C++ (required for BoringSSL compatibility on Windows)
-    # Define WIN32, _WINDOWS, and OPENSSL_WINDOWS for proper BoringSSL compilation
-    EXT_COMPILE_ARGS = [
-        "/O2",
-        "/DHAVE_NGHTTP2",
-        "/DNGHTTP2_STATICLIB",  # Static linking for nghttp2
-        "/EHsc",
-        "/DWIN32",
-        "/D_WINDOWS",
-        "/DOPENSSL_WINDOWS",
-        "/D_WIN32",
-        # Force include windows_compat.h to define ssize_t properly for all compilation units
-        "/FIwindows_compat.h",
-        # Version information from pyproject.toml
-        f"/DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
-        f"/DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
-        f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
-    ]
-    # BoringSSL and nghttp2 library names on Windows (without .lib extension)
-    # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
-    # Detect which zlib we're using
-    vendor_dir = Path("vendor").resolve()
-    vendor_zlib = vendor_dir / "zlib"
-    if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
-        zlib_lib_name = "zlibstatic"
+# Platform-specific compile args and libraries for extensions (skip on RTD)
+if not ON_READTHEDOCS:
+    if IS_WINDOWS:
+        # Use /TP to compile as C++ (required for BoringSSL compatibility on Windows)
+        # Define WIN32, _WINDOWS, and OPENSSL_WINDOWS for proper BoringSSL compilation
+        EXT_COMPILE_ARGS = [
+            "/O2",
+            "/DHAVE_NGHTTP2",
+            "/DNGHTTP2_STATICLIB",  # Static linking for nghttp2
+            "/EHsc",
+            "/DWIN32",
+            "/D_WINDOWS",
+            "/DOPENSSL_WINDOWS",
+            "/D_WIN32",
+            # Force include windows_compat.h to define ssize_t properly for all compilation units
+            "/FIwindows_compat.h",
+            # Version information from pyproject.toml
+            f"/DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+            f"/DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+            f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
+        ]
+        # BoringSSL and nghttp2 library names on Windows (without .lib extension)
+        # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
+        # Detect which zlib we're using
+        vendor_dir = Path("vendor").resolve()
+        vendor_zlib = vendor_dir / "zlib"
+        if (vendor_zlib / "build" / "Release" / "zlibstatic.lib").exists():
+            zlib_lib_name = "zlibstatic"
+        else:
+            zlib_lib_name = "zlib"
+        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
+        EXT_LINK_ARGS = []  # No special linker flags for Windows
     else:
-        zlib_lib_name = "zlib"
-    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
-    EXT_LINK_ARGS = []  # No special linker flags for Windows
-else:
-    # Production optimized build
-    import platform
+        # Production optimized build
+        import platform
 
-    # Determine architecture-specific optimization flags
-    machine = platform.machine().lower()
-    arch_flags = []
+        # Determine architecture-specific optimization flags
+        machine = platform.machine().lower()
+        arch_flags = []
 
-    if machine in ["x86_64", "amd64", "i386", "i686"]:
-        # x86/x64 - use -march=native for optimal performance
-        arch_flags = ["-march=native"]
-    elif machine in ["arm64", "aarch64"] and not IS_MACOS:
-        # ARM on Linux - use -mcpu=native
-        arch_flags = ["-mcpu=native"]
-    # On macOS ARM64, skip -march/-mcpu flags as clang doesn't support them well
+        if machine in ["x86_64", "amd64", "i386", "i686"]:
+            # x86/x64 - use -march=native for optimal performance
+            arch_flags = ["-march=native"]
+        elif machine in ["arm64", "aarch64"] and not IS_MACOS:
+            # ARM on Linux - use -mcpu=native
+            arch_flags = ["-mcpu=native"]
+        # On macOS ARM64, skip -march/-mcpu flags as clang doesn't support them well
 
-    EXT_COMPILE_ARGS = [
-        "-std=c11",
-        "-O3",
-        *arch_flags,  # Add architecture-specific flags if any
-        "-ffast-math",
-        "-DHAVE_NGHTTP2",
-        # Version information from pyproject.toml
-        f"-DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
-        f"-DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
-        f"-DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
+        EXT_COMPILE_ARGS = [
+            "-std=c11",
+            "-O3",
+            *arch_flags,  # Add architecture-specific flags if any
+            "-ffast-math",
+            "-DHAVE_NGHTTP2",
+            # Version information from pyproject.toml
+            f"-DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
+            f"-DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
+            f"-DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
+        ]
+        EXT_LINK_ARGS = []
+
+        # Unix library names
+        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
+
+    # Define C extension modules
+    # Build library directories list
+    BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
+
+    # Build include and library directory lists
+    INCLUDE_DIRS = [
+        str(INCLUDE_DIR),
+        str(CORE_DIR),
+        str(CORE_DIR / "internal"),  # Add internal headers directory for modular architecture
+        str(TLS_DIR),
+        str(SRC_DIR / "include"),  # Add src/include for windows_compat.h
+        LIB_PATHS["openssl_include"],
+        LIB_PATHS["nghttp2_include"],
     ]
-    EXT_LINK_ARGS = []
 
-    # Unix library names
-    EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
+    LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
 
-# Define C extension modules
-# Build library directories list
-BORINGSSL_LIB_DIRS = [LIB_PATHS["openssl_lib"]]
+    # Add zlib paths on Windows if available
+    if IS_WINDOWS and LIB_PATHS.get("zlib_include"):
+        zlib_inc = LIB_PATHS["zlib_include"]
+        if isinstance(zlib_inc, list):
+            INCLUDE_DIRS.extend(zlib_inc)
+        else:
+            INCLUDE_DIRS.append(zlib_inc)
+        LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
 
-# Build include and library directory lists
-INCLUDE_DIRS = [
-    str(INCLUDE_DIR),
-    str(CORE_DIR),
-    str(CORE_DIR / "internal"),  # Add internal headers directory for modular architecture
-    str(TLS_DIR),
-    str(SRC_DIR / "include"),  # Add src/include for windows_compat.h
-    LIB_PATHS["openssl_include"],
-    LIB_PATHS["nghttp2_include"],
-]
-
-LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
-
-# Add zlib paths on Windows if available
-if IS_WINDOWS and LIB_PATHS.get("zlib_include"):
-    zlib_inc = LIB_PATHS["zlib_include"]
-    if isinstance(zlib_inc, list):
-        INCLUDE_DIRS.extend(zlib_inc)
-    else:
-        INCLUDE_DIRS.append(zlib_inc)
-    LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
-
-extensions = [
-    # Main httpmorph C extension
-    Extension(
+    extensions = [
+        # Main httpmorph C extension
+        Extension(
         "httpmorph._httpmorph",
         sources=[
             str(BINDINGS_DIR / "_httpmorph.pyx"),
@@ -550,19 +559,24 @@ extensions = [
     ),
 ]
 
-# Cythonize extensions
-ext_modules = cythonize(
-    extensions,
-    compiler_directives={
-        "language_level": "3",
-        "embedsignature": True,
-        "boundscheck": False,  # Disable bounds checking for speed
-        "wraparound": False,  # Disable negative indexing for speed
-        "cdivision": True,  # Use C division semantics
-        "initializedcheck": False,  # Disable initialization checks for speed
-    },
-    annotate=True,  # Generate HTML annotation files
-)
+# Cythonize extensions (skip on Read the Docs)
+if ON_READTHEDOCS:
+    # On Read the Docs, skip C extensions (docs don't need them)
+    print("Skipping C extension build on Read the Docs")
+    ext_modules = []
+else:
+    ext_modules = cythonize(
+        extensions,
+        compiler_directives={
+            "language_level": "3",
+            "embedsignature": True,
+            "boundscheck": False,  # Disable bounds checking for speed
+            "wraparound": False,  # Disable negative indexing for speed
+            "cdivision": True,  # Use C division semantics
+            "initializedcheck": False,  # Disable initialization checks for speed
+        },
+        annotate=True,  # Generate HTML annotation files
+    )
 
 if __name__ == "__main__":
     setup(ext_modules=ext_modules)
