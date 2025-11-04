@@ -31,11 +31,29 @@ jobs:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================
+  # Build Test Jobs
+  # ============================================================
+  build-test-linux:
+    name: Build Test (Linux)
+    needs: load-config
+    uses: ./.github/workflows/_build_linux.yml
+
+  build-test-macos:
+    name: Build Test (macOS)
+    needs: load-config
+    uses: ./.github/workflows/_build_macos.yml
+
+  build-test-windows:
+    name: Build Test (Windows)
+    needs: load-config
+    uses: ./.github/workflows/_build_windows.yml
+
+  # ============================================================
   # Summary
   # ============================================================
   summary:
     name: CI Summary
-    needs: [load-config, test]
+    needs: [load-config, test, build-test-linux, build-test-macos, build-test-windows]
     if: always()
     runs-on: ubuntu-latest
 
@@ -57,6 +75,40 @@ jobs:
           fi
         else
           echo "⊘ Tests: DISABLED"
+        fi
+
+        # Build Tests
+        echo ""
+        echo "Build Tests:"
+
+        # Linux
+        if [ "${{ needs.build-test-linux.result }}" == "success" ]; then
+          echo "  ✅ Linux: PASSED"
+        elif [ "${{ needs.build-test-linux.result }}" == "skipped" ]; then
+          echo "  ⊘ Linux: SKIPPED"
+        else
+          echo "  ❌ Linux: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # macOS
+        if [ "${{ needs.build-test-macos.result }}" == "success" ]; then
+          echo "  ✅ macOS: PASSED"
+        elif [ "${{ needs.build-test-macos.result }}" == "skipped" ]; then
+          echo "  ⊘ macOS: SKIPPED"
+        else
+          echo "  ❌ macOS: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # Windows
+        if [ "${{ needs.build-test-windows.result }}" == "success" ]; then
+          echo "  ✅ Windows: PASSED"
+        elif [ "${{ needs.build-test-windows.result }}" == "skipped" ]; then
+          echo "  ⊘ Windows: SKIPPED"
+        else
+          echo "  ❌ Windows: FAILED"
+          EXIT_CODE=1
         fi
 
         echo ""
