@@ -9,9 +9,15 @@ This setup.py configures:
 """
 
 import platform
+import sys
 from pathlib import Path
 
-import tomllib
+# tomllib is only available in Python 3.11+, use tomli for older versions
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
+
 from Cython.Build import cythonize
 from setuptools import Extension, setup
 
