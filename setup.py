@@ -150,34 +150,62 @@ def get_library_paths():
     import subprocess
 
     if IS_MACOS:
-        # Try Homebrew paths
-        try:
-            openssl_prefix = (
-                subprocess.check_output(
-                    ["brew", "--prefix", "openssl@3"], stderr=subprocess.DEVNULL
-                )
-                .decode()
-                .strip()
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            openssl_prefix = "/opt/homebrew/opt/openssl@3"
+        # Use vendor dependencies if available, otherwise fall back to Homebrew
+        vendor_dir = Path("vendor").resolve()
 
-        try:
-            nghttp2_prefix = (
-                subprocess.check_output(
-                    ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+        # Check if vendor BoringSSL exists
+        vendor_boringssl = vendor_dir / "boringssl"
+        if vendor_boringssl.exists() and (vendor_boringssl / "include").exists():
+            openssl_include = str(vendor_boringssl / "include")
+            # Check both possible locations for libssl.a
+            if (vendor_boringssl / "build" / "ssl").exists():
+                openssl_lib = str(vendor_boringssl / "build")
+            else:
+                openssl_lib = str(vendor_boringssl / "build")
+            print(f"Using vendor BoringSSL from: {vendor_boringssl}")
+        else:
+            # Fall back to Homebrew OpenSSL
+            try:
+                openssl_prefix = (
+                    subprocess.check_output(
+                        ["brew", "--prefix", "openssl@3"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
                 )
-                .decode()
-                .strip()
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                openssl_prefix = "/opt/homebrew/opt/openssl@3"
+            openssl_include = f"{openssl_prefix}/include"
+            openssl_lib = f"{openssl_prefix}/lib"
+            print(f"Using Homebrew OpenSSL from: {openssl_prefix}")
+
+        # Check if vendor nghttp2 exists
+        vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
+        if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
+            nghttp2_include = str(vendor_nghttp2 / "include")
+            nghttp2_lib = str(vendor_nghttp2 / "lib")
+            print(f"Using vendor nghttp2 from: {vendor_nghttp2}")
+        else:
+            # Fall back to Homebrew nghttp2
+            try:
+                nghttp2_prefix = (
+                    subprocess.check_output(
+                        ["brew", "--prefix", "libnghttp2"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                nghttp2_prefix = "/opt/homebrew/opt/libnghttp2"
+            nghttp2_include = f"{nghttp2_prefix}/include"
+            nghttp2_lib = f"{nghttp2_prefix}/lib"
+            print(f"Using Homebrew nghttp2 from: {nghttp2_prefix}")
 
         return {
-            "openssl_include": f"{openssl_prefix}/include",
-            "openssl_lib": f"{openssl_prefix}/lib",
-            "nghttp2_include": f"{nghttp2_prefix}/include",
-            "nghttp2_lib": f"{nghttp2_prefix}/lib",
+            "openssl_include": openssl_include,
+            "openssl_lib": openssl_lib,
+            "nghttp2_include": nghttp2_include,
+            "nghttp2_lib": nghttp2_lib,
         }
 
     elif IS_LINUX:
@@ -446,7 +474,13 @@ if not ON_READTHEDOCS:
         EXT_LINK_ARGS = []
 
         # Unix library names
-        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
+        if IS_MACOS:
+            # On macOS, use empty libraries list and specify full paths to static libs
+            # This ensures we link against vendor .a files, not Homebrew .dylib files
+            EXT_LIBRARIES = ["z"]  # Only z (zlib) which is always available as static on macOS
+        else:
+            # Linux - use library names (will find .a or .so)
+            EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
     # Define C extension modules
     # Build library directories list
@@ -473,6 +507,30 @@ if not ON_READTHEDOCS:
         else:
             INCLUDE_DIRS.append(zlib_inc)
         LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
+
+    # On macOS, explicitly link against static libraries to avoid Homebrew dylibs
+    EXTRA_OBJECTS = []
+    if IS_MACOS:
+        vendor_dir = Path("vendor").resolve()
+
+        # BoringSSL static libraries (check both possible locations)
+        boringssl_build = vendor_dir / "boringssl" / "build"
+        if (boringssl_build / "ssl" / "libssl.a").exists():
+            EXTRA_OBJECTS.append(str(boringssl_build / "ssl" / "libssl.a"))
+            EXTRA_OBJECTS.append(str(boringssl_build / "crypto" / "libcrypto.a"))
+        elif (boringssl_build / "libssl.a").exists():
+            EXTRA_OBJECTS.append(str(boringssl_build / "libssl.a"))
+            EXTRA_OBJECTS.append(str(boringssl_build / "libcrypto.a"))
+
+        # nghttp2 static library
+        nghttp2_lib = vendor_dir / "nghttp2" / "install" / "lib" / "libnghttp2.a"
+        if nghttp2_lib.exists():
+            EXTRA_OBJECTS.append(str(nghttp2_lib))
+
+        if EXTRA_OBJECTS:
+            print(f"\nUsing static libraries on macOS:")
+            for obj in EXTRA_OBJECTS:
+                print(f"  {obj}")
 
     extensions = [
         # Main httpmorph C extension
@@ -512,6 +570,7 @@ if not ON_READTHEDOCS:
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
             extra_link_args=EXT_LINK_ARGS,
+            extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
             language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
         ),
         # HTTP/2 client extension
@@ -526,6 +585,7 @@ if not ON_READTHEDOCS:
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
             extra_link_args=EXT_LINK_ARGS,
+            extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
             language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
         ),
         # Async I/O extension (new!)
@@ -555,6 +615,7 @@ if not ON_READTHEDOCS:
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
             extra_link_args=EXT_LINK_ARGS,
+            extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
             language="c++" if IS_WINDOWS else "c",
         ),
     ]
