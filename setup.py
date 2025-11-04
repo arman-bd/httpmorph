@@ -446,24 +446,12 @@ if not ON_READTHEDOCS:
         EXT_LINK_ARGS = []  # No special linker flags for Windows
     else:
         # Production optimized build
-        # Determine architecture-specific optimization flags
-        # Only use -march=native on Linux x86_64 (macOS has issues with it)
-        arch_flags = []
-
-        if not IS_MACOS:
-            machine = platform.machine().lower()
-            if machine in ["x86_64", "amd64", "i386", "i686"]:
-                # x86/x64 on Linux - use -march=native for optimal performance
-                arch_flags = ["-march=native"]
-            elif machine in ["arm64", "aarch64"]:
-                # ARM on Linux - use -mcpu=native
-                arch_flags = ["-mcpu=native"]
-        # On macOS, skip architecture-specific flags entirely to avoid cross-compile issues
-
+        # Skip architecture-specific flags (-march=native, -mcpu=native) for portable wheels
+        # These flags optimize for the build machine's CPU but create non-portable binaries
+        # that fail with "Illegal instruction" on different CPUs
         EXT_COMPILE_ARGS = [
             "-std=c11",
             "-O3",
-            *arch_flags,  # Add architecture-specific flags if any
             "-ffast-math",
             "-DHAVE_NGHTTP2",
             # Version information from pyproject.toml
