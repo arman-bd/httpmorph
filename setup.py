@@ -528,7 +528,7 @@ if not ON_READTHEDOCS:
             EXTRA_OBJECTS.append(str(nghttp2_lib))
 
         if EXTRA_OBJECTS:
-            print(f"\nUsing static libraries on macOS:")
+            print("\nUsing static libraries on macOS:")
             for obj in EXTRA_OBJECTS:
                 print(f"  {obj}")
 

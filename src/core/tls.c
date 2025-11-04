@@ -270,7 +270,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 2. Cipher Suites - use browser profile's cipher list to make it unique */
     if (p < end) *p++ = ',';
     if (profile && profile->cipher_suite_count > 0) {
-        for (size_t i = 0; i < profile->cipher_suite_count && p < end; i++) {
+        for (int i = 0; i < profile->cipher_suite_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->cipher_suites[i]);
             if (written > 0 && written < (end - p)) p += written;
@@ -288,7 +288,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 3. Extensions - use browser profile's extension list */
     if (p < end) *p++ = ',';
     if (profile && profile->extension_count > 0) {
-        for (size_t i = 0; i < profile->extension_count && p < end; i++) {
+        for (int i = 0; i < profile->extension_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->extensions[i]);
             if (written > 0 && written < (end - p)) p += written;
@@ -302,7 +302,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 4. Elliptic Curves - use browser profile's curve list */
     if (p < end) *p++ = ',';
     if (profile && profile->curve_count > 0) {
-        for (size_t i = 0; i < profile->curve_count && p < end; i++) {
+        for (int i = 0; i < profile->curve_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->curves[i]);
             if (written > 0 && written < (end - p)) p += written;
