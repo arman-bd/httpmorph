@@ -411,10 +411,22 @@ else:
     # Production optimized build
     import platform
 
+    # Determine architecture-specific optimization flags
+    machine = platform.machine().lower()
+    arch_flags = []
+
+    if machine in ["x86_64", "amd64", "i386", "i686"]:
+        # x86/x64 - use -march=native for optimal performance
+        arch_flags = ["-march=native"]
+    elif machine in ["arm64", "aarch64"] and not IS_MACOS:
+        # ARM on Linux - use -mcpu=native
+        arch_flags = ["-mcpu=native"]
+    # On macOS ARM64, skip -march/-mcpu flags as clang doesn't support them well
+
     EXT_COMPILE_ARGS = [
         "-std=c11",
         "-O3",
-        "-march=native" if platform.machine() in ["x86_64", "AMD64"] else "-mcpu=native",
+        *arch_flags,  # Add architecture-specific flags if any
         "-ffast-math",
         "-DHAVE_NGHTTP2",
         # Version information from pyproject.toml
