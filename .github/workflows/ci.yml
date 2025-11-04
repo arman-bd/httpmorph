@@ -26,6 +26,9 @@ jobs:
       python-matrix: ${{ needs.load-config.outputs.python-matrix }}
       primary-os: ${{ needs.load-config.outputs.primary-os }}
       primary-python: ${{ needs.load-config.outputs.primary-python }}
+    secrets:
+      TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================
   # Summary

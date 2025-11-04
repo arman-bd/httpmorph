@@ -8,6 +8,17 @@
 #include <string.h>
 #include <inttypes.h>  /* for PRIu64 */
 
+/* Debug output control */
+#ifdef HTTPMORPH_DEBUG
+    #define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+    #define DEBUG_PRINT(...) ((void)0)
+#endif
+
+#ifdef _WIN32
+#include "iocp_dispatcher.h"
+#endif
+
 /* Platform-specific headers */
 #ifdef _WIN32
     #include <winsock2.h>
@@ -24,6 +35,11 @@
 
 #ifdef __linux__
 #include <sys/epoll.h>
+#endif
+
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
 #endif
 
 #ifdef HAVE_IO_URING
@@ -58,6 +74,7 @@ const char* io_engine_type_name(io_engine_type_t type) {
         case IO_ENGINE_URING:  return "io_uring";
         case IO_ENGINE_EPOLL:  return "epoll";
         case IO_ENGINE_KQUEUE: return "kqueue";
+        case IO_ENGINE_IOCP:   return "iocp";
         default:               return "unknown";
     }
 }
@@ -83,6 +100,71 @@ static io_engine_t* io_engine_create_epoll(void) {
     return engine;
 #else
     /* Not supported on non-Linux */
+    return NULL;
+#endif
+}
+
+/**
+ * Create kqueue-based engine (macOS/BSD)
+ */
+static io_engine_t* io_engine_create_kqueue(void) {
+#ifdef __APPLE__
+    io_engine_t *engine = calloc(1, sizeof(io_engine_t));
+    if (!engine) {
+        return NULL;
+    }
+
+    engine->type = IO_ENGINE_KQUEUE;
+    engine->engine_fd = kqueue();
+
+    if (engine->engine_fd < 0) {
+        free(engine);
+        return NULL;
+    }
+
+    /* Set close-on-exec flag */
+    fcntl(engine->engine_fd, F_SETFD, FD_CLOEXEC);
+
+    return engine;
+#else
+    /* Not supported on non-macOS */
+    return NULL;
+#endif
+}
+
+/**
+ * Create IOCP-based engine (Windows)
+ */
+static io_engine_t* io_engine_create_iocp(void) {
+#ifdef _WIN32
+    io_engine_t *engine = calloc(1, sizeof(io_engine_t));
+    if (!engine) {
+        return NULL;
+    }
+
+    engine->type = IO_ENGINE_IOCP;
+
+    /* Create I/O completion port */
+    engine->iocp_handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+
+    if (engine->iocp_handle == NULL) {
+        free(engine);
+        return NULL;
+    }
+
+    /* Start the IOCP completion dispatcher thread */
+    if (iocp_dispatcher_start(engine) != 0) {
+        DEBUG_PRINT("[io_engine] Failed to start IOCP dispatcher\n");
+        CloseHandle((HANDLE)engine->iocp_handle);
+        free(engine);
+        return NULL;
+    }
+
+    engine->engine_fd = -1;  /* IOCP doesn't use traditional fd */
+    DEBUG_PRINT("[io_engine] IOCP engine created with dispatcher thread\n");
+    return engine;
+#else
+    /* Not supported on non-Windows */
     return NULL;
 #endif
 }
@@ -135,21 +217,35 @@ io_engine_t* io_engine_create(uint32_t queue_depth) {
     if (io_engine_has_uring()) {
         io_engine_t *engine = io_engine_create_uring(queue_depth);
         if (engine) {
-            printf("[io_engine] Using io_uring (queue_depth=%u)\n", queue_depth);
+            DEBUG_PRINT("[io_engine] Using io_uring (queue_depth=%u)\n", queue_depth);
             return engine;
         }
     }
 #endif
 
-    /* Fall back to epoll on Linux, or basic mode on macOS */
-    io_engine_t *engine = io_engine_create_epoll();
+    /* Try IOCP on Windows */
+    io_engine_t *engine = io_engine_create_iocp();
     if (engine) {
-        printf("[io_engine] Using epoll\n");
+        DEBUG_PRINT("[io_engine] Using IOCP (Windows)\n");
         return engine;
     }
 
-    /* Basic fallback for macOS - no async engine */
-    printf("[io_engine] Using synchronous I/O (no epoll/io_uring available)\n");
+    /* Try epoll on Linux */
+    engine = io_engine_create_epoll();
+    if (engine) {
+        DEBUG_PRINT("[io_engine] Using epoll\n");
+        return engine;
+    }
+
+    /* Try kqueue on macOS */
+    engine = io_engine_create_kqueue();
+    if (engine) {
+        DEBUG_PRINT("[io_engine] Using kqueue\n");
+        return engine;
+    }
+
+    /* Basic fallback - synchronous I/O */
+    DEBUG_PRINT("[io_engine] Using synchronous I/O (no IOCP/epoll/kqueue/io_uring available)\n");
     engine = calloc(1, sizeof(io_engine_t));
     if (engine) {
         engine->type = IO_ENGINE_EPOLL;  /* Placeholder */
@@ -170,18 +266,116 @@ void io_engine_destroy(io_engine_t *engine) {
     if (engine->type == IO_ENGINE_URING && engine->ring) {
         io_uring_queue_exit(engine->ring);
         free(engine->ring);
+        engine->ring = NULL;
+    }
+#endif
+
+#ifdef _WIN32
+    if (engine->type == IO_ENGINE_IOCP && engine->iocp_handle) {
+        /* Stop the dispatcher thread first */
+        iocp_dispatcher_stop(engine);
+
+        /* Then close the IOCP handle */
+        CloseHandle(engine->iocp_handle);
+        engine->iocp_handle = NULL;
     }
 #endif
 
     if (engine->engine_fd >= 0) {
         close(engine->engine_fd);
+        engine->engine_fd = -1;
     }
 
-    printf("[io_engine] Stats - submitted: %" PRIu64 ", completed: %" PRIu64 ", failed: %" PRIu64 "\n",
-           engine->ops_submitted, engine->ops_completed, engine->ops_failed);
+    /* Only print stats if there was actual activity */
+    if (engine->ops_submitted > 0 || engine->ops_completed > 0 || engine->ops_failed > 0) {
+        /* Avoid printf during program exit - can cause crashes */
+        fprintf(stderr, "[io_engine] Stats - submitted: %" PRIu64 ", completed: %" PRIu64 ", failed: %" PRIu64 "\n",
+               engine->ops_submitted, engine->ops_completed, engine->ops_failed);
+    }
 
     free(engine);
 }
+
+/**
+ * Submit an I/O operation - epoll implementation
+ */
+#ifdef __linux__
+static int io_engine_submit_epoll(io_engine_t *engine, io_operation_t *op) {
+    struct epoll_event ev = {0};
+
+    switch (op->type) {
+        case IO_OP_RECV:
+            ev.events = EPOLLIN | EPOLLET;  /* Edge-triggered read */
+            break;
+        case IO_OP_SEND:
+            ev.events = EPOLLOUT | EPOLLET;  /* Edge-triggered write */
+            break;
+        case IO_OP_CONNECT:
+            ev.events = EPOLLOUT | EPOLLET;  /* Connect completes on writable */
+            break;
+        default:
+            return -1;
+    }
+
+    ev.data.ptr = op;  /* Store operation pointer in event data */
+
+    if (epoll_ctl(engine->engine_fd, EPOLL_CTL_ADD, op->fd, &ev) < 0) {
+        /* If already exists, modify instead */
+        if (errno == EEXIST) {
+            if (epoll_ctl(engine->engine_fd, EPOLL_CTL_MOD, op->fd, &ev) < 0) {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
+
+/**
+ * Submit an I/O operation - kqueue implementation
+ */
+#ifdef __APPLE__
+static int io_engine_submit_kqueue(io_engine_t *engine, io_operation_t *op) {
+    struct kevent kev;
+
+    switch (op->type) {
+        case IO_OP_RECV:
+            EV_SET(&kev, op->fd, EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, op);
+            break;
+        case IO_OP_SEND:
+        case IO_OP_CONNECT:
+            EV_SET(&kev, op->fd, EVFILT_WRITE, EV_ADD | EV_ONESHOT, 0, 0, op);
+            break;
+        default:
+            return -1;
+    }
+
+    if (kevent(engine->engine_fd, &kev, 1, NULL, 0, NULL) < 0) {
+        return -1;
+    }
+
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
+
+/**
+ * Submit an I/O operation - IOCP implementation
+ * Note: Current implementation is a placeholder for readiness-based polling.
+ * Full IOCP requires overlapped I/O operations which need architectural changes.
+ */
+#ifdef _WIN32
+static int io_engine_submit_iocp(io_engine_t *engine, io_operation_t *op) {
+    /* For now, just track the operation without actually submitting to IOCP */
+    /* This allows the async code to use the polling fallback mechanism */
+    engine->ops_submitted++;
+    return 0;
+}
+#endif
 
 /**
  * Submit an I/O operation
@@ -191,8 +385,22 @@ int io_engine_submit(io_engine_t *engine, io_operation_t *op) {
         return -1;
     }
 
-    /* For now, just a placeholder */
-    return 0;
+    switch (engine->type) {
+#ifdef __linux__
+        case IO_ENGINE_EPOLL:
+            return io_engine_submit_epoll(engine, op);
+#endif
+#ifdef __APPLE__
+        case IO_ENGINE_KQUEUE:
+            return io_engine_submit_kqueue(engine, op);
+#endif
+#ifdef _WIN32
+        case IO_ENGINE_IOCP:
+            return io_engine_submit_iocp(engine, op);
+#endif
+        default:
+            return -1;
+    }
 }
 
 /**
@@ -214,6 +422,109 @@ int io_engine_submit_batch(io_engine_t *engine, io_operation_t **ops, size_t cou
 }
 
 /**
+ * Wait for I/O completions - epoll implementation
+ */
+#ifdef __linux__
+static int epoll_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    struct epoll_event events[MAX_EVENTS];
+    int n = epoll_wait(engine->engine_fd, events, MAX_EVENTS, timeout_ms);
+
+    if (n < 0) {
+        if (errno == EINTR) {
+            return 0;  /* Interrupted, try again */
+        }
+        return -1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        io_operation_t *op = (io_operation_t*)events[i].data.ptr;
+        if (!op) {
+            continue;
+        }
+
+        /* Determine result based on events */
+        if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+            op->result = -1;
+            engine->ops_failed++;
+        } else {
+            op->result = 0;
+            engine->ops_completed++;
+        }
+
+        /* Invoke callback if registered */
+        if (op->callback) {
+            op->callback(op);
+        }
+    }
+
+    return n;
+}
+#endif
+
+/**
+ * Wait for I/O completions - kqueue implementation
+ */
+#ifdef __APPLE__
+static int kqueue_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    struct kevent events[MAX_EVENTS];
+    struct timespec timeout;
+
+    /* Convert milliseconds to timespec */
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_nsec = (timeout_ms % 1000) * 1000000;
+
+    int n = kevent(engine->engine_fd, NULL, 0, events, MAX_EVENTS, &timeout);
+
+    if (n < 0) {
+        if (errno == EINTR) {
+            return 0;  /* Interrupted, try again */
+        }
+        return -1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        io_operation_t *op = (io_operation_t*)events[i].udata;
+        if (!op) {
+            continue;
+        }
+
+        /* Determine result based on flags */
+        if (events[i].flags & EV_ERROR) {
+            op->result = -1;
+            engine->ops_failed++;
+        } else {
+            op->result = (int)events[i].data;  /* Number of bytes available */
+            engine->ops_completed++;
+        }
+
+        /* Invoke callback if registered */
+        if (op->callback) {
+            op->callback(op);
+        }
+    }
+
+    return n;
+}
+#endif
+
+/**
+ * Wait for I/O completions - IOCP implementation
+ * Add sleep to allow I/O operations (including SSL handshakes) to progress
+ */
+#ifdef _WIN32
+static int iocp_wait_events(io_engine_t *engine, uint32_t timeout_ms) {
+    (void)engine;  /* Unused */
+
+    /* Sleep to allow I/O operations to complete */
+    /* SSL operations especially need time for system-level I/O */
+    DWORD sleep_ms = (timeout_ms > 0 && timeout_ms < 50) ? timeout_ms : 50;
+    Sleep(sleep_ms);
+
+    return 0;  /* No specific events - requests will be stepped on next poll */
+}
+#endif
+
+/**
  * Wait for I/O completions
  */
 int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
@@ -221,8 +532,22 @@ int io_engine_wait(io_engine_t *engine, uint32_t timeout_ms) {
         return -1;
     }
 
-    /* Placeholder */
-    return 0;
+    switch (engine->type) {
+#ifdef __linux__
+        case IO_ENGINE_EPOLL:
+            return epoll_wait_events(engine, timeout_ms);
+#endif
+#ifdef __APPLE__
+        case IO_ENGINE_KQUEUE:
+            return kqueue_wait_events(engine, timeout_ms);
+#endif
+#ifdef _WIN32
+        case IO_ENGINE_IOCP:
+            return iocp_wait_events(engine, timeout_ms);
+#endif
+        default:
+            return -1;
+    }
 }
 
 /**
@@ -233,7 +558,8 @@ int io_engine_process_completions(io_engine_t *engine) {
         return -1;
     }
 
-    /* Placeholder */
+    /* For epoll/kqueue, callbacks are invoked in wait function */
+    /* This function can be used for additional post-processing if needed */
     return 0;
 }
 

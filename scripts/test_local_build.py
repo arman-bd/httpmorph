@@ -21,6 +21,7 @@ def test_import():
     print("=" * 60)
     try:
         import httpmorph
+
         print("[OK] Successfully imported httpmorph")
         print(f"  Location: {httpmorph.__file__}")
         return True
@@ -37,9 +38,10 @@ def test_version():
     print("=" * 60)
     try:
         import httpmorph
-        if hasattr(httpmorph, '__version__'):
+
+        if hasattr(httpmorph, "__version__"):
             print(f"[OK] Version: {httpmorph.__version__}")
-        elif hasattr(httpmorph, 'version'):
+        elif hasattr(httpmorph, "version"):
             version = httpmorph.version()
             print(f"[OK] Version: {version}")
         else:
@@ -57,17 +59,17 @@ def test_c_extensions():
     print("TEST 3: C Extensions")
     print("=" * 60)
     try:
-        import httpmorph
-
         # Try to import C extension modules
         try:
-            from httpmorph import _httpmorph
+            from httpmorph import _httpmorph  # noqa: F401
+
             print("[OK] C extension '_httpmorph' loaded successfully")
         except ImportError as e:
             print(f"[SKIP] C extension '_httpmorph' not available: {e}")
 
         try:
-            from httpmorph import _http2
+            from httpmorph import _http2  # noqa: F401
+
             print("[OK] C extension '_http2' loaded successfully")
         except ImportError as e:
             print(f"[SKIP] C extension '_http2' not available: {e}")
@@ -87,8 +89,8 @@ def test_client_creation():
     try:
         import httpmorph
 
-        if hasattr(httpmorph, 'Client'):
-            client = httpmorph.Client()
+        if hasattr(httpmorph, "Client"):
+            httpmorph.Client()
             print("[OK] Client created successfully")
             return True
         else:
@@ -108,14 +110,14 @@ def test_session_creation():
     try:
         import httpmorph
 
-        if not hasattr(httpmorph, 'Session'):
+        if not hasattr(httpmorph, "Session"):
             print("[SKIP] Session class not yet implemented (optional)")
             return True
 
         browsers = ["chrome", "firefox", "safari", "edge"]
         for browser in browsers:
             try:
-                session = httpmorph.Session(browser=browser)
+                httpmorph.Session(browser=browser)
                 print(f"[OK] Session created with browser: {browser}")
             except Exception as e:
                 print(f"[SKIP] Session creation with {browser} failed: {e}")
@@ -135,7 +137,7 @@ def test_simple_request():
     try:
         import httpmorph
 
-        if not hasattr(httpmorph, 'get'):
+        if not hasattr(httpmorph, "get"):
             print("[SKIP] httpmorph.get() not yet implemented (optional)")
             return True
 
@@ -143,17 +145,17 @@ def test_simple_request():
         print("Making GET request to https://icanhazip.com/...")
         response = httpmorph.get("https://icanhazip.com/", timeout=10)
 
-        if hasattr(response, 'status_code'):
+        if hasattr(response, "status_code"):
             print(f"[OK] Request successful, status code: {response.status_code}")
 
             if response.status_code == 200:
                 print("[OK] Request returned 200 OK")
 
                 # Check if we can access the response body
-                if hasattr(response, 'body'):
+                if hasattr(response, "body"):
                     body_len = len(response.body) if response.body else 0
                     print(f"[OK] Response body received ({body_len} bytes)")
-                elif hasattr(response, 'text'):
+                elif hasattr(response, "text"):
                     text_len = len(response.text) if response.text else 0
                     print(f"[OK] Response text received ({text_len} bytes)")
 
@@ -183,16 +185,15 @@ def test_dll_loading_windows():
 
     try:
         import httpmorph
-        import os
 
         # Check if BoringSSL DLLs are accessible
         # On Windows, the wheel should bundle all necessary DLLs
         print("[OK] All required DLLs loaded successfully (implicit)")
 
         # Try to trigger SSL/TLS functionality to ensure crypto libs work
-        if hasattr(httpmorph, 'Session'):
+        if hasattr(httpmorph, "Session"):
             try:
-                session = httpmorph.Session(browser="chrome")
+                httpmorph.Session(browser="chrome")
                 print("[OK] TLS/SSL libraries are functional")
             except Exception as e:
                 print(f"[SKIP] TLS/SSL test skipped: {e}")
