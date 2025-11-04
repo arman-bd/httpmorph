@@ -89,3 +89,11 @@ License
 -------
 
 MIT License
+
+Author
+------
+
+**Arman Hossain**
+
+- GitHub: `arman-bd <https://github.com/arman-bd>`_
+- Email: arman@bytetunnels.com

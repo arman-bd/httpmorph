@@ -17,6 +17,7 @@ except ImportError:
 
 __version__ = _get_version("httpmorph")
 __author__ = "Arman Hossain"
+__email__ = "arman@bytetunnels.com"
 __license__ = "MIT"
 
 # Import C implementation (required - no fallback!)

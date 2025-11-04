@@ -11,6 +11,44 @@
 #pragma comment(lib, "crypt32.lib")
 #endif
 
+/* OpenSSL 1.0.x compatibility */
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+/* EVP_MD_CTX functions renamed in 1.1.0 */
+#define EVP_MD_CTX_new EVP_MD_CTX_create
+#define EVP_MD_CTX_free EVP_MD_CTX_destroy
+
+/* TLS_client_method introduced in 1.1.0, was SSLv23_client_method */
+#define TLS_client_method SSLv23_client_method
+
+/* Protocol version setters introduced in 1.1.0 */
+static inline int SSL_CTX_set_min_proto_version(SSL_CTX *ctx, int version) {
+    /* OpenSSL 1.0.x doesn't support setting min/max versions dynamically */
+    /* The best we can do is disable older protocols */
+    long opts = SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
+    if (version >= TLS1_1_VERSION) opts |= SSL_OP_NO_TLSv1;
+    if (version >= TLS1_2_VERSION) opts |= SSL_OP_NO_TLSv1_1;
+    SSL_CTX_set_options(ctx, opts);
+    return 1;
+}
+
+static inline int SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
+    /* OpenSSL 1.0.x doesn't support setting max version */
+    /* We can only disable protocols, not set an upper bound */
+    (void)ctx;
+    (void)version;
+    return 1;
+}
+
+/* X25519 curve introduced in 1.1.0 */
+#ifndef NID_X25519
+#define NID_X25519 0  /* Not available in OpenSSL 1.0.x */
+#endif
+
+/* SSL_CTX_set1_groups introduced in 1.1.0, was SSL_CTX_set1_curves_list */
+#define SSL_CTX_set1_groups(ctx, glist, glistlen) \
+    SSL_CTX_set_ecdh_auto(ctx, 1)
+#endif
+
 /**
  * Configure SSL context with browser profile
  */
@@ -21,7 +59,11 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
 
     /* Set TLS version range */
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+#ifdef TLS1_3_VERSION
     SSL_CTX_set_max_proto_version(ctx, TLS1_3_VERSION);
+#else
+    SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
+#endif
 
     /* Build cipher list string from profile */
     char cipher_list[2048] = {0};
@@ -74,7 +116,8 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
                 default: continue;
             }
 
-            if (nid != -1) {
+            /* Skip if NID is invalid or unsupported (0 for X25519 on OpenSSL 1.0.x) */
+            if (nid > 0) {
                 nids[nid_count++] = nid;
             }
         }
@@ -245,7 +288,9 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
         case TLS1_VERSION:   ja3_version = 0x0301; break;  /* TLS 1.0 */
         case TLS1_1_VERSION: ja3_version = 0x0302; break;  /* TLS 1.1 */
         case TLS1_2_VERSION: ja3_version = 0x0303; break;  /* TLS 1.2 */
+#ifdef TLS1_3_VERSION
         case TLS1_3_VERSION: ja3_version = 0x0304; break;  /* TLS 1.3 */
+#endif
         default:             ja3_version = 0x0303; break;  /* Default to TLS 1.2 */
     }
 
@@ -258,7 +303,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 2. Cipher Suites - use browser profile's cipher list to make it unique */
     if (p < end) *p++ = ',';
     if (profile && profile->cipher_suite_count > 0) {
-        for (size_t i = 0; i < profile->cipher_suite_count && p < end; i++) {
+        for (int i = 0; i < profile->cipher_suite_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->cipher_suites[i]);
             if (written > 0 && written < (end - p)) p += written;
@@ -276,7 +321,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 3. Extensions - use browser profile's extension list */
     if (p < end) *p++ = ',';
     if (profile && profile->extension_count > 0) {
-        for (size_t i = 0; i < profile->extension_count && p < end; i++) {
+        for (int i = 0; i < profile->extension_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->extensions[i]);
             if (written > 0 && written < (end - p)) p += written;
@@ -290,7 +335,7 @@ char* httpmorph_calculate_ja3(SSL *ssl, const browser_profile_t *profile) {
     /* 4. Elliptic Curves - use browser profile's curve list */
     if (p < end) *p++ = ',';
     if (profile && profile->curve_count > 0) {
-        for (size_t i = 0; i < profile->curve_count && p < end; i++) {
+        for (int i = 0; i < profile->curve_count && p < end; i++) {
             if (i > 0 && p < end) *p++ = '-';
             written = snprintf(p, SNPRINTF_SIZE(end - p), "%u", profile->curves[i]);
             if (written > 0 && written < (end - p)) p += written;
@@ -356,7 +401,11 @@ int httpmorph_set_tls_version_range(SSL_CTX *ctx, uint16_t min_version, uint16_t
         case 0x0301: ssl_min_version = TLS1_VERSION; break;     /* TLS 1.0 */
         case 0x0302: ssl_min_version = TLS1_1_VERSION; break;   /* TLS 1.1 */
         case 0x0303: ssl_min_version = TLS1_2_VERSION; break;   /* TLS 1.2 */
+#ifdef TLS1_3_VERSION
         case 0x0304: ssl_min_version = TLS1_3_VERSION; break;   /* TLS 1.3 */
+#else
+        case 0x0304: ssl_min_version = TLS1_2_VERSION; break;   /* Fallback if TLS 1.3 not available */
+#endif
         case 0:      ssl_min_version = 0; break;                /* Default */
         default:     ssl_min_version = TLS1_2_VERSION; break;   /* Fallback to TLS 1.2 */
     }
@@ -365,9 +414,14 @@ int httpmorph_set_tls_version_range(SSL_CTX *ctx, uint16_t min_version, uint16_t
         case 0x0301: ssl_max_version = TLS1_VERSION; break;
         case 0x0302: ssl_max_version = TLS1_1_VERSION; break;
         case 0x0303: ssl_max_version = TLS1_2_VERSION; break;
+#ifdef TLS1_3_VERSION
         case 0x0304: ssl_max_version = TLS1_3_VERSION; break;
-        case 0:      ssl_max_version = 0; break;                /* Default */
         default:     ssl_max_version = TLS1_3_VERSION; break;   /* Fallback to TLS 1.3 */
+#else
+        case 0x0304: ssl_max_version = TLS1_2_VERSION; break;   /* Fallback if TLS 1.3 not available */
+        default:     ssl_max_version = TLS1_2_VERSION; break;   /* Fallback to TLS 1.2 */
+#endif
+        case 0:      ssl_max_version = 0; break;                /* Default */
     }
 
     /* Set TLS version range */
