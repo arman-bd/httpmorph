@@ -477,87 +477,87 @@ if not ON_READTHEDOCS:
     extensions = [
         # Main httpmorph C extension
         Extension(
-        "httpmorph._httpmorph",
-        sources=[
-            str(BINDINGS_DIR / "_httpmorph.pyx"),
-            # Modular C source files (refactored from httpmorph.c)
-            str(CORE_DIR / "util.c"),
-            str(CORE_DIR / "url.c"),
-            str(CORE_DIR / "network.c"),
-            str(CORE_DIR / "proxy.c"),
-            str(CORE_DIR / "tls.c"),
-            str(CORE_DIR / "compression.c"),
-            str(CORE_DIR / "cookies.c"),
-            str(CORE_DIR / "request.c"),
-            str(CORE_DIR / "response.c"),
-            str(CORE_DIR / "client.c"),
-            str(CORE_DIR / "session.c"),
-            str(CORE_DIR / "http1.c"),
-            str(CORE_DIR / "http2_logic.c"),
-            str(CORE_DIR / "http2_session_manager.c"),
-            str(CORE_DIR / "core.c"),
-            # Supporting modules
-            str(CORE_DIR / "connection_pool.c"),
-            str(CORE_DIR / "buffer_pool.c"),
-            str(CORE_DIR / "request_builder.c"),
-            str(CORE_DIR / "string_intern.c"),
-            str(CORE_DIR / "io_engine.c"),
-            str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
-            str(CORE_DIR / "async_request.c"),
-            str(CORE_DIR / "async_request_manager.c"),
-            str(TLS_DIR / "browser_profiles.c"),
-        ],
-        include_dirs=INCLUDE_DIRS,
-        library_dirs=LIBRARY_DIRS,
-        libraries=EXT_LIBRARIES,
-        extra_compile_args=EXT_COMPILE_ARGS,
-        extra_link_args=EXT_LINK_ARGS,
-        language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
-    ),
-    # HTTP/2 client extension
-    Extension(
-        "httpmorph._http2",
-        sources=[
-            str(BINDINGS_DIR / "_http2.pyx"),
-            str(CORE_DIR / "http2_client.c"),
-        ],
-        include_dirs=INCLUDE_DIRS,  # Use same include dirs as main extension
-        library_dirs=LIBRARY_DIRS,
-        libraries=EXT_LIBRARIES,
-        extra_compile_args=EXT_COMPILE_ARGS,
-        extra_link_args=EXT_LINK_ARGS,
-        language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
-    ),
-    # Async I/O extension (new!)
-    Extension(
-        "httpmorph._async",
-        sources=[
-            str(BINDINGS_DIR / "_async.pyx"),
-            # Core async I/O modules (already compiled in main extension, but needed here too)
-            str(CORE_DIR / "io_engine.c"),
-            str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
-            str(CORE_DIR / "async_request.c"),
-            str(CORE_DIR / "async_request_manager.c"),
-            # Dependencies needed by async modules
-            str(CORE_DIR / "util.c"),
-            str(CORE_DIR / "url.c"),
-            str(CORE_DIR / "network.c"),
-            str(CORE_DIR / "proxy.c"),  # Proxy support for async
-            str(CORE_DIR / "tls.c"),
-            str(CORE_DIR / "request.c"),
-            str(CORE_DIR / "response.c"),
-            str(CORE_DIR / "buffer_pool.c"),
-            str(CORE_DIR / "string_intern.c"),
-            str(TLS_DIR / "browser_profiles.c"),
-        ],
-        include_dirs=INCLUDE_DIRS,
-        library_dirs=LIBRARY_DIRS,
-        libraries=EXT_LIBRARIES,
-        extra_compile_args=EXT_COMPILE_ARGS,
-        extra_link_args=EXT_LINK_ARGS,
-        language="c++" if IS_WINDOWS else "c",
-    ),
-]
+            "httpmorph._httpmorph",
+            sources=[
+                str(BINDINGS_DIR / "_httpmorph.pyx"),
+                # Modular C source files (refactored from httpmorph.c)
+                str(CORE_DIR / "util.c"),
+                str(CORE_DIR / "url.c"),
+                str(CORE_DIR / "network.c"),
+                str(CORE_DIR / "proxy.c"),
+                str(CORE_DIR / "tls.c"),
+                str(CORE_DIR / "compression.c"),
+                str(CORE_DIR / "cookies.c"),
+                str(CORE_DIR / "request.c"),
+                str(CORE_DIR / "response.c"),
+                str(CORE_DIR / "client.c"),
+                str(CORE_DIR / "session.c"),
+                str(CORE_DIR / "http1.c"),
+                str(CORE_DIR / "http2_logic.c"),
+                str(CORE_DIR / "http2_session_manager.c"),
+                str(CORE_DIR / "core.c"),
+                # Supporting modules
+                str(CORE_DIR / "connection_pool.c"),
+                str(CORE_DIR / "buffer_pool.c"),
+                str(CORE_DIR / "request_builder.c"),
+                str(CORE_DIR / "string_intern.c"),
+                str(CORE_DIR / "io_engine.c"),
+                str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
+                str(CORE_DIR / "async_request.c"),
+                str(CORE_DIR / "async_request_manager.c"),
+                str(TLS_DIR / "browser_profiles.c"),
+            ],
+            include_dirs=INCLUDE_DIRS,
+            library_dirs=LIBRARY_DIRS,
+            libraries=EXT_LIBRARIES,
+            extra_compile_args=EXT_COMPILE_ARGS,
+            extra_link_args=EXT_LINK_ARGS,
+            language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+        ),
+        # HTTP/2 client extension
+        Extension(
+            "httpmorph._http2",
+            sources=[
+                str(BINDINGS_DIR / "_http2.pyx"),
+                str(CORE_DIR / "http2_client.c"),
+            ],
+            include_dirs=INCLUDE_DIRS,  # Use same include dirs as main extension
+            library_dirs=LIBRARY_DIRS,
+            libraries=EXT_LIBRARIES,
+            extra_compile_args=EXT_COMPILE_ARGS,
+            extra_link_args=EXT_LINK_ARGS,
+            language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+        ),
+        # Async I/O extension (new!)
+        Extension(
+            "httpmorph._async",
+            sources=[
+                str(BINDINGS_DIR / "_async.pyx"),
+                # Core async I/O modules (already compiled in main extension, but needed here too)
+                str(CORE_DIR / "io_engine.c"),
+                str(CORE_DIR / "iocp_dispatcher.c"),  # Windows IOCP dispatcher
+                str(CORE_DIR / "async_request.c"),
+                str(CORE_DIR / "async_request_manager.c"),
+                # Dependencies needed by async modules
+                str(CORE_DIR / "util.c"),
+                str(CORE_DIR / "url.c"),
+                str(CORE_DIR / "network.c"),
+                str(CORE_DIR / "proxy.c"),  # Proxy support for async
+                str(CORE_DIR / "tls.c"),
+                str(CORE_DIR / "request.c"),
+                str(CORE_DIR / "response.c"),
+                str(CORE_DIR / "buffer_pool.c"),
+                str(CORE_DIR / "string_intern.c"),
+                str(TLS_DIR / "browser_profiles.c"),
+            ],
+            include_dirs=INCLUDE_DIRS,
+            library_dirs=LIBRARY_DIRS,
+            libraries=EXT_LIBRARIES,
+            extra_compile_args=EXT_COMPILE_ARGS,
+            extra_link_args=EXT_LINK_ARGS,
+            language="c++" if IS_WINDOWS else "c",
+        ),
+    ]
 
 # Cythonize extensions (skip on Read the Docs)
 if ON_READTHEDOCS:
