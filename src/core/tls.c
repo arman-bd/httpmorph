@@ -13,8 +13,40 @@
 
 /* OpenSSL 1.0.x compatibility */
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
+/* EVP_MD_CTX functions renamed in 1.1.0 */
 #define EVP_MD_CTX_new EVP_MD_CTX_create
 #define EVP_MD_CTX_free EVP_MD_CTX_destroy
+
+/* TLS_client_method introduced in 1.1.0, was SSLv23_client_method */
+#define TLS_client_method SSLv23_client_method
+
+/* Protocol version setters introduced in 1.1.0 */
+static inline int SSL_CTX_set_min_proto_version(SSL_CTX *ctx, int version) {
+    /* OpenSSL 1.0.x doesn't support setting min/max versions dynamically */
+    /* The best we can do is disable older protocols */
+    long opts = SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
+    if (version >= TLS1_1_VERSION) opts |= SSL_OP_NO_TLSv1;
+    if (version >= TLS1_2_VERSION) opts |= SSL_OP_NO_TLSv1_1;
+    SSL_CTX_set_options(ctx, opts);
+    return 1;
+}
+
+static inline int SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
+    /* OpenSSL 1.0.x doesn't support setting max version */
+    /* We can only disable protocols, not set an upper bound */
+    (void)ctx;
+    (void)version;
+    return 1;
+}
+
+/* X25519 curve introduced in 1.1.0 */
+#ifndef NID_X25519
+#define NID_X25519 0  /* Not available in OpenSSL 1.0.x */
+#endif
+
+/* SSL_CTX_set1_groups introduced in 1.1.0, was SSL_CTX_set1_curves_list */
+#define SSL_CTX_set1_groups(ctx, glist, glistlen) \
+    SSL_CTX_set_ecdh_auto(ctx, 1)
 #endif
 
 /**
@@ -84,7 +116,8 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
                 default: continue;
             }
 
-            if (nid != -1) {
+            /* Skip if NID is invalid or unsupported (0 for X25519 on OpenSSL 1.0.x) */
+            if (nid > 0) {
                 nids[nid_count++] = nid;
             }
         }

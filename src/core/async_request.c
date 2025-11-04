@@ -2,12 +2,6 @@
  * async_request.c - Async request state machine implementation
  */
 
-/* Define feature test macros before any system includes */
-#ifndef _WIN32
-    #define _POSIX_C_SOURCE 200112L
-    #define _DEFAULT_SOURCE
-#endif
-
 #include "async_request.h"
 #include "io_engine.h"
 #include "internal/proxy.h"
