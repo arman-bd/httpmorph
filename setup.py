@@ -418,19 +418,19 @@ if not ON_READTHEDOCS:
         EXT_LINK_ARGS = []  # No special linker flags for Windows
     else:
         # Production optimized build
-        import platform
-
         # Determine architecture-specific optimization flags
-        machine = platform.machine().lower()
+        # Only use -march=native on Linux x86_64 (macOS has issues with it)
         arch_flags = []
 
-        if machine in ["x86_64", "amd64", "i386", "i686"]:
-            # x86/x64 - use -march=native for optimal performance
-            arch_flags = ["-march=native"]
-        elif machine in ["arm64", "aarch64"] and not IS_MACOS:
-            # ARM on Linux - use -mcpu=native
-            arch_flags = ["-mcpu=native"]
-        # On macOS ARM64, skip -march/-mcpu flags as clang doesn't support them well
+        if not IS_MACOS:
+            machine = platform.machine().lower()
+            if machine in ["x86_64", "amd64", "i386", "i686"]:
+                # x86/x64 on Linux - use -march=native for optimal performance
+                arch_flags = ["-march=native"]
+            elif machine in ["arm64", "aarch64"]:
+                # ARM on Linux - use -mcpu=native
+                arch_flags = ["-mcpu=native"]
+        # On macOS, skip architecture-specific flags entirely to avoid cross-compile issues
 
         EXT_COMPILE_ARGS = [
             "-std=c11",
