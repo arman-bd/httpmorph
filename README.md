@@ -9,9 +9,9 @@ A Python HTTP client focused on mimicking browser fingerprints.
 ## Features
 
 - **Requests-compatible API** - Drop-in replacement for most Python `requests` use cases
-- **High Performance** - Native C implementation with BoringSSL for blazing-fast HTTP/HTTPS
+- **High Performance** - Native C implementation with BoringSSL for HTTP/HTTPS
 - **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2 (httpx-like API)
-- **Browser Fingerprinting** - Realistic browser profiles (Chrome, Firefox, Safari, Edge)
+- **Browser Fingerprinting** - Realistic browser profiles (Chrome and it's variants)
 - **TLS Fingerprinting** - JA3 fingerprint generation and customization
 - **Connection Pooling** - Automatic connection reuse for better performance
 - **Session Management** - Persistent cookies and headers across requests

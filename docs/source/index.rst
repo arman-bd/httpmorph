@@ -1,26 +1,7 @@
-httpmorph Documentation
-=======================
+httpmorph
+=========
 
-**httpmorph** is a high-performance HTTP client library for Python with browser fingerprinting capabilities.
-
-.. note::
-   This is an initial documentation release. Comprehensive documentation with detailed guides,
-   API references, and examples will be added in the next update.
-
-Overview
---------
-
-httpmorph combines the speed of C with the convenience of Python, providing:
-
-* **High Performance**: 3-4x faster than the `requests` library
-* **Browser Fingerprinting**: Mimic Chrome, Firefox, Safari, and Edge browsers
-* **HTTP/2 Support**: Built-in HTTP/2 with httpx-compatible API
-* **Connection Pooling**: Automatic connection reuse for improved performance
-* **TLS Fingerprinting**: JA3 fingerprint generation and management
-* **Async Support**: (Coming soon)
-
-Quick Example
--------------
+A Python HTTP client library with browser fingerprinting capabilities, written in C for performance.
 
 .. code-block:: python
 
@@ -28,28 +9,29 @@ Quick Example
 
    # Simple GET request
    response = httpmorph.get('https://example.com')
-   print(response.status_code)
-   print(response.body)
+   print(response.status_code, response.text)
 
-   # Use a session with browser fingerprinting
-   with httpmorph.Session(browser='chrome') as session:
-       response = session.get('https://example.com')
-       print(response.tls_version)
-       print(response.ja3_fingerprint)
+   # Use a session with browser profile
+   session = httpmorph.Session(browser='chrome')
+   response = session.get('https://example.com')
 
-   # HTTP/2 support
-   client = httpmorph.Client(http2=True)
-   response = client.get('https://httpbingo.org/get')
-   print(response.http_version)  # "2.0"
+Features
+--------
 
-Performance
------------
+* **C implementation** - Native C code with Python bindings
+* **Browser profiles** - Mimic Chrome, Firefox, Safari, or Edge
+* **HTTP/2 support** - ALPN negotiation via nghttp2
+* **TLS fingerprinting** - JA3 fingerprint generation
+* **Connection pooling** - Automatic connection reuse
+* **Async support** - AsyncClient with epoll/kqueue
+* **Compression** - Automatic gzip/deflate decompression
 
-Benchmarked against the `requests` library (100-request sample):
+Requirements
+------------
 
-* **Local HTTP**: 3.34x faster
-* **Remote HTTP**: 1.83x faster
-* **Remote HTTPS**: 3.24x faster
+* Python 3.8+
+* BoringSSL (built from source during installation)
+* libnghttp2 (for HTTP/2 support)
 
 Installation
 ------------
@@ -58,24 +40,52 @@ Installation
 
    pip install httpmorph
 
-Documentation Contents
-----------------------
+See :doc:`installation` for build requirements and troubleshooting.
+
+Quick Example
+-------------
+
+.. code-block:: python
+
+   import httpmorph
+
+   # GET request
+   response = httpmorph.get('https://httpbin.org/get')
+   print(response.json())
+
+   # POST with JSON
+   response = httpmorph.post(
+       'https://httpbin.org/post',
+       json={'key': 'value'}
+   )
+
+   # Session with cookies
+   session = httpmorph.Session(browser='chrome')
+   response = session.get('https://example.com')
+   print(session.cookies)
+
+   # HTTP/2
+   client = httpmorph.Client(http2=True)
+   response = client.get('https://www.google.com')
+   print(response.http_version)  # '2.0'
+
+Documentation
+-------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started:
 
+   installation
    quickstart
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Reference:
-
    api
+   advanced
 
-Indices and tables
-==================
+Status
+------
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+httpmorph is under active development. The API may change between minor versions.
+
+License
+-------
+
+MIT License
