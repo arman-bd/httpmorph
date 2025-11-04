@@ -5,6 +5,10 @@
 #include "internal/network.h"
 #include "internal/util.h"
 
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 /* ====================================================================
  * DNS CACHING
  * ==================================================================== */

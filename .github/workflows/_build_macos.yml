@@ -2,12 +2,6 @@ name: Build macOS Wheels
 
 on:
   workflow_call:
-    inputs:
-      python-versions:
-        description: 'Python versions to build for'
-        required: false
-        type: string
-        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
 
 jobs:
   build-macos:
@@ -84,7 +78,7 @@ jobs:
       env:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
-        # Build for specified Python versions (universal2 for both Intel and Apple Silicon)
+        # Build for all Python versions (universal2 for both Intel and Apple Silicon)
         CIBW_BUILD: cp38-macosx_* cp39-macosx_* cp310-macosx_* cp311-macosx_* cp312-macosx_* cp313-macosx_* cp314-macosx_*
         # Use delocate to bundle dependencies
         CIBW_REPAIR_WHEEL_COMMAND_MACOS: "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} {wheel} --ignore-missing-dependencies"

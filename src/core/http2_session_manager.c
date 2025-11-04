@@ -2,12 +2,8 @@
  * http2_session_manager.c - HTTP/2 Session Manager Implementation
  */
 
-/* Define feature test macros before any system includes */
-#ifndef _WIN32
-    #define _POSIX_C_SOURCE 200112L
-    #define _DEFAULT_SOURCE
-#endif
-
+/* Include internal.h first to get POSIX feature test macros */
+#include "internal/internal.h"
 #include "http2_session_manager.h"
 
 #ifdef HAVE_NGHTTP2

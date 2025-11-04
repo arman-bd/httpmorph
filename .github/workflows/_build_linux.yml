@@ -2,12 +2,6 @@ name: Build Linux Wheels
 
 on:
   workflow_call:
-    inputs:
-      python-versions:
-        description: 'Python versions to build for'
-        required: false
-        type: string
-        default: '["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]'
 
 jobs:
   build-linux:
@@ -42,7 +36,7 @@ jobs:
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.22.0
       env:
-        # Build for specified Python versions
+        # Build for all Python versions
         CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
         # The script will detect cached libraries and skip rebuilding

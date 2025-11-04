@@ -2,9 +2,9 @@
  * async_request.c - Async request state machine implementation
  */
 
-/* Define feature test macros before any system includes */
+/* Define feature test macros before any includes */
 #ifndef _WIN32
-    #define _POSIX_C_SOURCE 200112L
+    #define _POSIX_C_SOURCE 200809L
     #define _DEFAULT_SOURCE
 #endif
 
