@@ -48,7 +48,27 @@ if IS_LINUX:
         # Check kernel version for io_uring support (Linux 5.1+)
         kernel_version = platform.release().split(".")
         major, minor = int(kernel_version[0]), int(kernel_version[1])
-        HAS_IO_URING = (major > 5) or (major == 5 and minor >= 1)
+        kernel_supports_io_uring = (major > 5) or (major == 5 and minor >= 1)
+
+        # Also check if liburing is available (vendor or system)
+        # In Docker containers, kernel version comes from host, but liburing must be in container
+        vendor_dir = Path("vendor")
+        has_vendor_liburing = (
+            (vendor_dir / "liburing" / "install" / "lib" / "liburing.a").exists() or
+            (vendor_dir / "liburing" / "src" / "liburing.a").exists()
+        )
+
+        # Try to find system liburing as fallback
+        import subprocess
+        has_system_liburing = False
+        if not has_vendor_liburing:
+            try:
+                subprocess.check_output(["pkg-config", "--exists", "liburing"], stderr=subprocess.DEVNULL)
+                has_system_liburing = True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+
+        HAS_IO_URING = kernel_supports_io_uring and (has_vendor_liburing or has_system_liburing)
     except (ValueError, IndexError):
         pass
 
@@ -212,6 +232,16 @@ def get_library_paths():
         # Use vendor dependencies if available, otherwise system paths
         vendor_dir = Path("vendor").resolve()
 
+        # Check if vendor BoringSSL exists
+        vendor_boringssl = vendor_dir / "boringssl"
+        if vendor_boringssl.exists() and (vendor_boringssl / "include").exists():
+            openssl_include = str(vendor_boringssl / "include")
+            openssl_lib = str(vendor_boringssl / "build")
+            print(f"Using vendor BoringSSL from: {vendor_boringssl}")
+        else:
+            openssl_include = None
+            openssl_lib = None
+
         # Check if vendor nghttp2 exists
         vendor_nghttp2 = vendor_dir / "nghttp2" / "install"
         if vendor_nghttp2.exists() and (vendor_nghttp2 / "include").exists():
@@ -259,33 +289,32 @@ def get_library_paths():
                             nghttp2_lib = alt_path
                             break
 
-        # Try pkg-config for BoringSSL/OpenSSL (system fallback on Linux)
-        openssl_include = None
-        openssl_lib = None
-        try:
-            import subprocess
+        # Try pkg-config for BoringSSL/OpenSSL if vendor not found
+        if not openssl_include or not openssl_lib:
+            try:
+                import subprocess
 
-            include_output = (
-                subprocess.check_output(
-                    ["pkg-config", "--cflags-only-I", "openssl"], stderr=subprocess.DEVNULL
+                include_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--cflags-only-I", "openssl"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
                 )
-                .decode()
-                .strip()
-            )
-            if include_output:
-                openssl_include = include_output.replace("-I", "").strip()
+                if include_output:
+                    openssl_include = include_output.replace("-I", "").strip()
 
-            lib_output = (
-                subprocess.check_output(
-                    ["pkg-config", "--libs-only-L", "openssl"], stderr=subprocess.DEVNULL
+                lib_output = (
+                    subprocess.check_output(
+                        ["pkg-config", "--libs-only-L", "openssl"], stderr=subprocess.DEVNULL
+                    )
+                    .decode()
+                    .strip()
                 )
-                .decode()
-                .strip()
-            )
-            if lib_output:
-                openssl_lib = lib_output.replace("-L", "").strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
+                if lib_output:
+                    openssl_lib = lib_output.replace("-L", "").strip()
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
 
         # Use system SSL library on Linux if pkg-config didn't work
         if not openssl_include:
@@ -308,11 +337,27 @@ def get_library_paths():
         if not nghttp2_lib or not nghttp2_lib.strip():
             nghttp2_lib = "/usr/lib/x86_64-linux-gnu"
 
+        # Add liburing paths if vendor build exists
+        liburing_include = None
+        liburing_lib = None
+        vendor_liburing_install = vendor_dir / "liburing" / "install"
+        if vendor_liburing_install.exists():
+            liburing_include = str(vendor_liburing_install / "include")
+            liburing_lib = str(vendor_liburing_install / "lib")
+            print(f"Using vendor liburing from: {vendor_liburing_install}")
+        elif (vendor_dir / "liburing" / "src").exists():
+            # Fallback to src directory if install doesn't exist
+            liburing_include = str(vendor_dir / "liburing" / "src" / "include")
+            liburing_lib = str(vendor_dir / "liburing" / "src")
+            print(f"Using vendor liburing from: {vendor_dir / 'liburing'}")
+
         return {
             "openssl_include": openssl_include,
             "openssl_lib": openssl_lib,
             "nghttp2_include": nghttp2_include,
             "nghttp2_lib": nghttp2_lib,
+            "liburing_include": liburing_include,
+            "liburing_lib": liburing_lib,
         }
 
     elif IS_WINDOWS:
@@ -462,12 +507,13 @@ if not ON_READTHEDOCS:
         EXT_LINK_ARGS = []
 
         # Unix library names
-        if IS_MACOS:
-            # On macOS, use empty libraries list and specify full paths to static libs
-            # This ensures we link against vendor .a files, not Homebrew .dylib files
-            EXT_LIBRARIES = ["z"]  # Only z (zlib) which is always available as static on macOS
+        if IS_MACOS or IS_LINUX:
+            # Use extra_objects for static linking (vendor .a files)
+            # This ensures we link against vendor static libs, not system dynamic libs
+            # Note: liburing will be linked statically via EXTRA_OBJECTS, not via -luring
+            EXT_LIBRARIES = ["z"]  # Only z (zlib)
         else:
-            # Linux - use library names (will find .a or .so)
+            # Other Unix - use library names (will find .a or .so)
             EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
 
     # Define C extension modules
@@ -485,6 +531,10 @@ if not ON_READTHEDOCS:
         LIB_PATHS["nghttp2_include"],
     ]
 
+    # Add liburing include directory if available (Linux only)
+    if IS_LINUX and HAS_IO_URING and LIB_PATHS.get("liburing_include"):
+        INCLUDE_DIRS.append(LIB_PATHS["liburing_include"])
+
     LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
 
     # Add zlib paths on Windows if available
@@ -496,29 +546,54 @@ if not ON_READTHEDOCS:
             INCLUDE_DIRS.append(zlib_inc)
         LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
 
-    # On macOS, explicitly link against static libraries to avoid Homebrew dylibs
+    # On macOS and Linux, explicitly link against vendor static libraries
     EXTRA_OBJECTS = []
-    if IS_MACOS:
+    EXTRA_LINK_ARGS_LIBS = []
+
+    if IS_MACOS or IS_LINUX:
         vendor_dir = Path("vendor").resolve()
+        static_libs = []
 
         # BoringSSL static libraries (check both possible locations)
         boringssl_build = vendor_dir / "boringssl" / "build"
         if (boringssl_build / "ssl" / "libssl.a").exists():
-            EXTRA_OBJECTS.append(str(boringssl_build / "ssl" / "libssl.a"))
-            EXTRA_OBJECTS.append(str(boringssl_build / "crypto" / "libcrypto.a"))
+            static_libs.append(str(boringssl_build / "ssl" / "libssl.a"))
+            static_libs.append(str(boringssl_build / "crypto" / "libcrypto.a"))
         elif (boringssl_build / "libssl.a").exists():
-            EXTRA_OBJECTS.append(str(boringssl_build / "libssl.a"))
-            EXTRA_OBJECTS.append(str(boringssl_build / "libcrypto.a"))
+            static_libs.append(str(boringssl_build / "libssl.a"))
+            static_libs.append(str(boringssl_build / "libcrypto.a"))
 
         # nghttp2 static library
         nghttp2_lib = vendor_dir / "nghttp2" / "install" / "lib" / "libnghttp2.a"
         if nghttp2_lib.exists():
-            EXTRA_OBJECTS.append(str(nghttp2_lib))
+            static_libs.append(str(nghttp2_lib))
 
-        if EXTRA_OBJECTS:
-            print("\nUsing static libraries on macOS:")
-            for obj in EXTRA_OBJECTS:
-                print(f"  {obj}")
+        # liburing static library (Linux only)
+        if IS_LINUX and HAS_IO_URING:
+            # Check multiple possible locations for liburing
+            uring_paths = [
+                vendor_dir / "liburing" / "install" / "lib" / "liburing.a",
+                vendor_dir / "liburing" / "src" / "liburing.a",
+            ]
+            for uring_path in uring_paths:
+                if uring_path.exists():
+                    static_libs.append(str(uring_path))
+                    break
+
+        if static_libs:
+            print("\nUsing static libraries:")
+            for lib in static_libs:
+                print(f"  {lib}")
+
+            # On Linux, use --no-as-needed to ensure all symbols are included
+            # and force C++ linkage for BoringSSL (which has C++ code)
+            if IS_LINUX:
+                # Add static libs directly to link args with --no-as-needed
+                # This ensures all symbols from the static libraries are included
+                EXTRA_LINK_ARGS_LIBS = ["-Wl,--no-as-needed"] + static_libs + ["-lstdc++", "-lpthread"]
+            else:
+                # On macOS, use extra_objects
+                EXTRA_OBJECTS = static_libs
 
     extensions = [
         # Main httpmorph C extension
@@ -557,9 +632,9 @@ if not ON_READTHEDOCS:
             library_dirs=LIBRARY_DIRS,
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
-            extra_link_args=EXT_LINK_ARGS,
+            extra_link_args=EXT_LINK_ARGS + EXTRA_LINK_ARGS_LIBS,
             extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
-            language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+            language="c++" if (IS_WINDOWS or IS_LINUX) else "c",  # Use C++ on Windows/Linux for BoringSSL
         ),
         # HTTP/2 client extension
         Extension(
@@ -572,9 +647,9 @@ if not ON_READTHEDOCS:
             library_dirs=LIBRARY_DIRS,
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
-            extra_link_args=EXT_LINK_ARGS,
+            extra_link_args=EXT_LINK_ARGS + EXTRA_LINK_ARGS_LIBS,
             extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
-            language="c++" if IS_WINDOWS else "c",  # Use C++ on Windows for BoringSSL compatibility
+            language="c++" if (IS_WINDOWS or IS_LINUX) else "c",  # Use C++ on Windows/Linux for BoringSSL
         ),
         # Async I/O extension (new!)
         Extension(
@@ -602,9 +677,9 @@ if not ON_READTHEDOCS:
             library_dirs=LIBRARY_DIRS,
             libraries=EXT_LIBRARIES,
             extra_compile_args=EXT_COMPILE_ARGS,
-            extra_link_args=EXT_LINK_ARGS,
-            extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS
-            language="c++" if IS_WINDOWS else "c",
+            extra_link_args=EXT_LINK_ARGS + EXTRA_LINK_ARGS_LIBS,
+            extra_objects=EXTRA_OBJECTS,  # Static libraries on macOS/Linux
+            language="c++" if (IS_WINDOWS or IS_LINUX) else "c",  # Use C++ on Windows/Linux for BoringSSL
         ),
     ]
 
