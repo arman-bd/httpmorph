@@ -68,8 +68,7 @@ try:
     else:
         raise ImportError("Could not create module spec")
 
-except (ImportError, Exception) as e:
-    print(f"WARNING: Failed to import _httpmorph: {e}", file=sys.stderr)
+except (ImportError, Exception):
     HAS_C_EXTENSION = False
     _httpmorph = None
 
