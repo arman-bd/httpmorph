@@ -40,6 +40,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.local_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_sequential_benchmark("curl_cffi_seq_local", run)
 
@@ -49,6 +50,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.remote_http_url)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_sequential_benchmark("curl_cffi_seq_remote_http", run)
 
@@ -58,6 +60,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.remote_https_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_sequential_benchmark("curl_cffi_seq_remote_https", run)
 
@@ -68,6 +71,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
             # curl_cffi uses HTTP/2 by default when available
             resp = curl_requests.get(self.http2_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_sequential_benchmark("curl_cffi_seq_remote_http2", run)
 
@@ -77,6 +81,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.local_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -86,6 +91,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.remote_http_url)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -95,6 +101,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.remote_https_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -104,6 +111,7 @@ class CurlCffiBenchmark(LibraryBenchmark):
 
             resp = curl_requests.get(self.http2_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_concurrent_sync(run)
 

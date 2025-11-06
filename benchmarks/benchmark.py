@@ -1803,8 +1803,8 @@ def main():
         "-s",
         "--sequential",
         type=int,
-        default=50,
-        help="Number of sequential requests (default: 50)",
+        default=25,
+        help="Number of sequential requests (default: 25)",
     )
     parser.add_argument(
         "-c",
@@ -1814,7 +1814,7 @@ def main():
         help="Number of concurrent requests (default: 25)",
     )
     parser.add_argument(
-        "-w", "--workers", type=int, default=10, help="Number of concurrent workers (default: 10)"
+        "-w", "--workers", type=int, default=5, help="Number of concurrent workers (default: 5)"
     )
     parser.add_argument(
         "--warmup", type=int, default=5, help="Number of warmup requests (default: 5)"

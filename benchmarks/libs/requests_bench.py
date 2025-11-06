@@ -36,6 +36,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.local_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_sequential_benchmark("requests_seq_local_http", run)
 
@@ -45,6 +46,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.remote_http_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_sequential_benchmark("requests_seq_remote_http", run)
 
@@ -54,6 +56,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.remote_https_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_sequential_benchmark("requests_seq_remote_https", run)
 
@@ -67,6 +70,7 @@ class RequestsBenchmark(LibraryBenchmark):
             try:
                 resp = session.get(self.proxy_target_http, verify=False, timeout=10)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_http, resp.text)
             except Exception:
                 pass
 
@@ -91,6 +95,7 @@ class RequestsBenchmark(LibraryBenchmark):
             try:
                 resp = session.get(self.proxy_target_https, verify=False, timeout=10)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 pass
 
@@ -111,6 +116,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.local_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -120,6 +126,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.remote_http_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -129,6 +136,7 @@ class RequestsBenchmark(LibraryBenchmark):
         def run():
             resp = session.get(self.remote_https_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -142,6 +150,7 @@ class RequestsBenchmark(LibraryBenchmark):
             try:
                 resp = session.get(self.proxy_target_http, verify=False, timeout=10)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_http, resp.text)
             except Exception:
                 pass
 
@@ -160,6 +169,7 @@ class RequestsBenchmark(LibraryBenchmark):
             try:
                 resp = session.get(self.proxy_target_https, verify=False, timeout=10)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 pass
 

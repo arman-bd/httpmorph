@@ -50,6 +50,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.local_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_sequential_benchmark("httpmorph_seq_local_http", run)
 
@@ -59,6 +60,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.remote_http_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_sequential_benchmark("httpmorph_seq_remote_http", run)
 
@@ -68,6 +70,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.remote_https_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_sequential_benchmark("httpmorph_seq_remote_https", run)
 
@@ -81,6 +84,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.http2_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_sequential_benchmark("httpmorph_seq_remote_http2", run)
 
@@ -95,6 +99,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_http, proxy=self.proxy_url_http, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_http, resp.text)
             except Exception:
                 # Proxy can be slow, accept timeout as valid
                 pass
@@ -121,6 +126,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_https, proxy=self.proxy_url_https, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 # Proxy can be slow, accept timeout as valid
                 pass
@@ -149,6 +155,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_https, proxy=self.proxy_url_https, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 pass
 
@@ -170,6 +177,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.local_url, verify=False)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.local_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -179,6 +187,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.remote_http_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -188,6 +197,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.remote_https_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -200,6 +210,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.http2_url, verify=False, timeout=10)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -214,6 +225,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_http, proxy=self.proxy_url_http, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_http, resp.text)
             except Exception:
                 # Proxy can be slow or rate-limit concurrent connections, accept timeout as valid
                 pass
@@ -235,6 +247,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_https, proxy=self.proxy_url_https, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 # Proxy can be slow or rate-limit concurrent connections, accept timeout as valid
                 pass
@@ -259,6 +272,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                     self.proxy_target_https, proxy=self.proxy_url_https, verify=False, timeout=10
                 )
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 # HTTP/2 over proxy can be slow, accept timeout as valid
                 pass
@@ -280,6 +294,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                 async def request():
                     resp = await client.get(self.local_url, timeout=10)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.local_url, resp.text)
 
                 return await self.run_concurrent_async(request)
 
@@ -298,6 +313,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                 async def request():
                     resp = await client.get(self.remote_http_url, verify=False, timeout=10)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.remote_http_url, resp.text)
 
                 return await self.run_concurrent_async(request)
 
@@ -316,6 +332,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                 async def request():
                     resp = await client.get(self.remote_https_url, verify=False, timeout=10)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.remote_https_url, resp.text)
 
                 return await self.run_concurrent_async(request)
 
@@ -336,6 +353,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                 async def request():
                     resp = await client.get(self.http2_url, verify=False, timeout=10)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.http2_url, resp.text)
 
                 return await self.run_concurrent_async(request)
 
@@ -362,6 +380,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                             timeout=10,
                         )
                         assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                        self.validate_response_body(self.proxy_target_http, resp.text)
                     except Exception:
                         # Proxy can be slow, accept timeout as valid
                         pass
@@ -392,6 +411,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                             timeout=10,
                         )
                         assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                        self.validate_response_body(self.proxy_target_https, resp.text)
                     except Exception:
                         # Proxy can be slow, accept timeout as valid
                         pass
@@ -424,6 +444,7 @@ class HttpmorphBenchmark(LibraryBenchmark):
                             timeout=10,
                         )
                         assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                        self.validate_response_body(self.proxy_target_https, resp.text)
                     except Exception:
                         # HTTP/2 over proxy can be slow, accept timeout as valid
                         pass
