@@ -46,6 +46,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False) as client:
                 resp = client.get(self.local_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.local_url, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_local", run)
 
@@ -54,6 +55,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False, timeout=10) as client:
                 resp = client.get(self.remote_http_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_remote_http", run)
 
@@ -62,6 +64,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False, timeout=10) as client:
                 resp = client.get(self.remote_https_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_remote_https", run)
 
@@ -70,6 +73,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(http2=True, verify=False, timeout=10) as client:
                 resp = client.get(self.http2_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_http2", run)
 
@@ -81,6 +85,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_http)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_http, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_proxy_http", run)
 
@@ -92,6 +97,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_https)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_https, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_proxy_https", run)
 
@@ -103,6 +109,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_https)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_https, resp.text)
 
         return self.run_sequential_benchmark("httpx_seq_proxy_http2", run)
 
@@ -111,6 +118,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False) as client:
                 resp = client.get(self.local_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.local_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -119,6 +127,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False, timeout=10) as client:
                 resp = client.get(self.remote_http_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -127,6 +136,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(verify=False, timeout=10) as client:
                 resp = client.get(self.remote_https_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -135,6 +145,7 @@ class HttpxBenchmark(LibraryBenchmark):
             with httpx.Client(http2=True, verify=False, timeout=10) as client:
                 resp = client.get(self.http2_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -146,6 +157,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_http)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_http, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -157,6 +169,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_https)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_https, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -168,6 +181,7 @@ class HttpxBenchmark(LibraryBenchmark):
         def run():
             resp = client.get(self.proxy_target_https)
             assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+            self.validate_response_body(self.proxy_target_https, resp.text)
 
         return self.run_concurrent_sync(run)
 
@@ -176,6 +190,7 @@ class HttpxBenchmark(LibraryBenchmark):
             async with httpx.AsyncClient(verify=False) as client:
                 resp = await client.get(self.local_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.local_url, resp.text)
 
         return self.run_async_benchmark(request)
 
@@ -184,6 +199,7 @@ class HttpxBenchmark(LibraryBenchmark):
             async with httpx.AsyncClient(verify=False, timeout=10) as client:
                 resp = await client.get(self.remote_http_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_http_url, resp.text)
 
         return self.run_async_benchmark(request)
 
@@ -192,6 +208,7 @@ class HttpxBenchmark(LibraryBenchmark):
             async with httpx.AsyncClient(verify=False, timeout=10) as client:
                 resp = await client.get(self.remote_https_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.remote_https_url, resp.text)
 
         return self.run_async_benchmark(request)
 
@@ -200,6 +217,7 @@ class HttpxBenchmark(LibraryBenchmark):
             async with httpx.AsyncClient(http2=True, verify=False, timeout=10) as client:
                 resp = await client.get(self.http2_url)
                 assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                self.validate_response_body(self.http2_url, resp.text)
 
         return self.run_async_benchmark(request)
 
@@ -214,6 +232,7 @@ class HttpxBenchmark(LibraryBenchmark):
                 ) as client:
                     resp = await client.get(self.proxy_target_http)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.proxy_target_http, resp.text)
             except Exception:
                 pass
 
@@ -233,6 +252,7 @@ class HttpxBenchmark(LibraryBenchmark):
                 ) as client:
                     resp = await client.get(self.proxy_target_https)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 pass
 
@@ -252,6 +272,7 @@ class HttpxBenchmark(LibraryBenchmark):
                 ) as client:
                     resp = await client.get(self.proxy_target_https)
                     assert 200 <= resp.status_code < 600, f"Got status {resp.status_code}"
+                    self.validate_response_body(self.proxy_target_https, resp.text)
             except Exception:
                 pass
 

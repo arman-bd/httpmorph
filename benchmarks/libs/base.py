@@ -5,6 +5,7 @@ import statistics
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 
 class LibraryBenchmark(ABC):
@@ -40,6 +41,34 @@ class LibraryBenchmark(ABC):
         self.proxy_url_https = config.get("proxy_url_https")
         self.proxy_target_http = config["proxy_target_http"]
         self.proxy_target_https = config["proxy_target_https"]
+
+    def validate_response_body(self, url, body_text):
+        """
+        Validate that the response body contains the hostname from the URL.
+
+        Args:
+            url: The requested URL (e.g., "http://httpbin.org/get")
+            body_text: The response body as text
+
+        Raises:
+            AssertionError: If the hostname is not found in the response body
+        """
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname or parsed.netloc.split('@')[-1].split(':')[0]
+
+            if not hostname or hostname in ['127.0.0.1', 'localhost']:
+                # Skip validation for local URLs
+                return
+
+            # Check if hostname appears in the response body
+            assert hostname in body_text, (
+                f"Validation failed: hostname '{hostname}' not found in response body. "
+                f"This might indicate proxy misconfiguration or incorrect routing."
+            )
+        except (AttributeError, IndexError) as e:
+            # If URL parsing fails, skip validation
+            pass
 
     @abstractmethod
     def get_test_matrix(self):

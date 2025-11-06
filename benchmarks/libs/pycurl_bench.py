@@ -49,6 +49,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.local_url, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_local", run)
@@ -64,6 +66,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.remote_http_url, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_remote_http", run)
@@ -81,6 +85,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.remote_https_url, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_remote_https", run)
@@ -99,6 +105,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.http2_url, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_remote_http2", run)
@@ -121,6 +129,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.proxy_target_http, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_proxy_http", run)
@@ -143,6 +153,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.proxy_target_https, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_proxy_https", run)
@@ -166,6 +178,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.proxy_target_https, body)
             c.close()
 
         return self.run_sequential_benchmark("pycurl_seq_proxy_http2", run)
@@ -183,6 +197,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.local_url, body)
             c.close()
 
         return self.run_concurrent_sync(run)
@@ -198,6 +214,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.remote_http_url, body)
             c.close()
 
         return self.run_concurrent_sync(run)
@@ -215,6 +233,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.remote_https_url, body)
             c.close()
 
         return self.run_concurrent_sync(run)
@@ -233,6 +253,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.http2_url, body)
             c.close()
 
         return self.run_concurrent_sync(run)
@@ -278,6 +300,8 @@ class PycurlBenchmark(LibraryBenchmark):
             c.perform()
             code = c.getinfo(c.RESPONSE_CODE)
             assert 200 <= code < 600, f"Got status {code}"
+            body = buffer.getvalue().decode('utf-8')
+            self.validate_response_body(self.proxy_target_https, body)
             c.close()
 
         return self.run_concurrent_sync(run)
@@ -302,6 +326,8 @@ class PycurlBenchmark(LibraryBenchmark):
                 c.perform()
                 code = c.getinfo(c.RESPONSE_CODE)
                 assert 200 <= code < 600, f"Got status {code}"
+                body = buffer.getvalue().decode('utf-8')
+                self.validate_response_body(self.proxy_target_https, body)
                 c.close()
             except Exception:
                 pass

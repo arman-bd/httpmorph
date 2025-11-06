@@ -51,6 +51,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.local_url)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.local_url, body)
 
         return self.run_sequential_benchmark("urllib3_seq_local", run)
 
@@ -60,6 +62,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.remote_http_url, timeout=10.0)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.remote_http_url, body)
 
         return self.run_sequential_benchmark("urllib3_seq_remote_http", run)
 
@@ -69,6 +73,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.remote_https_url, timeout=10.0)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.remote_https_url, body)
 
         return self.run_sequential_benchmark("urllib3_seq_remote_https", run)
 
@@ -78,6 +84,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.local_url)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.local_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -87,6 +95,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.remote_http_url, timeout=10.0)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.remote_http_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -96,6 +106,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.remote_https_url, timeout=10.0)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.remote_https_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -108,6 +120,8 @@ class Urllib3Benchmark(LibraryBenchmark):
             try:
                 resp = http.request("GET", self.proxy_target_http)
                 assert 200 <= resp.status < 600
+                body = resp.data.decode('utf-8')
+                self.validate_response_body(self.proxy_target_http, body)
             except Exception:
                 pass
 
@@ -124,6 +138,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.proxy_target_https)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.proxy_target_https, body)
 
         return self.run_concurrent_sync(run)
 
@@ -135,6 +151,8 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.proxy_target_http)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.proxy_target_http, body)
 
         return self.run_sequential_benchmark("urllib3_seq_proxy_http", run)
 
@@ -146,5 +164,7 @@ class Urllib3Benchmark(LibraryBenchmark):
         def run():
             resp = http.request("GET", self.proxy_target_https)
             assert 200 <= resp.status < 600, f"Got status {resp.status}"
+            body = resp.data.decode('utf-8')
+            self.validate_response_body(self.proxy_target_https, body)
 
         return self.run_sequential_benchmark("urllib3_seq_proxy_https", run)

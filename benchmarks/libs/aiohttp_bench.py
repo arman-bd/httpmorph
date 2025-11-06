@@ -32,7 +32,8 @@ class AiohttpBenchmark(LibraryBenchmark):
                     self.local_url, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    await resp.read()
+                    body = await resp.text()
+                    self.validate_response_body(self.local_url, body)
 
         return self.run_async_benchmark(request)
 
@@ -43,7 +44,8 @@ class AiohttpBenchmark(LibraryBenchmark):
                     self.remote_http_url, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    await resp.read()
+                    body = await resp.text()
+                    self.validate_response_body(self.remote_http_url, body)
 
         return self.run_async_benchmark(request)
 
@@ -54,7 +56,8 @@ class AiohttpBenchmark(LibraryBenchmark):
                     self.remote_https_url, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    await resp.read()
+                    body = await resp.text()
+                    self.validate_response_body(self.remote_https_url, body)
 
         return self.run_async_benchmark(request)
 
@@ -73,7 +76,8 @@ class AiohttpBenchmark(LibraryBenchmark):
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                        await resp.read()
+                        body = await resp.text()
+                        self.validate_response_body(self.proxy_target_http, body)
             except Exception:
                 pass
 
@@ -97,7 +101,8 @@ class AiohttpBenchmark(LibraryBenchmark):
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                        await resp.read()
+                        body = await resp.text()
+                        self.validate_response_body(self.proxy_target_https, body)
             except Exception:
                 pass
 
