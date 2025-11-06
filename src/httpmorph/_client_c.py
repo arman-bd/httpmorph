@@ -364,11 +364,11 @@ class Response:
 class Client:
     """HTTP client using C implementation"""
 
-    def __init__(self, http2=False):
+    def __init__(self, http2=True):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
-        self.http2 = http2  # HTTP/2 enabled flag
+        self.http2 = http2  # HTTP/2 enabled flag (default True for Chrome 142)
         self._cookies = {}  # Cookie jar for this client
 
         # Auto-load certifi CA bundle if available (like requests does)

@@ -14,9 +14,9 @@ class TestClientHTTP2Flag:
     """Test Client class with HTTP/2 flag"""
 
     def test_client_http2_default_false(self, httpbin_host):
-        """Test that Client http2 flag defaults to False"""
+        """Test that Client http2 flag defaults to True (Chrome 142)"""
         client = httpmorph.Client()
-        assert client.http2 is False
+        assert client.http2 is True
 
     def test_client_http2_true(self, httpbin_host):
         """Test Client with http2=True"""
@@ -229,9 +229,9 @@ class TestHTTP2EdgeCases:
         client2 = httpmorph.Client(http2=False)
         assert client2.http2 is False
 
-        # Should handle default (no argument)
+        # Should handle default (no argument) - defaults to True for Chrome 142
         client3 = httpmorph.Client()
-        assert client3.http2 is False
+        assert client3.http2 is True
 
     def test_http2_multiple_concurrent_requests(self, httpbin_host):
         """Test HTTP/2 with concurrent requests (multiplexing)"""

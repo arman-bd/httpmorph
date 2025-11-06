@@ -223,8 +223,8 @@ cdef class Client:
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
 
-            # Set HTTP/2 flag if provided (default is False)
-            http2 = kwargs.get('http2', False)
+            # Set HTTP/2 flag if provided (default is True for Chrome)
+            http2 = kwargs.get('http2', True)
             httpmorph_request_set_http2(req, http2)
 
             # Set SSL verification (default is True)
@@ -284,7 +284,10 @@ cdef class Client:
 
             # Add default headers that will be added by C code if not present
             if 'User-Agent' not in request_headers:
-                request_headers['User-Agent'] = f'httpmorph/{_get_httpmorph_version()}'
+                # Use Chrome 142 User-Agent by default
+                request_headers['User-Agent'] = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+                # Add the User-Agent header to the C request
+                httpmorph_request_add_header(req, b'User-Agent', request_headers['User-Agent'].encode('utf-8'))
             if 'Accept' not in request_headers:
                 request_headers['Accept'] = '*/*'
             if 'Connection' not in request_headers:
@@ -383,7 +386,7 @@ cdef class Session:
 
         browser_lower = browser.lower()
         self._browser = browser_lower
-        if browser_lower == "chrome":
+        if browser_lower == "chrome" or browser_lower == "chrome142":
             browser_type = HTTPMORPH_BROWSER_CHROME
         elif browser_lower == "firefox":
             browser_type = HTTPMORPH_BROWSER_FIREFOX
@@ -474,8 +477,8 @@ cdef class Session:
                 timeout_ms = int(timeout * 1000) if isinstance(timeout, float) else int(timeout) * 1000
                 httpmorph_request_set_timeout(req, timeout_ms)
 
-            # Set HTTP/2 flag if provided (default is False)
-            http2 = kwargs.get('http2', False)
+            # Set HTTP/2 flag if provided (default is True for Chrome)
+            http2 = kwargs.get('http2', True)
             httpmorph_request_set_http2(req, http2)
 
             # Set SSL verification (default is True)
@@ -571,10 +574,7 @@ cdef class Session:
 
             # Get browser-specific User-Agent
             browser_user_agents = {
-                'chrome': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                'firefox': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
-                'safari': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-                'edge': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0',
+                'chrome': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
             }
             default_ua = browser_user_agents.get(self._browser, f'httpmorph/{_get_httpmorph_version()}')
 

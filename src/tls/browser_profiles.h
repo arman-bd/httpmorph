@@ -41,12 +41,15 @@ typedef enum {
     TLS_EXT_SIGNED_CERTIFICATE_TIMESTAMP = 18,
     TLS_EXT_PADDING = 21,
     TLS_EXT_EXTENDED_MASTER_SECRET = 23,
+    TLS_EXT_COMPRESS_CERTIFICATE = 27,
     TLS_EXT_SESSION_TICKET = 35,
+    TLS_EXT_PRE_SHARED_KEY = 41,
     TLS_EXT_SUPPORTED_VERSIONS = 43,
     TLS_EXT_PSK_KEY_EXCHANGE_MODES = 45,
     TLS_EXT_KEY_SHARE = 51,
-    TLS_EXT_COMPRESS_CERTIFICATE = 27,
     TLS_EXT_APPLICATION_SETTINGS = 17513,
+    TLS_EXT_ENCRYPTED_CLIENT_HELLO = 65037,
+    TLS_EXT_RENEGOTIATION_INFO = 65281,
     TLS_EXT_GREASE = 0x0a0a,  /* GREASE values vary */
 } tls_extension_t;
 
@@ -133,11 +136,7 @@ browser_profile_t* browser_profile_generate_variant(const browser_profile_t *bas
 void browser_profile_destroy(browser_profile_t *profile);
 
 /* Predefined profiles */
-extern const browser_profile_t PROFILE_CHROME_131;
-extern const browser_profile_t PROFILE_CHROME_124;
-extern const browser_profile_t PROFILE_FIREFOX_122;
-extern const browser_profile_t PROFILE_SAFARI_17;
-extern const browser_profile_t PROFILE_EDGE_122;
+extern const browser_profile_t PROFILE_CHROME_142;  /* Chrome 142 - Current Chrome fingerprint */
 
 #ifdef __cplusplus
 }
