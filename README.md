@@ -231,25 +231,6 @@ except httpmorph.RequestException as e:
     print(f"Request failed: {e}")
 ```
 
-## Performance
-
-httpmorph is built for speed with a native C implementation and BoringSSL for optimized TLS operations.
-
-**Benchmark vs requests library** (30-second test, macOS Apple Silicon):
-- **Throughput:** 49.4% faster on average (1,056 vs 707 req/s)
-- **GET requests:** 1,032 req/s vs 709 req/s (1.46x faster)
-- **POST requests:** 1,080 req/s vs 705 req/s (1.53x faster)
-- **Latency:** 33.1% lower on average (0.95ms vs 1.41ms)
-
-See [detailed benchmark results](benchmarks/results_requests_macos.md) for full metrics including performance charts.
-
-### Performance Features
-- Native C implementation with minimal Python overhead
-- BoringSSL for optimized TLS operations
-- Connection pooling reduces handshake overhead
-- HTTP/2 multiplexing for concurrent requests
-- Efficient memory management
-
 ## Platform Support
 
 | Platform | Status |
@@ -383,8 +364,8 @@ pytest tests/ -v
 
 - Built on BoringSSL (Google)
 - HTTP/2 support via nghttp2
-- Inspired by Python's requests library
-- Browser fingerprints based on real browser implementations
+- Inspired by Python's requests and httpx libraries
+- Browser fingerprints based on real browser implementations ( still in progress )
 
 ## FAQ
 
@@ -403,7 +384,8 @@ A: Please open an issue on GitHub with a minimal reproduction example and your e
 ## Support
 
 - GitHub Issues: [Report bugs and feature requests](https://github.com/arman-bd/httpmorph/issues)
-- Documentation: [Full API documentation](https://httpmorph.readthedocs.io) (coming soon)
+- Documentation: [Full API documentation](https://httpmorph.readthedocs.io)
+- PyPI: [httpmorph on PyPI](https://pypi.org/project/httpmorph/)
 
 ---
 

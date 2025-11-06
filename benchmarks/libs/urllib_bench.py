@@ -35,7 +35,8 @@ class UrllibBenchmark(LibraryBenchmark):
             ctx.verify_mode = ssl.CERT_NONE
             with urllib.request.urlopen(self.local_url, context=ctx) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.local_url, body)
 
         return self.run_sequential_benchmark("urllib_seq_local", run)
 
@@ -43,7 +44,8 @@ class UrllibBenchmark(LibraryBenchmark):
         def run():
             with urllib.request.urlopen(self.remote_http_url, timeout=10) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.remote_http_url, body)
 
         return self.run_sequential_benchmark("urllib_seq_remote_http", run)
 
@@ -54,7 +56,8 @@ class UrllibBenchmark(LibraryBenchmark):
             ctx.verify_mode = ssl.CERT_NONE
             with urllib.request.urlopen(self.remote_https_url, context=ctx, timeout=10) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.remote_https_url, body)
 
         return self.run_sequential_benchmark("urllib_seq_remote_https", run)
 
@@ -68,7 +71,8 @@ class UrllibBenchmark(LibraryBenchmark):
                 opener = urllib.request.build_opener(proxy_handler)
                 with opener.open(self.proxy_target_http, timeout=10) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    resp.read()
+                    body = resp.read().decode('utf-8')
+                    self.validate_response_body(self.proxy_target_http, body)
             except Exception:
                 pass
 
@@ -90,7 +94,8 @@ class UrllibBenchmark(LibraryBenchmark):
                 opener = urllib.request.build_opener(proxy_handler)
                 with opener.open(self.proxy_target_https, timeout=10) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    resp.read()
+                    body = resp.read().decode('utf-8')
+                    self.validate_response_body(self.proxy_target_https, body)
             except Exception:
                 pass
 
@@ -106,7 +111,8 @@ class UrllibBenchmark(LibraryBenchmark):
             ctx.verify_mode = ssl.CERT_NONE
             with urllib.request.urlopen(self.local_url, context=ctx) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.local_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -114,7 +120,8 @@ class UrllibBenchmark(LibraryBenchmark):
         def run():
             with urllib.request.urlopen(self.remote_http_url, timeout=10) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.remote_http_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -125,7 +132,8 @@ class UrllibBenchmark(LibraryBenchmark):
             ctx.verify_mode = ssl.CERT_NONE
             with urllib.request.urlopen(self.remote_https_url, context=ctx, timeout=10) as resp:
                 assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                resp.read()
+                body = resp.read().decode('utf-8')
+                self.validate_response_body(self.remote_https_url, body)
 
         return self.run_concurrent_sync(run)
 
@@ -139,7 +147,8 @@ class UrllibBenchmark(LibraryBenchmark):
                 opener = urllib.request.build_opener(proxy_handler)
                 with opener.open(self.proxy_target_http, timeout=10) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    resp.read()
+                    body = resp.read().decode('utf-8')
+                    self.validate_response_body(self.proxy_target_http, body)
             except Exception:
                 pass
 
@@ -161,7 +170,8 @@ class UrllibBenchmark(LibraryBenchmark):
                 opener = urllib.request.build_opener(proxy_handler)
                 with opener.open(self.proxy_target_https, timeout=10) as resp:
                     assert 200 <= resp.status < 600, f"Got status {resp.status}"
-                    resp.read()
+                    body = resp.read().decode('utf-8')
+                    self.validate_response_body(self.proxy_target_https, body)
             except Exception:
                 pass
 

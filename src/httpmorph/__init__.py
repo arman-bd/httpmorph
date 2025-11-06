@@ -6,8 +6,6 @@ High-performance HTTP/HTTPS client with dynamic browser fingerprinting.
 Built from scratch in C with BoringSSL. No fallback implementations.
 """
 
-import sys
-
 # Read version from package metadata (single source of truth: pyproject.toml)
 try:
     from importlib.metadata import version as _get_version
@@ -63,8 +61,6 @@ if not HAS_C_EXTENSION:
         "Please ensure the package was built correctly with: "
         "python setup.py build_ext --inplace"
     )
-
-print("[httpmorph] Using C extension with BoringSSL", file=sys.stderr)
 
 # Import async client (C-level async I/O with kqueue/epoll)
 try:
