@@ -71,6 +71,33 @@ response = session.get('https://example.com')
 # Available browsers: chrome, chrome142
 ```
 
+### OS-Specific User Agents
+
+httpmorph supports different operating system user agents to simulate requests from various platforms:
+
+```python
+import httpmorph
+
+# macOS (default)
+session = httpmorph.Session(browser='chrome', os='macos')
+# User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...
+
+# Windows
+session = httpmorph.Session(browser='chrome', os='windows')
+# User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...
+
+# Linux
+session = httpmorph.Session(browser='chrome', os='linux')
+# User-Agent: Mozilla/5.0 (X11; Linux x86_64) ...
+```
+
+**Supported OS values:**
+- `macos` - macOS / Mac OS X (default)
+- `windows` - Windows 10/11
+- `linux` - Linux distributions
+
+The OS parameter only affects the User-Agent string, while all other fingerprinting characteristics (TLS, HTTP/2, JA3/JA4) remain consistent to match the specified browser profile.
+
 ### Chrome 142 Fingerprint Matching
 
 httpmorph accurately mimics **Chrome 142** TLS fingerprints with:

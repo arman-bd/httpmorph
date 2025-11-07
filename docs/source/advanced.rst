@@ -9,26 +9,51 @@ TLS Fingerprinting
 Browser-Specific Fingerprints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each browser profile generates a unique TLS fingerprint:
+httpmorph generates accurate Chrome 142 TLS fingerprints with perfect JA3N, JA4, and JA4_R matching:
 
 .. code-block:: python
 
-   # Chrome profile
+   # Chrome 142 profile (default)
    session = httpmorph.Session(browser='chrome')
    response = session.get('https://example.com')
-   print(response.ja3_fingerprint)
-   # Output: Chrome-specific JA3 hash
 
-   # Firefox profile
-   session = httpmorph.Session(browser='firefox')
-   response = session.get('https://example.com')
-   print(response.ja3_fingerprint)
-   # Output: Firefox-specific JA3 hash
+   print('JA3:', response.ja3_fingerprint)
+   print('TLS:', response.tls_version)
+   print('Cipher:', response.tls_cipher)
+   print('HTTP:', response.http_version)
+
+   # Output example:
+   # JA3: 8e19337e7524d2573be54efb2b0784c9 (Chrome 142 normalized)
+   # TLS: TLSv1.3
+   # Cipher: TLS_AES_128_GCM_SHA256
+   # HTTP: 2.0
+
+OS-Specific User Agents
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Customize the User-Agent for different operating systems:
+
+.. code-block:: python
+
+   # macOS user agent (default)
+   session = httpmorph.Session(browser='chrome', os='macos')
+   response = session.get('https://httpbin.org/user-agent')
+   # User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...
+
+   # Windows user agent
+   session = httpmorph.Session(browser='chrome', os='windows')
+   response = session.get('https://httpbin.org/user-agent')
+   # User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...
+
+   # Linux user agent
+   session = httpmorph.Session(browser='chrome', os='linux')
+   response = session.get('https://httpbin.org/user-agent')
+   # User-Agent: Mozilla/5.0 (X11; Linux x86_64) ...
 
 GREASE Values
 ~~~~~~~~~~~~~
 
-Chrome and Edge profiles use GREASE (Generate Random Extensions And Sustain Extensibility) values that are randomized per request:
+Chrome 142 uses GREASE (Generate Random Extensions And Sustain Extensibility) values that are randomized per request to maintain TLS ecosystem extensibility:
 
 .. code-block:: python
 
@@ -38,7 +63,8 @@ Chrome and Edge profiles use GREASE (Generate Random Extensions And Sustain Exte
    r1 = session.get('https://example.com')
    r2 = session.get('https://example.com')
 
-   # JA3 fingerprints will differ slightly due to GREASE
+   # JA3 fingerprints will differ slightly due to GREASE randomization
+   # However, JA3N (normalized) remains consistent
 
 TLS Version Control
 ~~~~~~~~~~~~~~~~~~~

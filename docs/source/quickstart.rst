@@ -98,32 +98,58 @@ Use as context manager:
 Browser Fingerprinting
 ----------------------
 
-Mimic specific browsers:
+Mimic Chrome browser with realistic fingerprints:
 
 .. code-block:: python
 
-   # Chrome browser profile
+   # Chrome browser profile (defaults to Chrome 142)
    session = httpmorph.Session(browser='chrome')
+   response = session.get('https://example.com')
 
-   # Firefox browser profile
-   session = httpmorph.Session(browser='firefox')
+   # Use specific Chrome version
+   session = httpmorph.Session(browser='chrome142')
+   response = session.get('https://example.com')
 
-   # Safari browser profile
-   session = httpmorph.Session(browser='safari')
-
-   # Edge browser profile
-   session = httpmorph.Session(browser='edge')
-
-   # Random browser
+   # Random browser selection
    session = httpmorph.Session(browser='random')
 
-Each browser profile includes:
+The Chrome browser profile includes:
 
-* Browser-specific User-Agent
-* Browser-specific TLS cipher suites
-* Browser-specific TLS extensions
-* Browser-specific HTTP/2 settings
-* JA3 fingerprint matching the browser
+* Chrome-specific User-Agent
+* Chrome-specific TLS cipher suites and extensions
+* Post-quantum cryptography (X25519MLKEM768)
+* Certificate compression (Brotli, Zlib)
+* Chrome-specific HTTP/2 settings
+* Perfect JA3N, JA4, and JA4_R fingerprint matching
+
+OS-Specific User Agents
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Simulate requests from different operating systems:
+
+.. code-block:: python
+
+   import httpmorph
+
+   # macOS (default)
+   session = httpmorph.Session(browser='chrome', os='macos')
+   # User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...
+
+   # Windows
+   session = httpmorph.Session(browser='chrome', os='windows')
+   # User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...
+
+   # Linux
+   session = httpmorph.Session(browser='chrome', os='linux')
+   # User-Agent: Mozilla/5.0 (X11; Linux x86_64) ...
+
+Supported OS values:
+
+* ``macos`` - macOS / Mac OS X (default)
+* ``windows`` - Windows 10/11
+* ``linux`` - Linux distributions
+
+The ``os`` parameter only affects the User-Agent string. All other fingerprinting characteristics (TLS, HTTP/2, JA3/JA4) remain consistent with the specified browser profile.
 
 Request Parameters
 ------------------

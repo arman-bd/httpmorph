@@ -18,10 +18,12 @@ A Python HTTP client library with browser fingerprinting capabilities, written i
 Features
 --------
 
-* **C implementation** - Native C code with Python bindings
-* **Browser profiles** - Mimic Chrome, Firefox, Safari, or Edge
-* **HTTP/2 support** - ALPN negotiation via nghttp2
-* **TLS fingerprinting** - JA3 fingerprint generation
+* **C implementation** - Native C code with Python bindings for maximum performance
+* **Chrome 142 fingerprinting** - Perfect JA3N, JA4, and JA4_R matching
+* **HTTP/2 support** - Full HTTP/2 with ALPN negotiation via nghttp2
+* **TLS 1.3 with post-quantum crypto** - X25519MLKEM768 support
+* **Certificate compression** - Brotli and Zlib support for Cloudflare sites
+* **OS-specific user agents** - macOS, Windows, and Linux variants
 * **Connection pooling** - Automatic connection reuse
 * **Async support** - AsyncClient with epoll/kqueue
 * **Compression** - Automatic gzip/deflate decompression
