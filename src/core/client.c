@@ -229,7 +229,7 @@ httpmorph_client_t* httpmorph_client_create(void) {
     client->io_engine = default_io_engine;
 
     /* Default to Chrome browser profile - protected by mutex since SSL_CTX_* functions are not thread-safe */
-    client->browser_profile = &PROFILE_CHROME_131;
+    client->browser_profile = &PROFILE_CHROME_142;
 
 #ifndef _WIN32
     pthread_mutex_lock(&ssl_ctx_config_mutex);

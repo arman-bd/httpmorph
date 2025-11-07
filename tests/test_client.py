@@ -177,10 +177,10 @@ class TestClientHTTP2Flag:
     """Test Client with HTTP/2 flag (httpx-like API)"""
 
     def test_client_http2_flag_default(self):
-        """Test that Client http2 flag defaults to False"""
+        """Test that Client http2 flag defaults to True (Chrome 142)"""
         client = httpmorph.Client()
         assert hasattr(client, "http2")
-        assert client.http2 is False
+        assert client.http2 is True
 
     def test_client_http2_flag_enabled(self, httpbin_host):
         """Test Client with http2=True"""

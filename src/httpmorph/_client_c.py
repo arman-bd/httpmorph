@@ -364,11 +364,11 @@ class Response:
 class Client:
     """HTTP client using C implementation"""
 
-    def __init__(self, http2=False):
+    def __init__(self, http2=True):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._client = _httpmorph.Client()
-        self.http2 = http2  # HTTP/2 enabled flag
+        self.http2 = http2  # HTTP/2 enabled flag (default True for Chrome 142)
         self._cookies = {}  # Cookie jar for this client
 
         # Auto-load certifi CA bundle if available (like requests does)
@@ -654,11 +654,12 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
-    def __init__(self, browser="chrome", http2=False):
+    def __init__(self, browser="chrome", http2=False, os="macos"):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
-        self._session = _httpmorph.Session(browser=browser)
+        self._session = _httpmorph.Session(browser=browser, os=os)
         self.browser = browser
+        self.os = os
         self.http2 = http2  # HTTP/2 enabled flag
         self.headers = {}  # Persistent headers
         self._cookies = CookieDict(self._session.cookie_jar)

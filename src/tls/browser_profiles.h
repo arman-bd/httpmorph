@@ -22,6 +22,13 @@ extern "C" {
 #define MAX_ALPN_PROTOCOLS 8
 #define MAX_HTTP2_SETTINGS 16
 
+/* OS types for user agent generation */
+typedef enum {
+    OS_MACOS = 0,    /* macOS (default) */
+    OS_WINDOWS = 1,  /* Windows */
+    OS_LINUX = 2,    /* Linux */
+} os_type_t;
+
 /* TLS version */
 typedef enum {
     TLS_VERSION_1_0 = 0x0301,
@@ -41,12 +48,15 @@ typedef enum {
     TLS_EXT_SIGNED_CERTIFICATE_TIMESTAMP = 18,
     TLS_EXT_PADDING = 21,
     TLS_EXT_EXTENDED_MASTER_SECRET = 23,
+    TLS_EXT_COMPRESS_CERTIFICATE = 27,
     TLS_EXT_SESSION_TICKET = 35,
+    TLS_EXT_PRE_SHARED_KEY = 41,
     TLS_EXT_SUPPORTED_VERSIONS = 43,
     TLS_EXT_PSK_KEY_EXCHANGE_MODES = 45,
     TLS_EXT_KEY_SHARE = 51,
-    TLS_EXT_COMPRESS_CERTIFICATE = 27,
     TLS_EXT_APPLICATION_SETTINGS = 17513,
+    TLS_EXT_ENCRYPTED_CLIENT_HELLO = 65037,
+    TLS_EXT_RENEGOTIATION_INFO = 65281,
     TLS_EXT_GREASE = 0x0a0a,  /* GREASE values vary */
 } tls_extension_t;
 
@@ -54,7 +64,11 @@ typedef enum {
 typedef struct {
     const char *name;           /* e.g., "Chrome 131" */
     const char *version;        /* e.g., "131.0.6778.109" */
-    const char *user_agent;     /* Full user agent string */
+    const char *user_agent;     /* Full user agent string (macOS - default) */
+
+    /* OS-specific user agents */
+    const char *user_agent_windows;  /* Windows user agent */
+    const char *user_agent_linux;    /* Linux user agent */
 
     /* TLS configuration */
     tls_version_t min_tls_version;
@@ -118,6 +132,13 @@ const browser_profile_t* browser_profile_random(void);
 const browser_profile_t* browser_profile_by_type(const char *browser_type);
 
 /**
+ * Get user agent for specific OS from profile
+ * Returns appropriate user agent string based on os_type
+ * Falls back to macOS user agent if OS-specific version not available
+ */
+const char* browser_profile_get_user_agent(const browser_profile_t *profile, os_type_t os);
+
+/**
  * List all available profiles
  */
 const char** browser_profile_list(int *count);
@@ -133,11 +154,7 @@ browser_profile_t* browser_profile_generate_variant(const browser_profile_t *bas
 void browser_profile_destroy(browser_profile_t *profile);
 
 /* Predefined profiles */
-extern const browser_profile_t PROFILE_CHROME_131;
-extern const browser_profile_t PROFILE_CHROME_124;
-extern const browser_profile_t PROFILE_FIREFOX_122;
-extern const browser_profile_t PROFILE_SAFARI_17;
-extern const browser_profile_t PROFILE_EDGE_122;
+extern const browser_profile_t PROFILE_CHROME_142;  /* Chrome 142 - Current Chrome fingerprint */
 
 #ifdef __cplusplus
 }

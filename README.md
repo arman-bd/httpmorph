@@ -11,8 +11,9 @@ A Python HTTP client focused on mimicking browser fingerprints.
 - **Requests-compatible API** - Drop-in replacement for most Python `requests` use cases
 - **High Performance** - Native C implementation with BoringSSL for HTTP/HTTPS
 - **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2 (httpx-like API)
-- **Browser Fingerprinting** - Realistic browser profiles (Chrome and it's variants)
-- **TLS Fingerprinting** - JA3 fingerprint generation and customization
+- **Chrome 142 Fingerprint** - Perfect JA3N, JA4, and JA4_R matching
+- **Browser Fingerprinting** - Realistic Chrome 142 browser profile
+- **TLS Fingerprinting** - JA3/JA3N/JA4 fingerprint generation with post-quantum crypto
 - **Connection Pooling** - Automatic connection reuse for better performance
 - **Session Management** - Persistent cookies and headers across requests
 
@@ -60,15 +61,72 @@ print(response.http_version)  # '2.0'
 Mimic real browser behavior with pre-configured profiles:
 
 ```python
-# Use Chrome fingerprint
+# Use Chrome fingerprint (defaults to Chrome 142)
 response = httpmorph.get('https://example.com', browser='chrome')
 
-# Use Firefox fingerprint
-session = httpmorph.Session(browser='firefox')
+# Use specific Chrome version
+session = httpmorph.Session(browser='chrome142')
 response = session.get('https://example.com')
 
-# Available browsers: chrome, firefox, safari, edge
+# Available browsers: chrome, chrome142
 ```
+
+### OS-Specific User Agents
+
+httpmorph supports different operating system user agents to simulate requests from various platforms:
+
+```python
+import httpmorph
+
+# macOS (default)
+session = httpmorph.Session(browser='chrome', os='macos')
+# User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ...
+
+# Windows
+session = httpmorph.Session(browser='chrome', os='windows')
+# User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...
+
+# Linux
+session = httpmorph.Session(browser='chrome', os='linux')
+# User-Agent: Mozilla/5.0 (X11; Linux x86_64) ...
+```
+
+**Supported OS values:**
+- `macos` - macOS / Mac OS X (default)
+- `windows` - Windows 10/11
+- `linux` - Linux distributions
+
+The OS parameter only affects the User-Agent string, while all other fingerprinting characteristics (TLS, HTTP/2, JA3/JA4) remain consistent to match the specified browser profile.
+
+### Chrome 142 Fingerprint Matching
+
+httpmorph accurately mimics **Chrome 142** TLS fingerprints with:
+
+- **JA3N** ✅ Perfect match
+- **JA4** ✅ Perfect match
+- **JA4_R** ✅ Perfect match
+- **User-Agent**: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36`
+- **TLS 1.3** with correct cipher suites and extensions
+- **HTTP/2** with Chrome-specific SETTINGS frame
+- **Post-quantum cryptography** (X25519MLKEM768)
+- **Certificate compression** (Brotli, Zlib)
+
+**Verify your fingerprint:**
+
+```python
+import httpmorph
+
+# Make a request to fingerprint checker
+response = httpmorph.get('https://suip.biz/?act=ja4', browser='chrome142')
+print(response.text)
+
+# You should see perfect matches for:
+# - JA4 fingerprint ✅
+# - JA3N fingerprint ✅
+# - User-Agent: Chrome/142.0.0.0 ✅
+```
+
+httpmorph achieves **perfect matches** for all modern fingerprints including JA3N, JA4, and JA4_R when tested against real Chrome 142 browsers.
 
 ## Advanced Usage
 
@@ -343,9 +401,12 @@ Please open an issue or pull request on GitHub.
 
 ## Testing
 
-httpmorph has a comprehensive test suite with 270+ tests covering:
+httpmorph has a comprehensive test suite with 350+ tests covering:
 
 - All HTTP methods and parameters
+- Chrome 142 fingerprint validation (JA3N, JA4, JA4_R)
+- TLS 1.2/1.3 with post-quantum cryptography
+- Certificate compression (Brotli, Zlib)
 - Redirect handling and history
 - Cookie and session management
 - Authentication and SSL
@@ -362,21 +423,28 @@ pytest tests/ -v
 
 ## Acknowledgments
 
-- Built on BoringSSL (Google)
+- Built on BoringSSL (Google) with post-quantum cryptography support
 - HTTP/2 support via nghttp2
 - Inspired by Python's requests and httpx libraries
-- Browser fingerprints based on real browser implementations ( still in progress )
+- Chrome 142 fingerprint matching with perfect JA3N, JA4, and JA4_R matches
+- Certificate compression support for Cloudflare-protected sites
 
 ## FAQ
 
 **Q: Why another HTTP client?**
 A: httpmorph combines the performance of native C with browser fingerprinting capabilities, making it ideal for applications that need both speed and realistic browser behavior.
 
+**Q: How accurate is the Chrome 142 fingerprint?**
+A: httpmorph achieves perfect matches for modern fingerprints including JA3N, JA4, and JA4_R. This is verified against real Chrome 142 browsers. Test your fingerprint at https://suip.biz/?act=ja4
+
 **Q: Is it production-ready?**
 A: No, httpmorph is still in active development and not yet recommended for production use.
 
 **Q: Can I use this as a drop-in replacement for requests?**
 A: For most common use cases, yes! We've implemented the most widely-used requests API. Some advanced features may have slight differences.
+
+**Q: Does it work with Cloudflare-protected sites?**
+A: Yes! httpmorph supports certificate compression (Brotli, Zlib) which is required for many Cloudflare-protected sites. We successfully tested with icanhazip.com and postman-echo.com.
 
 **Q: How do I report a bug?**
 A: Please open an issue on GitHub with a minimal reproduction example and your environment details (OS, Python version, httpmorph version).
@@ -387,6 +455,30 @@ A: Please open an issue on GitHub with a minimal reproduction example and your e
 - Documentation: [Full API documentation](https://httpmorph.readthedocs.io)
 - PyPI: [httpmorph on PyPI](https://pypi.org/project/httpmorph/)
 
+## License
+
+MIT License - See [LICENSE](LICENSE) file for details.
+
+## Legal Disclaimer
+
+**FOR EDUCATIONAL AND RESEARCH PURPOSES ONLY**
+
+This software is provided for educational, research, authorized security testing, and development purposes only.
+
+**No Affiliation:** This software is not affiliated with, endorsed by, or connected to Google, Chrome, or any browser vendors. All trademarks are property of their respective owners.
+
+**User Responsibility:** You are solely responsible for your use of this software and any consequences. You must:
+- Obtain proper authorization before testing systems you don't own
+- Comply with all applicable laws, regulations, and terms of service
+- Respect robots.txt and website usage policies
+- NOT use this for illegal, unauthorized, or malicious activities
+
+**Prohibited Uses:** Do not use this software for bypassing security measures without authorization, violating terms of service, unauthorized access, unauthorized web scraping, circumventing rate limits, fraud, harassment, or any illegal activities.
+
+**Disclaimer:** The authors disclaim all liability for any damages arising from use or misuse of this software. This software is provided "AS IS" without warranties of any kind. Use at your own risk.
+
+**Agreement:** By using this software, you agree to these terms. If you disagree, do not use this software.
+
 ---
 
-**httpmorph** - Fast, compatible, and powerful HTTP for Python.
+*Use this tool ethically and legally. You assume all risks and responsibilities.*

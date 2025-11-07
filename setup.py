@@ -109,7 +109,7 @@ else:
         "-fno-omit-frame-pointer",  # Better stack traces
         "-Wall",  # All warnings
         "-Wextra",  # Extra warnings
-        "-std=c11",  # C11 standard
+        # Note: -std flag removed to support mixed C/C++ compilation (C11/C++11 are defaults)
         # Version information from pyproject.toml
         f"-DHTTPMORPH_VERSION_MAJOR={VERSION_MAJOR}",
         f"-DHTTPMORPH_VERSION_MINOR={VERSION_MINOR}",
@@ -495,7 +495,7 @@ if not ON_READTHEDOCS:
         # These flags optimize for the build machine's CPU but create non-portable binaries
         # that fail with "Illegal instruction" on different CPUs
         EXT_COMPILE_ARGS = [
-            "-std=c11",
+            # Note: -std flag removed to support mixed C/C++ compilation
             "-O3",
             "-ffast-math",
             "-DHAVE_NGHTTP2",
@@ -607,6 +607,7 @@ if not ON_READTHEDOCS:
                 str(CORE_DIR / "network.c"),
                 str(CORE_DIR / "proxy.c"),
                 str(CORE_DIR / "tls.c"),
+                str(CORE_DIR / "boringssl_wrapper.cc"),  # C++ wrapper for BoringSSL C++ functions
                 str(CORE_DIR / "compression.c"),
                 str(CORE_DIR / "cookies.c"),
                 str(CORE_DIR / "request.c"),
@@ -667,6 +668,7 @@ if not ON_READTHEDOCS:
                 str(CORE_DIR / "network.c"),
                 str(CORE_DIR / "proxy.c"),  # Proxy support for async
                 str(CORE_DIR / "tls.c"),
+                str(CORE_DIR / "boringssl_wrapper.cc"),  # C++ wrapper for BoringSSL C++ functions
                 str(CORE_DIR / "request.c"),
                 str(CORE_DIR / "response.c"),
                 str(CORE_DIR / "buffer_pool.c"),

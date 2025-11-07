@@ -50,6 +50,7 @@ httpmorph_request_t* httpmorph_request_create(httpmorph_method_t method,
 
     /* TLS configuration defaults */
     request->verify_ssl = true;        /* Verify SSL certificates by default */
+    request->http2_enabled = true;     /* Enable HTTP/2 by default (Chrome supports it) */
     request->min_tls_version = 0;      /* Use library default (TLS 1.2+) */
     request->max_tls_version = 0;      /* Use library default (TLS 1.3) */
 

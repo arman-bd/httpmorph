@@ -41,19 +41,16 @@ def example_session():
 
 
 def example_different_browsers():
-    """Testing different browser fingerprints"""
-    print("\n=== Different Browser Fingerprints ===")
+    """Testing browser fingerprint"""
+    print("\n=== Chrome Browser Fingerprint ===")
 
-    browsers = ["chrome", "firefox", "safari", "edge"]
-
-    for browser in browsers:
-        try:
-            httpmorph.Session(browser=browser)
-            print(f"Created {browser} session")
-            # response = session.get("https://httpbin.org/user-agent")
-            # print(f"  User-Agent: {response.headers.get('User-Agent')}")
-        except NotImplementedError:
-            print(f"  {browser}: Not yet implemented")
+    try:
+        session = httpmorph.Session(browser="chrome")
+        print("Created Chrome session")
+        # response = session.get("https://httpbin.org/user-agent")
+        # print(f"  User-Agent: {response.headers.get('User-Agent')}")
+    except NotImplementedError:
+        print("  Chrome: Not yet implemented")
 
 
 def example_post_json():

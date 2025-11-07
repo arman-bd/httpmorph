@@ -195,31 +195,34 @@ static int http2_init_or_reuse_session(nghttp2_session **session_ptr,
             return -1;
         }
 
-        /* Configure optimal HTTP/2 settings for performance */
-        nghttp2_settings_entry iv[3];
+        /* Configure HTTP/2 settings to match Chrome 142 exactly */
+        nghttp2_settings_entry iv[6];
 
-        /* 1. Increase initial window size to 16MB (from default 64KB)
-         *    Allows more data in flight, reduces latency */
-        iv[0].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
-        iv[0].value = 16777216;  /* 16MB */
+        /* Chrome 142 HTTP/2 SETTINGS frame */
+        iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+        iv[0].value = 65536;
 
-        /* 2. Increase max concurrent streams (from default 100)
-         *    Allows more concurrent requests per connection */
-        iv[1].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
-        iv[1].value = 256;
+        iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+        iv[1].value = 0;  /* Disable server push */
 
-        /* 3. Enable connection-level window updates
-         *    Set max frame size to 16KB (default is already 16KB but be explicit) */
-        iv[2].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
-        iv[2].value = 16384;
+        iv[2].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
+        iv[2].value = 1000;
 
-        /* Send connection preface and optimized SETTINGS */
-        nghttp2_submit_settings(*session_ptr, NGHTTP2_FLAG_NONE, iv, 3);
+        iv[3].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+        iv[3].value = 6291456;
 
-        /* Increase connection-level flow control window to 16MB
-         * This is separate from per-stream windows */
+        iv[4].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
+        iv[4].value = 16384;
+
+        iv[5].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
+        iv[5].value = 262144;
+
+        /* Send connection preface and Chrome 142 SETTINGS */
+        nghttp2_submit_settings(*session_ptr, NGHTTP2_FLAG_NONE, iv, 6);
+
+        /* Send Chrome 142 WINDOW_UPDATE for connection-level flow control */
         nghttp2_submit_window_update(*session_ptr, NGHTTP2_FLAG_NONE, 0,
-                                      16777216 - 65535);  /* Increase by delta */
+                                      15663105);  /* Chrome 142 window update */
 
         nghttp2_session_send(*session_ptr);
 
@@ -267,27 +270,34 @@ int httpmorph_http2_request(SSL *ssl, const httpmorph_request_t *request,
         return -1;
     }
 
-    /* Configure optimal HTTP/2 settings for performance */
-    nghttp2_settings_entry iv[3];
+    /* Configure HTTP/2 settings to match Chrome 142 exactly */
+    nghttp2_settings_entry iv[6];
 
-    /* 1. Increase initial window size to 16MB (from default 64KB) */
-    iv[0].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
-    iv[0].value = 16777216;  /* 16MB */
+    /* Chrome 142 HTTP/2 SETTINGS frame */
+    iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+    iv[0].value = 65536;
 
-    /* 2. Increase max concurrent streams (from default 100) */
-    iv[1].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
-    iv[1].value = 256;
+    iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+    iv[1].value = 0;  /* Disable server push */
 
-    /* 3. Set max frame size to 16KB */
-    iv[2].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
-    iv[2].value = 16384;
+    iv[2].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
+    iv[2].value = 1000;
 
-    /* Send connection preface and optimized SETTINGS */
-    nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 3);
+    iv[3].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+    iv[3].value = 6291456;
 
-    /* Increase connection-level flow control window to 16MB */
+    iv[4].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
+    iv[4].value = 16384;
+
+    iv[5].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
+    iv[5].value = 262144;
+
+    /* Send connection preface and Chrome 142 SETTINGS */
+    nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 6);
+
+    /* Send Chrome 142 WINDOW_UPDATE for connection-level flow control */
     nghttp2_submit_window_update(session, NGHTTP2_FLAG_NONE, 0,
-                                  16777216 - 65535);  /* Increase by delta */
+                                  15663105);  /* Chrome 142 window update */
 
     nghttp2_session_send(session);
 
