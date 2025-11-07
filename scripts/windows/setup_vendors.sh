@@ -73,8 +73,9 @@ else
     fi
     echo "Using $NUM_CORES parallel jobs for compilation"
 
-    # Use Ninja if available (faster), otherwise Visual Studio generator
-    if command -v ninja &> /dev/null; then
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    # Ninja requires MSVC environment to be set up, VS generator sets it up automatically
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
         echo "Using Ninja generator (faster builds)..."
         cmake -G "Ninja" \
               -DCMAKE_BUILD_TYPE=Release \
@@ -83,7 +84,7 @@ else
               ..
         ninja -j$NUM_CORES
     else
-        echo "Using Visual Studio generator (Ninja not found)..."
+        echo "Using Visual Studio generator (MSVC environment)..."
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
               -DBUILD_SHARED_LIBS=OFF \
@@ -138,8 +139,8 @@ if [ ! -f "build/lib/Release/nghttp2.lib" ]; then
         NUM_CORES=${NUMBER_OF_PROCESSORS:-4}
     fi
 
-    # Use Ninja if available (faster), otherwise Visual Studio generator
-    if command -v ninja &> /dev/null; then
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
         cmake -G "Ninja" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
@@ -206,8 +207,8 @@ if [ ! -f "build/Release/zlibstatic.lib" ]; then
         NUM_CORES=${NUMBER_OF_PROCESSORS:-4}
     fi
 
-    # Use Ninja if available (faster), otherwise Visual Studio generator
-    if command -v ninja &> /dev/null; then
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
         cmake -G "Ninja" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
