@@ -90,14 +90,13 @@ Client Class
 
 .. code-block:: python
 
-   client = httpmorph.Client(http2=False, timeout=30)
+   client = httpmorph.Client(http2=False)
 
 HTTP client for making requests.
 
 **Constructor Parameters:**
 
 * ``http2`` (bool) - Enable HTTP/2. Default: ``False``
-* ``timeout`` (int/float) - Default timeout in seconds. Default: ``30``
 
 **Methods:**
 
@@ -128,13 +127,14 @@ Session Class
 
 .. code-block:: python
 
-   session = httpmorph.Session(browser='chrome', http2=False)
+   session = httpmorph.Session(browser='chrome', os='macos', http2=False)
 
 HTTP session with persistent cookies and headers.
 
 **Constructor Parameters:**
 
-* ``browser`` (str) - Browser profile to mimic. Options: ``'chrome'``, ``'firefox'``, ``'safari'``, ``'edge'``, ``'random'``. Default: ``'chrome'``
+* ``browser`` (str) - Browser profile to mimic. Options: ``'chrome'``, ``'chrome142'``, ``'random'``. Default: ``'chrome'``
+* ``os`` (str) - Operating system for User-Agent. Options: ``'macos'``, ``'windows'``, ``'linux'``. Default: ``'macos'``
 * ``http2`` (bool) - Enable HTTP/2. Default: ``False``
 
 **Attributes:**
@@ -423,40 +423,42 @@ Browser Profiles
 
 Available browser profiles for ``Session(browser=...)``:
 
-Chrome
-~~~~~~
+Chrome 142
+~~~~~~~~~~
 
-* User-Agent: Chrome 131
-* TLS ciphers: 9 cipher suites
-* TLS curves: X25519, secp256r1, secp384r1
-* GREASE: Randomized per request
-* HTTP/2 settings: Browser-specific
+The default and most accurate browser profile, mimicking Chrome 142:
 
-Firefox
-~~~~~~~
+**Fingerprint Characteristics:**
 
-* User-Agent: Firefox 122
-* TLS ciphers: Different order from Chrome
-* No GREASE support
-* HTTP/2 settings: Browser-specific
+* **JA3N**: ``8e19337e7524d2573be54efb2b0784c9`` (perfect match)
+* **JA4**: ``t13d1516h2_8daaf6152771_d8a2da3f94cd`` (perfect match)
+* **JA4_R**: ``t13d1516h2_002f,0035,009c,...`` (perfect match)
+* **TLS 1.3** with 15 cipher suites
+* **Post-quantum cryptography**: X25519MLKEM768 (curve 4588)
+* **Certificate compression**: Brotli, Zlib
+* **GREASE**: Randomized per request
+* **HTTP/2**: Chrome-specific SETTINGS frame
 
-Safari
-~~~~~~
+**User-Agent Variants:**
 
-* User-Agent: Safari 17
-* TLS ciphers: Safari-specific order
-* No GREASE support
-* HTTP/2 settings: Browser-specific
+* **macOS**: ``Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
+* **Windows**: ``Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
+* **Linux**: ``Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
 
-Edge
-~~~~
+**Usage:**
 
-* User-Agent: Edge 122 (Chromium-based)
-* TLS ciphers: Chrome-like
-* GREASE: Randomized per request
-* HTTP/2 settings: Similar to Chrome
+.. code-block:: python
+
+   # Use Chrome 142 profile (default)
+   session = httpmorph.Session(browser='chrome')
+
+   # Explicitly use Chrome 142
+   session = httpmorph.Session(browser='chrome142')
+
+   # With specific OS
+   session = httpmorph.Session(browser='chrome', os='windows')
 
 Random
 ~~~~~~
 
-Randomly selects one of the above profiles for each session.
+Randomly selects a browser profile for each session. Currently only Chrome 142 is available.

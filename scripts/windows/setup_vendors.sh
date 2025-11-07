@@ -28,20 +28,21 @@ cd "$VENDOR_DIR"
 #
 echo "==> Setting up BoringSSL..."
 
-# Always remove and re-clone BoringSSL to ensure clean state
-# This prevents platform cross-contamination (e.g., Linux files on Windows runners)
-if [ -d "boringssl" ]; then
-    echo "Removing existing BoringSSL directory to ensure clean build..."
-    rm -rf boringssl
-fi
+# Check if BoringSSL is already built with valid libraries (use cache if available)
+if [ -d "boringssl/build" ] && { [ -f "boringssl/build/ssl/Release/ssl.lib" ] || [ -f "boringssl/build/Release/ssl.lib" ]; }; then
+    echo "✓ BoringSSL already built (using cached build)"
+    cd boringssl
+else
+    # Remove any incomplete or contaminated BoringSSL directory
+    if [ -d "boringssl" ]; then
+        echo "Removing existing BoringSSL directory to ensure clean build..."
+        rm -rf boringssl
+    fi
 
-echo "Cloning BoringSSL..."
-git clone --depth 1 https://boringssl.googlesource.com/boringssl
+    echo "Cloning BoringSSL..."
+    git clone --depth 1 https://boringssl.googlesource.com/boringssl
 
-cd boringssl
-
-# Check if already built
-if [ ! -f "build/ssl/Release/ssl.lib" ] && [ ! -f "build/Release/ssl.lib" ]; then
+    cd boringssl
     echo "Building BoringSSL..."
 
     # Check for required tools
@@ -63,12 +64,34 @@ if [ ! -f "build/ssl/Release/ssl.lib" ] && [ ! -f "build/Release/ssl.lib" ]; the
     mkdir -p build
     cd build
 
-    # Use Visual Studio generator on Windows for proper .lib output
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-          -DBUILD_SHARED_LIBS=OFF \
-          ..
-    cmake --build . --config Release
+    # Detect number of CPU cores for parallel builds
+    if command -v nproc &> /dev/null; then
+        NUM_CORES=$(nproc)
+    else
+        # Windows fallback
+        NUM_CORES=${NUMBER_OF_PROCESSORS:-4}
+    fi
+    echo "Using $NUM_CORES parallel jobs for compilation"
+
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    # Ninja requires MSVC environment to be set up, VS generator sets it up automatically
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
+        echo "Using Ninja generator (faster builds)..."
+        cmake -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DBUILD_SHARED_LIBS=OFF \
+              ..
+        ninja -j$NUM_CORES
+    else
+        echo "Using Visual Studio generator (MSVC environment)..."
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DBUILD_SHARED_LIBS=OFF \
+              ..
+        # Use parallel builds with MSVC
+        cmake --build . --config Release --parallel $NUM_CORES
+    fi
 
     echo "✓ BoringSSL built successfully"
 
@@ -78,8 +101,6 @@ if [ ! -f "build/ssl/Release/ssl.lib" ] && [ ! -f "build/Release/ssl.lib" ]; the
         echo "Cleaning up .git directory to save cache space..."
         rm -rf .git
     fi
-else
-    echo "✓ BoringSSL already built"
 fi
 
 cd "$VENDOR_DIR"
@@ -111,16 +132,32 @@ if [ ! -f "build/lib/Release/nghttp2.lib" ]; then
     mkdir -p build
     cd build
 
-    # Build static library only (disable shared library)
-    # NGHTTP2_STATICLIB will be defined when linking in setup.py
-    cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DENABLE_LIB_ONLY=ON \
-        -DENABLE_SHARED_LIB=OFF \
-        -DENABLE_STATIC_LIB=ON
+    # Detect number of CPU cores for parallel builds
+    if command -v nproc &> /dev/null; then
+        NUM_CORES=$(nproc)
+    else
+        NUM_CORES=${NUMBER_OF_PROCESSORS:-4}
+    fi
 
-    cmake --build . --config Release
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
+        cmake -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_LIB_ONLY=ON \
+            -DENABLE_SHARED_LIB=OFF \
+            -DENABLE_STATIC_LIB=ON \
+            ..
+        ninja -j$NUM_CORES
+    else
+        cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_LIB_ONLY=ON \
+            -DENABLE_SHARED_LIB=OFF \
+            -DENABLE_STATIC_LIB=ON
+        cmake --build . --config Release --parallel $NUM_CORES
+    fi
 
     echo "✓ nghttp2 built successfully (static library)"
 
@@ -163,12 +200,26 @@ if [ ! -f "build/Release/zlibstatic.lib" ]; then
     mkdir -p build
     cd build
 
-    # Use CMake for Windows build
-    cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    # Detect number of CPU cores for parallel builds
+    if command -v nproc &> /dev/null; then
+        NUM_CORES=$(nproc)
+    else
+        NUM_CORES=${NUMBER_OF_PROCESSORS:-4}
+    fi
 
-    cmake --build . --config Release
+    # Use Ninja if available AND compiler is in PATH, otherwise Visual Studio generator
+    if command -v ninja &> /dev/null && command -v cl &> /dev/null; then
+        cmake -G "Ninja" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            ..
+        ninja -j$NUM_CORES
+    else
+        cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        cmake --build . --config Release --parallel $NUM_CORES
+    fi
 
     echo "✓ zlib built successfully"
 else

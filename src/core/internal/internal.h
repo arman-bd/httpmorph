@@ -121,6 +121,9 @@ struct httpmorph_session {
     httpmorph_client_t *client;
     const browser_profile_t *browser_profile;
 
+    /* User-Agent from browser profile */
+    const char *user_agent;
+
     /* Connection pool for this session */
     httpmorph_pool_t *pool;
 

@@ -5,6 +5,9 @@
 #include "internal/tls.h"
 #include "internal/util.h"
 
+/* C wrapper for BoringSSL C++ function (defined in boringssl_wrapper.cc) */
+extern void httpmorph_set_aes_hw_override(SSL_CTX *ctx, int override_value);
+
 #ifdef _WIN32
 #include <windows.h>
 #include <wincrypt.h>
@@ -49,6 +52,15 @@ static inline int SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
     SSL_CTX_set_ecdh_auto(ctx, 1)
 #endif
 
+/* Stub certificate decompression function for compress_certificate extension */
+static int cert_decompress_stub(SSL *ssl, CRYPTO_BUFFER **out,
+                                 size_t uncompressed_len,
+                                 const uint8_t *in, size_t in_len) {
+    /* We only need to advertise support, not actually decompress */
+    (void)ssl; (void)out; (void)uncompressed_len; (void)in; (void)in_len;
+    return 0;  /* Return 0 to indicate we can't decompress, but extension is supported */
+}
+
 /**
  * Configure SSL context with browser profile
  */
@@ -65,40 +77,80 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
 #endif
 
-    /* Build cipher list string from profile */
-    char cipher_list[2048] = {0};
-    char *p = cipher_list;
+    /* Enable certificate compression (Chrome 142 supports brotli, zlib)
+     * This is required for sites that send compressed certificates (e.g., Cloudflare)
+     * Passing NULL uses BoringSSL's built-in compression/decompression */
+    SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_brotli, NULL, NULL);
+    SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_zlib, NULL, NULL);
+
+    /* Force AES hardware preference to match Chrome's cipher order (AES-GCM before ChaCha20)
+     * This prevents BoringSSL from reordering ciphers based on ARM vs Intel CPU capabilities */
+    httpmorph_set_aes_hw_override(ctx, 1);
+
+    /* Build TLS 1.3 ciphersuites (preserves exact order) */
+    char tls13_ciphers[512] = {0};
+    char *p13 = tls13_ciphers;
+
+    /* Build TLS 1.2 cipher list */
+    char tls12_ciphers[2048] = {0};
+    char *p12 = tls12_ciphers;
 
     for (int i = 0; i < profile->cipher_suite_count; i++) {
         uint16_t cs = profile->cipher_suites[i];
+        const char *name = NULL;
+        int is_tls13 = 0;
 
         /* Map cipher suite code to BoringSSL name */
-        const char *name = NULL;
         switch (cs) {
-            case 0x1301: name = "TLS_AES_128_GCM_SHA256"; break;
-            case 0x1302: name = "TLS_AES_256_GCM_SHA384"; break;
-            case 0x1303: name = "TLS_CHACHA20_POLY1305_SHA256"; break;
+            /* TLS 1.3 cipher suites */
+            case 0x1301: name = "TLS_AES_128_GCM_SHA256"; is_tls13 = 1; break;
+            case 0x1302: name = "TLS_AES_256_GCM_SHA384"; is_tls13 = 1; break;
+            case 0x1303: name = "TLS_CHACHA20_POLY1305_SHA256"; is_tls13 = 1; break;
+            /* TLS 1.2 ECDHE cipher suites */
             case 0xc02b: name = "ECDHE-ECDSA-AES128-GCM-SHA256"; break;
             case 0xc02f: name = "ECDHE-RSA-AES128-GCM-SHA256"; break;
             case 0xc02c: name = "ECDHE-ECDSA-AES256-GCM-SHA384"; break;
             case 0xc030: name = "ECDHE-RSA-AES256-GCM-SHA384"; break;
+            case 0xc013: name = "ECDHE-RSA-AES128-SHA"; break;
+            case 0xc014: name = "ECDHE-RSA-AES256-SHA"; break;
             case 0xcca9: name = "ECDHE-ECDSA-CHACHA20-POLY1305"; break;
             case 0xcca8: name = "ECDHE-RSA-CHACHA20-POLY1305"; break;
+            /* TLS 1.2 RSA cipher suites */
+            case 0x002f: name = "AES128-SHA"; break;
+            case 0x0035: name = "AES256-SHA"; break;
+            case 0x009c: name = "AES128-GCM-SHA256"; break;
+            case 0x009d: name = "AES256-GCM-SHA384"; break;
             default: continue;  /* Skip unsupported */
         }
 
         if (name) {
-            if (p != cipher_list) {
-                *p++ = ':';
+            if (is_tls13) {
+                if (p13 != tls13_ciphers) *p13++ = ':';
+                strcpy(p13, name);
+                p13 += strlen(name);
+            } else {
+                if (p12 != tls12_ciphers) *p12++ = ':';
+                strcpy(p12, name);
+                p12 += strlen(name);
             }
-            strcpy(p, name);
-            p += strlen(name);
         }
     }
 
-    /* Set cipher list */
-    if (SSL_CTX_set_cipher_list(ctx, cipher_list) != 1) {
-        return -1;
+    /* Combine TLS 1.3 and TLS 1.2 ciphers with TLS 1.3 first */
+    char combined_ciphers[2560] = {0};
+    if (strlen(tls13_ciphers) > 0 && strlen(tls12_ciphers) > 0) {
+        snprintf(combined_ciphers, sizeof(combined_ciphers), "%s:%s", tls13_ciphers, tls12_ciphers);
+    } else if (strlen(tls13_ciphers) > 0) {
+        strcpy(combined_ciphers, tls13_ciphers);
+    } else if (strlen(tls12_ciphers) > 0) {
+        strcpy(combined_ciphers, tls12_ciphers);
+    }
+
+    /* Use strict cipher list to preserve exact order */
+    if (strlen(combined_ciphers) > 0) {
+        if (SSL_CTX_set_strict_cipher_list(ctx, combined_ciphers) != 1) {
+            return -1;
+        }
     }
 
     /* Set supported curves */
@@ -109,6 +161,7 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
         for (int i = 0; i < profile->curve_count && nid_count < MAX_CURVES; i++) {
             int nid = -1;
             switch (profile->curves[i]) {
+                case 0x11ec: nid = NID_X25519MLKEM768; break;  /* X25519MLKEM768 (post-quantum hybrid) */
                 case 0x001d: nid = NID_X25519; break;
                 case 0x0017: nid = NID_X9_62_prime256v1; break;  /* secp256r1 */
                 case 0x0018: nid = NID_secp384r1; break;
@@ -147,6 +200,31 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
         SSL_CTX_set_alpn_protos(ctx, alpn_list, alpn_p - alpn_list);
     }
 
+    /* Note: OCSP stapling disabled because BoringSSL adds both status_request (0x0005)
+     * AND status_request_v2 (0x0015), but Chrome 142's fingerprint only includes 0x0005.
+     * The status_request extension appears to be added by BoringSSL automatically. */
+    // SSL_CTX_enable_ocsp_stapling(ctx);
+
+    /* Enable signed_certificate_timestamp extension (0x0012) */
+    SSL_CTX_enable_signed_cert_timestamps(ctx);
+
+    /* Configure signature algorithms (advertised in ClientHello) */
+    if (profile->signature_algorithm_count > 0) {
+        /* Use verify_algorithm_prefs which controls what's advertised in ClientHello */
+        SSL_CTX_set_verify_algorithm_prefs(ctx,
+            profile->signature_algorithms,
+            profile->signature_algorithm_count);
+    }
+
+    /* Enable compress_certificate extension (0x001b) with brotli */
+    /* BoringSSL alg_id 0x0002 = brotli compression */
+    /* Provide decompress stub to advertise support */
+    SSL_CTX_add_cert_compression_alg(ctx, 0x0002, NULL, cert_decompress_stub);
+
+    /* Note: application_settings (0x44cd/ALPS) and encrypted_client_hello
+     * (0xfe0d/ECH) require per-connection setup. They will be enabled
+     * per-SSL object in httpmorph_tls_connect(). */
+
     return 0;
 }
 
@@ -162,6 +240,13 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
     if (!ssl) {
         return NULL;
     }
+
+    /* Enable ECH grease for encrypted_client_hello extension (0xfe0d) */
+    SSL_set_enable_ech_grease(ssl, 1);
+
+    /* Enable OCSP stapling for status_request extension (0x0005)
+     * Note: This may trigger padding extension (0x0015) depending on ClientHello size */
+    SSL_enable_ocsp_stapling(ssl);
 
     /* Set SSL verification mode */
     if (verify_cert) {
@@ -190,6 +275,20 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
         /* Only set ALPN if we have protocols */
         if (alpn_p > alpn_list) {
             SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
+
+            /* Enable ALPS (application_settings extension 0x44cd) for each ALPN protocol */
+            for (int i = 0; i < browser_profile->alpn_protocol_count; i++) {
+                /* Skip "h2" if HTTP/2 not enabled */
+                if (!http2_enabled && strcmp(browser_profile->alpn_protocols[i], "h2") == 0) {
+                    continue;
+                }
+
+                const char *proto = browser_profile->alpn_protocols[i];
+                /* Send empty ALPS settings (Chrome sends empty for most protocols) */
+                SSL_add_application_settings(ssl,
+                    (const uint8_t *)proto, strlen(proto),
+                    (const uint8_t *)"", 0);
+            }
         }
     }
 
@@ -254,6 +353,15 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
         }
 
         /* Other error - handshake failed */
+        /* Get detailed SSL error */
+        unsigned long err = ERR_get_error();
+        if (err != 0) {
+            char err_buf[256];
+            ERR_error_string_n(err, err_buf, sizeof(err_buf));
+            fprintf(stderr, "TLS handshake error: %s (SSL error code: %d)\n", err_buf, ssl_err);
+        } else {
+            fprintf(stderr, "TLS handshake failed with SSL error code: %d\n", ssl_err);
+        }
         SSL_free(ssl);
         return NULL;
     }

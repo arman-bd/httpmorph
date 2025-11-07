@@ -297,7 +297,8 @@ class TestSessionConnectionPooling:
 
     def test_session_connection_per_host(self, httpbin_server):
         """Test session maintains separate connections per host"""
-        session = httpmorph.Session()
+        # Use HTTP/1.1 for compatibility with postman-echo
+        session = httpmorph.Session(http2=False)
 
         # Requests to different hosts
         response1 = session.get(f"{httpbin_server}/get")

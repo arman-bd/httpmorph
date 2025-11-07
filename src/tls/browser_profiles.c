@@ -18,16 +18,21 @@
     #include <strings.h>  /* for strcasecmp */
 #endif
 
-/* Chrome 131 Profile */
-const browser_profile_t PROFILE_CHROME_131 = {
-    .name = "Chrome 131",
-    .version = "131.0.6778.109",
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+/* Chrome 142 Profile (Current Chrome fingerprint with JA4: t13d1516h2_8daaf6152771_d8a2da3f94cd) */
+const browser_profile_t PROFILE_CHROME_142 = {
+    .name = "chrome142",
+    .version = "142.0.0.0",
+    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+
+    /* OS-specific user agents */
+    .user_agent_windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    .user_agent_linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
 
     .min_tls_version = TLS_VERSION_1_2,
     .max_tls_version = TLS_VERSION_1_3,
 
     .cipher_suites = {
+        /* Chrome 142 sends TLS 1.3 ciphers first, then TLS 1.2 ciphers */
         0x1301,  /* TLS_AES_128_GCM_SHA256 */
         0x1302,  /* TLS_AES_256_GCM_SHA384 */
         0x1303,  /* TLS_CHACHA20_POLY1305_SHA256 */
@@ -37,32 +42,40 @@ const browser_profile_t PROFILE_CHROME_131 = {
         0xc030,  /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
         0xcca9,  /* TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 */
         0xcca8,  /* TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 */
+        0xc013,  /* TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA */
+        0xc014,  /* TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA */
+        0x009c,  /* TLS_RSA_WITH_AES_128_GCM_SHA256 */
+        0x009d,  /* TLS_RSA_WITH_AES_256_GCM_SHA384 */
+        0x002f,  /* TLS_RSA_WITH_AES_128_CBC_SHA */
+        0x0035,  /* TLS_RSA_WITH_AES_256_CBC_SHA */
     },
-    .cipher_suite_count = 9,
+    .cipher_suite_count = 15,
 
     .extensions = {
-        0,      /* server_name */
-        10,     /* supported_groups */
-        11,     /* ec_point_formats */
-        13,     /* signature_algorithms */
-        16,     /* application_layer_protocol_negotiation */
-        18,     /* signed_certificate_timestamp */
-        21,     /* padding */
-        23,     /* extended_master_secret */
-        27,     /* compress_certificate */
-        35,     /* session_ticket */
-        43,     /* supported_versions */
-        45,     /* psk_key_exchange_modes */
-        51,     /* key_share */
+        5,      /* 0x0005 - status_request (OCSP) */
+        10,     /* 0x000a - supported_groups */
+        11,     /* 0x000b - ec_point_formats */
+        13,     /* 0x000d - signature_algorithms */
+        18,     /* 0x0012 - signed_certificate_timestamp */
+        23,     /* 0x0017 - extended_master_secret */
+        27,     /* 0x001b - padding */
+        35,     /* 0x0023 - session_ticket */
+        43,     /* 0x002b - supported_versions */
+        45,     /* 0x002d - psk_key_exchange_modes */
+        51,     /* 0x0033 - key_share */
+        17613,  /* 0x44cd - application_settings (ALPS) */
+        65037,  /* 0xfe0d - encrypted_client_hello (ECH) */
+        65281,  /* 0xff01 - renegotiation_info */
     },
-    .extension_count = 13,
+    .extension_count = 14,
 
     .curves = {
+        0x11ec,  /* X25519MLKEM768 (post-quantum hybrid) - Chrome 142 */
         0x001d,  /* X25519 */
         0x0017,  /* secp256r1 */
         0x0018,  /* secp384r1 */
     },
-    .curve_count = 3,
+    .curve_count = 4,
 
     .signature_algorithms = {
         0x0403,  /* ecdsa_secp256r1_sha256 */
@@ -97,130 +110,36 @@ const browser_profile_t PROFILE_CHROME_131 = {
         .window_update = 15663105,
     },
 
-    .ja3_hash = "cd08e31494f9531f560d64c695473da9",  /* MD5 of JA3 string */
+    .ja3_hash = "ad39201d5fec29cb6a0bfe632d59781b",  /* MD5 of JA3 string - matches Chrome 141 */
 };
 
-/* Chrome 124 Profile (older version) */
-const browser_profile_t PROFILE_CHROME_124 = {
-    .name = "Chrome 124",
-    .version = "124.0.6367.207",
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-
-    .min_tls_version = TLS_VERSION_1_2,
-    .max_tls_version = TLS_VERSION_1_3,
-
-    .cipher_suites = {
-        0x1301, 0x1302, 0x1303,
-        0xc02b, 0xc02f, 0xc02c, 0xc030,
-        0xcca9, 0xcca8,
-    },
-    .cipher_suite_count = 9,
-
-    .curves = {0x001d, 0x0017, 0x0018},
-    .curve_count = 3,
-
-    .alpn_protocols = {"h2", "http/1.1"},
-    .alpn_protocol_count = 2,
-
-    .use_grease = true,
-};
-
-/* Firefox 122 Profile */
-const browser_profile_t PROFILE_FIREFOX_122 = {
-    .name = "Firefox 122",
-    .version = "122.0",
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0",
-
-    .min_tls_version = TLS_VERSION_1_2,
-    .max_tls_version = TLS_VERSION_1_3,
-
-    .cipher_suites = {
-        0x1301, 0x1303, 0x1302,
-        0xc02b, 0xc02f, 0xc02c, 0xc030,
-        0xcca9, 0xcca8,
-    },
-    .cipher_suite_count = 9,
-
-    .curves = {0x001d, 0x0017, 0x0018, 0x0019},
-    .curve_count = 4,
-
-    .alpn_protocols = {"h2", "http/1.1"},
-    .alpn_protocol_count = 2,
-
-    .use_grease = false,
-};
-
-/* Safari 17 Profile */
-const browser_profile_t PROFILE_SAFARI_17 = {
-    .name = "Safari 17",
-    .version = "17.0",
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-
-    .min_tls_version = TLS_VERSION_1_2,
-    .max_tls_version = TLS_VERSION_1_3,
-
-    .cipher_suites = {
-        0x1301, 0x1302, 0x1303,
-        0xc02c, 0xc030, 0xc02b, 0xc02f,
-        0xcca9, 0xcca8,
-    },
-    .cipher_suite_count = 9,
-
-    .curves = {0x001d, 0x0017, 0x0018},
-    .curve_count = 3,
-
-    .alpn_protocols = {"h2", "http/1.1"},
-    .alpn_protocol_count = 2,
-
-    .use_grease = false,
-};
-
-/* Edge 122 Profile */
-const browser_profile_t PROFILE_EDGE_122 = {
-    .name = "Edge 122",
-    .version = "122.0.2365.92",
-    .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
-
-    .min_tls_version = TLS_VERSION_1_2,
-    .max_tls_version = TLS_VERSION_1_3,
-
-    .cipher_suites = {
-        0x1301, 0x1302, 0x1303,
-        0xc02b, 0xc02f, 0xc02c, 0xc030,
-        0xcca9, 0xcca8,
-    },
-    .cipher_suite_count = 9,
-
-    .curves = {0x001d, 0x0017, 0x0018},
-    .curve_count = 3,
-
-    .alpn_protocols = {"h2", "http/1.1"},
-    .alpn_protocol_count = 2,
-
-    .use_grease = true,
-};
 
 /* Profile database */
 static const browser_profile_t *profiles[] = {
-    &PROFILE_CHROME_131,
-    &PROFILE_CHROME_124,
-    &PROFILE_FIREFOX_122,
-    &PROFILE_SAFARI_17,
-    &PROFILE_EDGE_122,
+    &PROFILE_CHROME_142,
 };
 
 static const int profile_count = sizeof(profiles) / sizeof(profiles[0]);
 
 /**
  * Get profile by name
+ * Supports aliases for backward compatibility:
+ * - "chrome" -> "chrome142" (latest Chrome version)
  */
 const browser_profile_t* browser_profile_get(const char *name) {
     if (!name) {
         return NULL;
     }
 
+    /* Handle aliases (case-insensitive) */
+    const char *resolved_name = name;
+    if (strcasecmp(name, "chrome") == 0) {
+        resolved_name = "chrome142";  /* Default to latest Chrome */
+    }
+
+    /* Find profile by name (case-insensitive) */
     for (int i = 0; i < profile_count; i++) {
-        if (strcmp(profiles[i]->name, name) == 0) {
+        if (strcasecmp(profiles[i]->name, resolved_name) == 0) {
             return profiles[i];
         }
     }
@@ -246,21 +165,28 @@ const browser_profile_t* browser_profile_random(void) {
  * Get profile by browser type
  */
 const browser_profile_t* browser_profile_by_type(const char *browser_type) {
-    if (!browser_type) {
-        return &PROFILE_CHROME_131;
+    /* Always return Chrome 142 - the only supported profile */
+    (void)browser_type;  /* Unused parameter */
+    return &PROFILE_CHROME_142;
+}
+
+/**
+ * Get user agent for specific OS from profile
+ */
+const char* browser_profile_get_user_agent(const browser_profile_t *profile, os_type_t os) {
+    if (!profile) {
+        return NULL;
     }
 
-    if (strcasecmp(browser_type, "chrome") == 0) {
-        return &PROFILE_CHROME_131;
-    } else if (strcasecmp(browser_type, "firefox") == 0) {
-        return &PROFILE_FIREFOX_122;
-    } else if (strcasecmp(browser_type, "safari") == 0) {
-        return &PROFILE_SAFARI_17;
-    } else if (strcasecmp(browser_type, "edge") == 0) {
-        return &PROFILE_EDGE_122;
+    switch (os) {
+        case OS_WINDOWS:
+            return profile->user_agent_windows ? profile->user_agent_windows : profile->user_agent;
+        case OS_LINUX:
+            return profile->user_agent_linux ? profile->user_agent_linux : profile->user_agent;
+        case OS_MACOS:
+        default:
+            return profile->user_agent;  /* macOS is the default */
     }
-
-    return &PROFILE_CHROME_131;
 }
 
 /**

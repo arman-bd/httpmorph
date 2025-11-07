@@ -15,8 +15,8 @@ pip-delete-this-directory.txt
 
 # Cython generated files (only in bindings directory)
 src/bindings/*.c
+src/bindings/*.cpp
 src/bindings/*.html
-_httpmorph.cpp
 
 # C/C++
 *.o
