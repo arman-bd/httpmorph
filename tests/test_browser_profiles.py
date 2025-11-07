@@ -255,6 +255,52 @@ class TestChrome142Fingerprint:
         assert response_chrome.tls_version == response_142.tls_version
         assert response_chrome.tls_cipher == response_142.tls_cipher
 
+    def test_os_macos_user_agent(self, httpbin_host):
+        """Test macOS user agent is sent correctly"""
+        session = httpmorph.Session(browser="chrome142", os="macos")
+        response = session.get(f"https://{httpbin_host}/user-agent")
+
+        assert response.status_code in [200, 402]
+        # Parse the response to check user agent
+        if response.status_code == 200:
+            response_text = response.text
+            # Should contain macOS-specific user agent
+            assert "Macintosh" in response_text
+            assert "Mac OS X 10_15_7" in response_text
+            assert "Chrome/142.0.0.0" in response_text
+            assert "Safari/537.36" in response_text
+
+    def test_os_windows_user_agent(self, httpbin_host):
+        """Test Windows user agent is sent correctly"""
+        session = httpmorph.Session(browser="chrome142", os="windows")
+        response = session.get(f"https://{httpbin_host}/user-agent")
+
+        assert response.status_code in [200, 402]
+        # Parse the response to check user agent
+        if response.status_code == 200:
+            response_text = response.text
+            # Should contain Windows-specific user agent
+            assert "Windows NT 10.0" in response_text
+            assert "Win64" in response_text
+            assert "x64" in response_text
+            assert "Chrome/142.0.0.0" in response_text
+            assert "Safari/537.36" in response_text
+
+    def test_os_linux_user_agent(self, httpbin_host):
+        """Test Linux user agent is sent correctly"""
+        session = httpmorph.Session(browser="chrome142", os="linux")
+        response = session.get(f"https://{httpbin_host}/user-agent")
+
+        assert response.status_code in [200, 402]
+        # Parse the response to check user agent
+        if response.status_code == 200:
+            response_text = response.text
+            # Should contain Linux-specific user agent
+            assert "X11" in response_text
+            assert "Linux x86_64" in response_text
+            assert "Chrome/142.0.0.0" in response_text
+            assert "Safari/537.36" in response_text
+
 
 class TestGREASE:
     """Test GREASE (Generate Random Extensions And Sustain Extensibility)"""
