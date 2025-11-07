@@ -24,6 +24,10 @@ const browser_profile_t PROFILE_CHROME_142 = {
     .version = "142.0.0.0",
     .user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
 
+    /* OS-specific user agents */
+    .user_agent_windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    .user_agent_linux = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+
     .min_tls_version = TLS_VERSION_1_2,
     .max_tls_version = TLS_VERSION_1_3,
 
@@ -164,6 +168,25 @@ const browser_profile_t* browser_profile_by_type(const char *browser_type) {
     /* Always return Chrome 142 - the only supported profile */
     (void)browser_type;  /* Unused parameter */
     return &PROFILE_CHROME_142;
+}
+
+/**
+ * Get user agent for specific OS from profile
+ */
+const char* browser_profile_get_user_agent(const browser_profile_t *profile, os_type_t os) {
+    if (!profile) {
+        return NULL;
+    }
+
+    switch (os) {
+        case OS_WINDOWS:
+            return profile->user_agent_windows ? profile->user_agent_windows : profile->user_agent;
+        case OS_LINUX:
+            return profile->user_agent_linux ? profile->user_agent_linux : profile->user_agent;
+        case OS_MACOS:
+        default:
+            return profile->user_agent;  /* macOS is the default */
+    }
 }
 
 /**

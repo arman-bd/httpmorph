@@ -22,6 +22,13 @@ extern "C" {
 #define MAX_ALPN_PROTOCOLS 8
 #define MAX_HTTP2_SETTINGS 16
 
+/* OS types for user agent generation */
+typedef enum {
+    OS_MACOS = 0,    /* macOS (default) */
+    OS_WINDOWS = 1,  /* Windows */
+    OS_LINUX = 2,    /* Linux */
+} os_type_t;
+
 /* TLS version */
 typedef enum {
     TLS_VERSION_1_0 = 0x0301,
@@ -57,7 +64,11 @@ typedef enum {
 typedef struct {
     const char *name;           /* e.g., "Chrome 131" */
     const char *version;        /* e.g., "131.0.6778.109" */
-    const char *user_agent;     /* Full user agent string */
+    const char *user_agent;     /* Full user agent string (macOS - default) */
+
+    /* OS-specific user agents */
+    const char *user_agent_windows;  /* Windows user agent */
+    const char *user_agent_linux;    /* Linux user agent */
 
     /* TLS configuration */
     tls_version_t min_tls_version;
@@ -119,6 +130,13 @@ const browser_profile_t* browser_profile_random(void);
  * Get profile by browser type
  */
 const browser_profile_t* browser_profile_by_type(const char *browser_type);
+
+/**
+ * Get user agent for specific OS from profile
+ * Returns appropriate user agent string based on os_type
+ * Falls back to macOS user agent if OS-specific version not available
+ */
+const char* browser_profile_get_user_agent(const browser_profile_t *profile, os_type_t os);
 
 /**
  * List all available profiles

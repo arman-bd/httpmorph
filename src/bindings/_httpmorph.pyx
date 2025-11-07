@@ -380,12 +380,15 @@ cdef class Session:
     """HTTP session with persistent fingerprint"""
     cdef httpmorph_session_t *_session
     cdef str _browser
+    cdef str _os
 
-    def __cinit__(self, str browser="chrome"):
+    def __cinit__(self, str browser="chrome", str os="macos"):
         cdef httpmorph_browser_t browser_type
 
         browser_lower = browser.lower()
         self._browser = browser_lower
+        self._os = os.lower()
+
         if browser_lower == "chrome" or browser_lower == "chrome142":
             browser_type = HTTPMORPH_BROWSER_CHROME
         elif browser_lower == "firefox":
@@ -572,11 +575,27 @@ cdef class Session:
             if json_data and (headers is None or 'Content-Type' not in headers):
                 request_headers['Content-Type'] = 'application/json'
 
-            # Get browser-specific User-Agent
+            # Get browser-specific User-Agent based on OS
             browser_user_agents = {
-                'chrome': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                # Chrome user agents by OS
+                'chrome': {
+                    'macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                    'windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                    'linux': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                },
+                'chrome142': {
+                    'macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                    'windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                    'linux': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+                },
             }
-            default_ua = browser_user_agents.get(self._browser, f'httpmorph/{_get_httpmorph_version()}')
+
+            # Get user agent for browser and OS, defaulting to macOS if OS not found
+            browser_ua_dict = browser_user_agents.get(self._browser, {})
+            if isinstance(browser_ua_dict, dict):
+                default_ua = browser_ua_dict.get(self._os, browser_ua_dict.get('macos', f'httpmorph/{_get_httpmorph_version()}'))
+            else:
+                default_ua = f'httpmorph/{_get_httpmorph_version()}'
 
             # Add browser-specific User-Agent header if not already set
             has_user_agent = False
