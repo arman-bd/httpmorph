@@ -23,8 +23,12 @@
  *
  * Returns new buffer on success, NULL on failure.
  * If successful, updates response->body, response->body_capacity, and response->_body_actual_size
+ *
+ * @param response The response structure
+ * @param new_capacity The new capacity needed
+ * @param current_data_size The actual amount of data currently in the buffer (NOT response->body_len)
  */
-static uint8_t* realloc_body_buffer(httpmorph_response_t *response, size_t new_capacity) {
+static uint8_t* realloc_body_buffer(httpmorph_response_t *response, size_t new_capacity, size_t current_data_size) {
     uint8_t *new_body = NULL;
     size_t new_actual_size = 0;
 
@@ -41,9 +45,9 @@ static uint8_t* realloc_body_buffer(httpmorph_response_t *response, size_t new_c
         return NULL;
     }
 
-    /* Copy existing data to new buffer */
-    if (response->body && response->body_len > 0) {
-        memcpy(new_body, response->body, response->body_len);
+    /* Copy existing data to new buffer - use current_data_size, NOT response->body_len! */
+    if (response->body && current_data_size > 0) {
+        memcpy(new_body, response->body, current_data_size);
     }
 
     /* Return old buffer to pool if available */
@@ -413,10 +417,16 @@ int httpmorph_recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *res
     if (body_in_buffer > 0) {
         if (response->body_capacity < body_in_buffer) {
             /* Use 2x growth strategy instead of exact size */
-            size_t new_capacity = body_in_buffer * 2;
-            if (!realloc_body_buffer(response, new_capacity)) {
-                /* Allocation failed, but continue with existing buffer */
+            /* Check for integer overflow before doubling */
+            if (body_in_buffer > SIZE_MAX / 2) {
+                /* Would overflow - use what we have */
                 body_in_buffer = response->body_capacity;
+            } else {
+                size_t new_capacity = body_in_buffer * 2;
+                if (!realloc_body_buffer(response, new_capacity, 0)) {
+                    /* Allocation failed, but continue with existing buffer */
+                    body_in_buffer = response->body_capacity;
+                }
             }
         }
         memcpy(response->body, body_start, body_in_buffer);
@@ -436,7 +446,7 @@ int httpmorph_recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *res
     if (content_length > 0 && content_length < 100 * 1024 * 1024) {
         /* Known content length - pre-allocate exact size */
         if (response->body_capacity < content_length) {
-            if (!realloc_body_buffer(response, content_length)) {
+            if (!realloc_body_buffer(response, content_length, body_received)) {
                 /* Allocation failed - will read what fits */
             }
         }
@@ -536,8 +546,15 @@ int httpmorph_recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *res
 
                         /* Ensure response body has enough space BEFORE copying */
                         if (body_received + data_to_copy > response->body_capacity) {
-                            size_t new_capacity = (body_received + data_to_copy) * 2;
-                            if (!realloc_body_buffer(response, new_capacity)) {
+                            /* Check for integer overflow before doubling */
+                            size_t sum = body_received + data_to_copy;
+                            if (sum > SIZE_MAX / 2) {
+                                /* Would overflow - fail gracefully */
+                                last_chunk = true;
+                                break;
+                            }
+                            size_t new_capacity = sum * 2;
+                            if (!realloc_body_buffer(response, new_capacity, body_received)) {
                                 last_chunk = true;
                                 break;
                             }
@@ -586,8 +603,13 @@ int httpmorph_recv_http_response(SSL *ssl, int sockfd, httpmorph_response_t *res
 
             /* Expand buffer if needed */
             if (body_received > response->body_capacity - 2048) {
+                /* Check for integer overflow before doubling */
+                if (response->body_capacity > SIZE_MAX / 2) {
+                    /* Would overflow - stop reading */
+                    break;
+                }
                 size_t new_capacity = response->body_capacity * 2;
-                if (!realloc_body_buffer(response, new_capacity)) break;
+                if (!realloc_body_buffer(response, new_capacity, body_received)) break;
             }
         }
     }

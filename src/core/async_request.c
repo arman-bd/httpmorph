@@ -11,6 +11,7 @@
 #include "async_request.h"
 #include "io_engine.h"
 #include "internal/proxy.h"
+#include "internal/util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1009,20 +1010,30 @@ static int build_http_request(async_request_t *req) {
         default:               method_str = "GET"; break;
     }
 
-    /* Extract path from URL (simple extraction) */
-    const char *path = strchr(request->url, '/');
-    if (path && path[0] == '/' && path[1] == '/') {
-        /* Skip scheme (http:// or https://) */
-        path = strchr(path + 2, '/');
-    }
-    if (!path || path[0] != '/') {
-        path = "/";
+    /* For HTTP through proxy, use absolute URI. For HTTPS or direct, use path only. */
+    const char *request_target;
+    bool use_absolute_uri = (req->proxy_host && !req->is_https);
+
+    if (use_absolute_uri) {
+        /* HTTP through proxy: use full URL as request target */
+        request_target = request->url;
+    } else {
+        /* HTTPS through proxy or direct connection: extract path */
+        const char *path = strchr(request->url, '/');
+        if (path && path[0] == '/' && path[1] == '/') {
+            /* Skip scheme (http:// or https://) */
+            path = strchr(path + 2, '/');
+        }
+        if (!path || path[0] != '/') {
+            path = "/";
+        }
+        request_target = path;
     }
 
-    /* Build request line: METHOD path HTTP/1.1\r\n */
+    /* Build request line: METHOD request-target HTTP/1.1\r\n */
     char *buf = (char *)req->send_buf;
     int written = snprintf(buf, SEND_BUFFER_SIZE,
-                          "%s %s HTTP/1.1\r\n", method_str, path);
+                          "%s %s HTTP/1.1\r\n", method_str, request_target);
     if (written < 0 || written >= (int)SEND_BUFFER_SIZE) {
         return -1;
     }
@@ -1032,6 +1043,25 @@ static int build_http_request(async_request_t *req) {
                        "Host: %s\r\n", request->host ? request->host : "localhost");
     if (written >= (int)SEND_BUFFER_SIZE) {
         return -1;
+    }
+
+    /* Add Proxy-Authorization header for HTTP proxy (not HTTPS/CONNECT) */
+    if (use_absolute_uri && (req->proxy_username || req->proxy_password)) {
+        const char *username = req->proxy_username ? req->proxy_username : "";
+        const char *password = req->proxy_password ? req->proxy_password : "";
+
+        char credentials[512];
+        snprintf(credentials, sizeof(credentials), "%s:%s", username, password);
+
+        char *encoded = httpmorph_base64_encode(credentials, strlen(credentials));
+        if (encoded) {
+            written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
+                              "Proxy-Authorization: Basic %s\r\n", encoded);
+            free(encoded);
+            if (written >= (int)SEND_BUFFER_SIZE) {
+                return -1;
+            }
+        }
     }
 
     /* Add custom headers */

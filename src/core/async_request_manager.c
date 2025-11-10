@@ -168,6 +168,12 @@ void async_manager_destroy(async_request_manager_t *mgr) {
  * Grow request array if needed
  */
 static int grow_request_array(async_request_manager_t *mgr) {
+    /* Check for integer overflow before doubling */
+    if (mgr->request_capacity > SIZE_MAX / 2 / sizeof(async_request_t*)) {
+        /* Would overflow - reject new request */
+        return -1;
+    }
+
     size_t new_capacity = mgr->request_capacity * 2;
     async_request_t **new_array = realloc(mgr->requests,
                                           new_capacity * sizeof(async_request_t*));
