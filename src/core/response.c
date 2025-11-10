@@ -120,6 +120,11 @@ int httpmorph_response_add_header_internal(httpmorph_response_t *response,
 
     /* Check if we need to grow the array - use exponential growth */
     if (response->header_count >= response->header_capacity) {
+        /* Check for integer overflow before doubling */
+        if (response->header_capacity > SIZE_MAX / 2 / sizeof(httpmorph_header_t)) {
+            /* Would overflow - reject new header */
+            return -1;
+        }
         size_t new_capacity = response->header_capacity * 2;
         httpmorph_header_t *new_headers = (httpmorph_header_t*)realloc(response->headers,
                                                                         new_capacity * sizeof(httpmorph_header_t));

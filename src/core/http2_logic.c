@@ -137,7 +137,16 @@ static int http2_on_data_chunk_recv_callback(nghttp2_session *session, uint8_t f
 
     /* Expand buffer if needed */
     if (stream_data->data_len + len > stream_data->data_capacity) {
-        size_t new_capacity = (stream_data->data_len + len) * 2;
+        /* Calculate sum first to check for overflow */
+        size_t sum = stream_data->data_len + len;
+
+        /* Check for integer overflow before doubling */
+        if (sum > SIZE_MAX / 2) {
+            /* Would overflow - either use SIZE_MAX or fail */
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+
+        size_t new_capacity = sum * 2;
         uint8_t *new_buf = realloc(stream_data->data_buf, new_capacity);
         if (!new_buf) return NGHTTP2_ERR_CALLBACK_FAILURE;
         stream_data->data_buf = new_buf;

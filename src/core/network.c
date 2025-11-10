@@ -82,24 +82,42 @@ static struct addrinfo* addrinfo_deep_copy(const struct addrinfo *src) {
     if (!copy) return NULL;
 
     memcpy(copy, src, sizeof(struct addrinfo));
+    copy->ai_addr = NULL;
+    copy->ai_canonname = NULL;
     copy->ai_next = NULL;
 
     /* Copy sockaddr */
     if (src->ai_addr) {
         copy->ai_addr = (struct sockaddr*)malloc(src->ai_addrlen);
-        if (copy->ai_addr) {
-            memcpy(copy->ai_addr, src->ai_addr, src->ai_addrlen);
+        if (!copy->ai_addr) {
+            /* Allocation failed - cleanup and return NULL */
+            free(copy);
+            return NULL;
         }
+        memcpy(copy->ai_addr, src->ai_addr, src->ai_addrlen);
     }
 
     /* Copy canonname */
     if (src->ai_canonname) {
         copy->ai_canonname = strdup(src->ai_canonname);
+        if (!copy->ai_canonname) {
+            /* Allocation failed - cleanup and return NULL */
+            free(copy->ai_addr);
+            free(copy);
+            return NULL;
+        }
     }
 
     /* Recursively copy linked list */
     if (src->ai_next) {
         copy->ai_next = addrinfo_deep_copy(src->ai_next);
+        if (!copy->ai_next && src->ai_next) {
+            /* Recursive copy failed - cleanup and return NULL */
+            free(copy->ai_canonname);
+            free(copy->ai_addr);
+            free(copy);
+            return NULL;
+        }
     }
 
     return copy;

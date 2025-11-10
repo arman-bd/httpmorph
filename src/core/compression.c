@@ -52,6 +52,19 @@ static int decompress_zlib(httpmorph_response_t *response, int windowBits) {
 
     /* Handle need for more output space */
     while (ret == Z_BUF_ERROR || ret == Z_OK) {
+        /* Check for integer overflow before doubling */
+        if (decompressed_capacity > SIZE_MAX / 2) {
+            /* Would overflow - fail decompression */
+            inflateEnd(&stream);
+            if (response->_buffer_pool) {
+                buffer_pool_put((httpmorph_buffer_pool_t*)response->_buffer_pool,
+                              decompressed, decompressed_actual_size);
+            } else {
+                free(decompressed);
+            }
+            return -1;
+        }
+
         size_t new_capacity = decompressed_capacity * 2;
         size_t new_actual_size = 0;
         uint8_t *new_decompressed = NULL;
