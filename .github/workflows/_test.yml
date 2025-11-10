@@ -18,6 +18,8 @@ on:
     secrets:
       TEST_PROXY_URL:
         required: false
+      TEST_HTTPBIN_HOST:
+        required: false
       CODECOV_TOKEN:
         required: false
 
@@ -234,6 +236,7 @@ jobs:
         pytest tests/ -v --cov=httpmorph --cov-report=xml -m "not proxy"
       env:
         TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
+        TEST_HTTPBIN_HOST: ${{ secrets.TEST_HTTPBIN_HOST }}
 
     - name: Upload coverage
       if: matrix.os == inputs.primary-os && matrix.python-version == inputs.primary-python
