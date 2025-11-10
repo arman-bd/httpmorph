@@ -11,6 +11,7 @@ from libc.stdint cimport uint8_t, uint16_t, uint32_t, uint64_t
 from libc.stdlib cimport malloc, free
 from libc.string cimport strdup
 from libc.stdio cimport printf
+from cpython.bytes cimport PyBytes_FromStringAndSize
 
 # Helper to get version for User-Agent strings
 def _get_httpmorph_version():
@@ -74,14 +75,18 @@ cdef extern from "../include/httpmorph.h":
         char *key
         char *value
 
-    # Response structure (match the header exactly)
+    # Response structure (match the C header EXACTLY - field order matters!)
     struct httpmorph_response:
         uint16_t status_code
         httpmorph_version_t http_version
         httpmorph_header_t *headers
         size_t header_count
+        size_t header_capacity
         uint8_t *body
         size_t body_len
+        size_t body_capacity
+        void *_buffer_pool
+        size_t _body_actual_size
         uint64_t connect_time_us
         uint64_t tls_time_us
         uint64_t first_byte_time_us
@@ -215,6 +220,7 @@ cdef class Client:
         if req is NULL:
             raise MemoryError("Failed to create request")
 
+        cdef bytes body_bytes = b''
         try:
             # Set timeout if provided (default is 30 seconds in C code)
             timeout = kwargs.get('timeout')
@@ -312,11 +318,16 @@ cdef class Client:
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 
+            # Copy body BEFORE destroying response (important for memory safety)
+            body_bytes = b''
+            if resp.body and resp.body_len > 0:
+                body_bytes = PyBytes_FromStringAndSize(<char*>resp.body, <Py_ssize_t>resp.body_len)
+
             # Convert response to Python dict
             result = {
                 'status_code': resp.status_code,
                 'headers': {},
-                'body': bytes(resp.body[:resp.body_len]) if resp.body else b'',
+                'body': body_bytes,
                 'http_version': resp.http_version,
                 'connect_time_us': resp.connect_time_us,
                 'tls_time_us': resp.tls_time_us,
@@ -472,6 +483,7 @@ cdef class Session:
         if req is NULL:
             raise MemoryError("Failed to create request")
 
+        cdef bytes body_bytes = b''
         try:
             # Set timeout if provided (default is 30 seconds in C code)
             timeout = kwargs.get('timeout')
@@ -621,11 +633,16 @@ cdef class Session:
             if resp is NULL:
                 raise RuntimeError("Failed to execute request")
 
+            # Copy body BEFORE destroying response (important for memory safety)
+            body_bytes = b''
+            if resp.body and resp.body_len > 0:
+                body_bytes = PyBytes_FromStringAndSize(<char*>resp.body, <Py_ssize_t>resp.body_len)
+
             # Convert response to Python dict
             result = {
                 'status_code': resp.status_code,
                 'headers': {},
-                'body': bytes(resp.body[:resp.body_len]) if resp.body else b'',
+                'body': body_bytes,
                 'http_version': resp.http_version,
                 'connect_time_us': resp.connect_time_us,
                 'tls_time_us': resp.tls_time_us,

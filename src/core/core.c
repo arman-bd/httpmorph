@@ -73,59 +73,10 @@ httpmorph_response_t* httpmorph_request_execute(
         bool proxy_use_tls = false;
         SSL *proxy_ssl = NULL;
 
-        /* Try to reuse pooled proxy connection to same target */
-        if (pool) {
-            pooled_conn = pool_get_connection(pool, host, port);
-            if (pooled_conn && pooled_conn->is_proxy) {
-                /* Check if proxy URL matches */
-                if (pooled_conn->proxy_url && strcmp(pooled_conn->proxy_url, request->proxy_url) == 0) {
-                    /* Reuse existing proxy connection */
-                    sockfd = pooled_conn->sockfd;
-                    ssl = pooled_conn->ssl;
-                    use_http2 = pooled_conn->is_http2;
-
-                    /* Don't reuse HTTP/2 connections - HTTP/2 pooling has reliability issues */
-                    if (use_http2) {
-                        pool_connection_destroy(pooled_conn);
-                        pooled_conn = NULL;
-                        sockfd = -1;
-                        ssl = NULL;
-                        use_http2 = false;
-                    }
-
-                    /* For SSL connections, verify still valid before reuse */
-                    if (ssl && sockfd >= 0) {
-                        int shutdown_state = SSL_get_shutdown(ssl);
-                        if (shutdown_state != 0) {
-                            /* SSL was shut down - destroy and recreate */
-                            pool_connection_destroy(pooled_conn);
-                            pooled_conn = NULL;
-                            sockfd = -1;
-                            ssl = NULL;
-                        }
-                    }
-
-                    if (sockfd >= 0) {
-                        /* Connection reused - no connect/TLS time */
-                        connect_time = 0;
-                        response->tls_time_us = 0;
-
-                        /* Restore TLS info from pooled connection */
-                        if (pooled_conn->ja3_fingerprint) {
-                            response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
-                        }
-                    }
-                } else {
-                    /* Different proxy URL - can't reuse, destroy it */
-                    pool_connection_destroy(pooled_conn);
-                    pooled_conn = NULL;
-                }
-            } else if (pooled_conn) {
-                /* Got a direct connection when we need proxy - can't reuse */
-                pool_connection_destroy(pooled_conn);
-                pooled_conn = NULL;
-            }
-        }
+        /* Don't use connection pool for proxy connections - they are not pooled
+         * due to SSL_CTX use-after-free issues (see line 532 below).
+         * If we retrieve a connection from pool here, it would be a stale direct
+         * connection which cannot be used for proxy requests. */
 
         /* If no pooled connection, create new proxy connection */
         if (sockfd < 0) {

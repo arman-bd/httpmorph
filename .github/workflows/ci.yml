@@ -28,6 +28,7 @@ jobs:
       primary-python: ${{ needs.load-config.outputs.primary-python }}
     secrets:
       TEST_PROXY_URL: ${{ secrets.TEST_PROXY_URL }}
+      TEST_HTTPBIN_HOST: ${{ secrets.TEST_HTTPBIN_HOST }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================
