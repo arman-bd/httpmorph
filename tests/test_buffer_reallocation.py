@@ -9,9 +9,10 @@ actual amount of data in the buffer (body_received).
 
 import os
 
-import httpmorph
 import pytest
 from dotenv import load_dotenv
+
+import httpmorph
 
 # Load environment variables from .env file
 load_dotenv()
