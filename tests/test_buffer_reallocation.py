@@ -10,12 +10,16 @@ actual amount of data in the buffer (body_received).
 import os
 
 import pytest
-from dotenv import load_dotenv
 
 import httpmorph
 
 # Load environment variables from .env file
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, skip - env vars should be set directly in CI
+    pass
 
 # Use TEST_HTTPBIN_HOST environment variable
 HTTPBIN_HOST = os.environ.get('TEST_HTTPBIN_HOST')
