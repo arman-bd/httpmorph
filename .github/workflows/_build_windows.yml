@@ -84,12 +84,14 @@ jobs:
 
     # Build wheels for all Python versions
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22
+      uses: pypa/cibuildwheel@v3.3
       env:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
-        # Build for all Python versions
-        CIBW_BUILD: cp38-win_amd64 cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64 cp314-win_amd64
+        # Build for all Python versions on AMD64 and ARM64
+        CIBW_BUILD: cp38-win_amd64 cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64 cp314-win_amd64 cp311-win_arm64 cp312-win_arm64 cp313-win_arm64 cp314-win_arm64
+        # Enable ARM64 cross-compilation (Python 3.11+ supports ARM64 on Windows)
+        CIBW_ARCHS_WINDOWS: AMD64 ARM64
 
     # Setup Python versions for testing
     - name: Setup Python versions
@@ -105,11 +107,17 @@ jobs:
           3.14
         allow-prereleases: true
 
-    # Test the built wheels
+    # Test the built wheels (AMD64 only - ARM64 wheels cannot be tested on AMD64 runners)
     - name: Test wheels
       run: |
-        # Test each wheel that was built
+        # Test each wheel that was built (skip ARM64 wheels)
         for wheel in ./wheelhouse/*.whl; do
+          # Skip ARM64 wheels (they can't run on AMD64 runners)
+          if [[ "$(basename "$wheel")" == *"arm64"* ]]; then
+            echo "⊘ Skipping ARM64 wheel (cross-compiled): $(basename "$wheel")"
+            continue
+          fi
+
           echo "========================================"
           echo "Testing wheel: $(basename "$wheel")"
           echo "========================================"
@@ -158,7 +166,8 @@ jobs:
         done
 
         echo "========================================"
-        echo "All wheel tests PASSED"
+        echo "All AMD64 wheel tests PASSED"
+        echo "Note: ARM64 wheels were built but not tested (require ARM64 runner)"
         echo "========================================"
       shell: bash
 

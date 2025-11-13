@@ -20,6 +20,12 @@ jobs:
         go-version: '1.21'
         cache: true
 
+    # Setup QEMU for ARM64 emulation (required for aarch64 builds on x86_64 runners)
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
     # Cache vendor dependencies to speed up builds
     - name: Restore vendor cache
       id: cache-vendor
@@ -34,12 +40,14 @@ jobs:
     # The vendor directory is mounted into the container and shared across Python versions
     # The setup script will skip rebuilding if libraries already exist
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22
+      uses: pypa/cibuildwheel@v3.3
       env:
-        # Build for all Python versions
-        CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
+        # Build for all Python versions on x86_64 and aarch64 (ARM64)
+        CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64 cp38-manylinux_aarch64 cp39-manylinux_aarch64 cp310-manylinux_aarch64 cp311-manylinux_aarch64 cp312-manylinux_aarch64 cp313-manylinux_aarch64 cp314-manylinux_aarch64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
         # The script will detect cached libraries and skip rebuilding
+        # Enable ARM64 emulation on x86_64 runners using QEMU
+        CIBW_ARCHS_LINUX: x86_64 aarch64
 
     # Save vendor cache after build
     - name: Save vendor cache
@@ -63,11 +71,17 @@ jobs:
           3.14
         allow-prereleases: true
 
-    # Test the built wheels
+    # Test the built wheels (x86_64 only - ARM64 wheels cannot be tested on x86_64 runners)
     - name: Test wheels
       run: |
-        # Test each wheel that was built
+        # Test each wheel that was built (skip ARM64 wheels)
         for wheel in ./wheelhouse/*.whl; do
+          # Skip ARM64 wheels (they can't run on x86_64 runners)
+          if [[ "$(basename "$wheel")" == *"aarch64"* ]]; then
+            echo "⊘ Skipping ARM64 wheel (cross-compiled): $(basename "$wheel")"
+            continue
+          fi
+
           echo "========================================"
           echo "Testing wheel: $(basename "$wheel")"
           echo "========================================"
@@ -121,7 +135,8 @@ jobs:
         done
 
         echo "========================================"
-        echo "All wheel tests PASSED"
+        echo "All x86_64 wheel tests PASSED"
+        echo "Note: ARM64 wheels were built but not tested (require ARM64 runner)"
         echo "========================================"
 
     # Upload wheels as artifacts

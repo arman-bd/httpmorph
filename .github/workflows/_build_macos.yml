@@ -74,7 +74,7 @@ jobs:
 
     # Build wheels for all Python versions
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22
+      uses: pypa/cibuildwheel@v3.3
       env:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
