@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "httpmorph"
-version = "0.2.5"
+version = "0.2.6"
 description = "A Python HTTP client focused on mimicking browser fingerprints."
 readme = "README.md"
 requires-python = ">=3.8"

@@ -34,7 +34,7 @@ jobs:
     # The vendor directory is mounted into the container and shared across Python versions
     # The setup script will skip rebuilding if libraries already exist
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22.0
+      uses: pypa/cibuildwheel@v2.22
       env:
         # Build for all Python versions
         CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
