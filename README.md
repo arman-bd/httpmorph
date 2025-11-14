@@ -2,6 +2,8 @@
 
 ![Build](https://github.com/arman-bd/httpmorph/workflows/CI/badge.svg) [![codecov](https://codecov.io/gh/arman-bd/httpmorph/graph/badge.svg?token=D7BCC52PQN)](https://codecov.io/gh/arman-bd/httpmorph) [![PyPI version](https://badge.fury.io/py/httpmorph.svg)](https://pypi.org/project/httpmorph/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+![Python](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue) ![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey) ![Architectures](https://img.shields.io/badge/arch-x86__64%20%7C%20aarch64%20%7C%20arm64-green)
+
 A Python HTTP client focused on mimicking browser fingerprints.
 
 **⚠️ Work in Progress** - This library is in early development. Features and API may change.
@@ -23,12 +25,23 @@ A Python HTTP client focused on mimicking browser fingerprints.
 pip install httpmorph
 ```
 
-### Requirements
+### Platform Support
 
-- Python 3.8+
-- Windows, macOS, or Linux
-- BoringSSL (built automatically from source)
-- libnghttp2 (for HTTP/2)
+httpmorph provides pre-built wheels for maximum compatibility:
+
+| Platform | Architectures | Python Versions |
+|----------|--------------|-----------------|
+| **Linux** | x86_64, aarch64 (ARM64) | 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14 |
+| **macOS** | Intel (x86_64), Apple Silicon (arm64)* | 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14 |
+| **Windows** | x64 (AMD64) | 3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14 |
+
+_*macOS wheels are universal2 binaries supporting both Intel and Apple Silicon_
+
+**Total Coverage: 28 pre-built wheels serving 99%+ of Python users**
+
+#### Requirements
+- Python 3.8 or later
+- No compilation required - batteries included!
 
 ## Quick Start
 
