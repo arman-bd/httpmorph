@@ -164,8 +164,12 @@ jobs:
       shell: bash
 
     # Upload wheels as artifacts
-    - uses: actions/upload-artifact@v4
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
       with:
         name: wheels-windows
         path: ./wheelhouse/*.whl
         if-no-files-found: error
+        retention-days: 5
+      # Retry on transient failures
+      continue-on-error: false
