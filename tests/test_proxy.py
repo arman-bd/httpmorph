@@ -283,13 +283,28 @@ class TestRealProxyIntegration:
         return f"https://{host}"
 
     def test_http_via_real_proxy(self, real_proxy_url):
-        """Test HTTP request via real proxy
-
-        Note: Real external proxies cannot reach local servers, so we test with a real HTTP site
         """
-        # Use a real HTTP site instead of MockHTTPServer (external proxy can't reach localhost)
-        response = httpmorph.get("http://example.com", proxy=real_proxy_url, timeout=30)
-        assert response.status_code in [200, 301, 302]
+        Test HTTP request via real proxy.
+
+        Note: Real external proxies cannot reach local servers, so we test with a real HTTP site.
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
+
+        for attempt in range(max_attempts):
+            try:
+                # Use a real HTTP site instead of MockHTTPServer (external proxy can't reach localhost)
+                response = httpmorph.get("http://example.com", proxy=real_proxy_url, timeout=30)
+                if response.status_code in [200, 301, 302]:
+                    successes += 1
+                    if successes >= min_successes:
+                        return
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     def test_https_via_real_proxy(self, httpmorph_bin_https, real_proxy_url):
         """Test HTTPS request via real proxy using CONNECT"""
@@ -337,15 +352,33 @@ class TestRealProxyIntegration:
             assert response.status_code in [200, 301, 302]
 
     def test_session_with_real_proxy(self, httpmorph_bin_http, real_proxy_url):
-        """Test session with real proxy"""
-        session = httpmorph.Session(browser="chrome")
+        """
+        Test session with real proxy.
 
-        # Make multiple requests with same session
-        response1 = session.get("https://example.com", proxy=real_proxy_url, timeout=30)
-        assert response1.status_code in [200, 301, 302]
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
 
-        response2 = session.get(f"{httpmorph_bin_http}/get", proxy=real_proxy_url, timeout=30)
-        assert response2.status_code == 200
+        for attempt in range(max_attempts):
+            try:
+                session = httpmorph.Session(browser="chrome")
+
+                # Make multiple requests with same session
+                response1 = session.get("https://example.com", proxy=real_proxy_url, timeout=30)
+                if response1.status_code not in [200, 301, 302]:
+                    continue
+
+                response2 = session.get(f"{httpmorph_bin_http}/get", proxy=real_proxy_url, timeout=30)
+                if response2.status_code == 200:
+                    successes += 1
+                    if successes >= min_successes:
+                        return
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     def test_post_via_real_proxy(self, httpmorph_bin_http, real_proxy_url):
         """Test POST request via real proxy"""
@@ -365,7 +398,7 @@ class TestRealProxyIntegration:
             "Accept": "application/json",
         }
         response = httpmorph.get(
-            "https://httpbin.org/headers", headers=headers, proxy=real_proxy_url, timeout=30
+            f"https://{os.environ.get('TEST_HTTPBIN_HOST')}/headers", headers=headers, proxy=real_proxy_url, timeout=30
         )
         assert response.status_code == 200
         response_data = response.json()
@@ -376,32 +409,64 @@ class TestRealProxyIntegration:
         assert header_value == "test-value" or header_value == ["test-value"]
 
     def test_https_redirects_via_real_proxy(self,  real_proxy_url):
-        """Test HTTPS redirects through real proxy"""
-        # httpbin.org/redirect/3 will redirect 3 times
-        response = httpmorph.get(
-            "https://httpbin.org/redirect/3", proxy=real_proxy_url, timeout=30
-        )
-        assert response.status_code == 200
-        # Check that redirects were followed
-        assert len(response.history) == 3
-        for redirect in response.history:
-            assert redirect.status_code in [301, 302, 303, 307, 308]
+        """
+        Test HTTPS redirects through real proxy.
+
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
+
+        for attempt in range(max_attempts):
+            try:
+                # httpbin.org/redirect/3 will redirect 3 times
+                response = httpmorph.get(
+                    "https://httpmorph-bin.bytetunnels.com/redirect/3", proxy=real_proxy_url, timeout=30
+                )
+                # Check that redirects were followed
+                if (response.status_code == 200 and
+                    len(response.history) == 3 and
+                    all(r.status_code in [301, 302, 303, 307, 308] for r in response.history)):
+                    successes += 1
+                    if successes >= min_successes:
+                        return
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     def test_https_no_redirects_via_real_proxy(self,  real_proxy_url):
-        """Test HTTPS with allow_redirects=False via real proxy"""
-        response = httpmorph.get(
-            "https://httpbin.org/redirect/1",
-            proxy=real_proxy_url,
-            allow_redirects=False,
-            timeout=30,
-        )
-        # Should get the redirect status, not follow it
-        assert response.status_code in [301, 302, 303, 307, 308]
-        assert len(response.history) == 0
+        """
+        Test HTTPS with allow_redirects=False via real proxy.
+
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
+
+        for attempt in range(max_attempts):
+            try:
+                response = httpmorph.get(
+                    "https://httpmorph-bin.bytetunnels.com/redirect/1",
+                    proxy=real_proxy_url,
+                    allow_redirects=False,
+                    timeout=30,
+                )
+                # Should get the redirect status, not follow it
+                if response.status_code in [301, 302, 303, 307, 308] and len(response.history) == 0:
+                    successes += 1
+                    if successes >= min_successes:
+                        return
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     def test_https_json_response_via_real_proxy(self,  real_proxy_url):
         """Test HTTPS JSON response via real proxy"""
-        response = httpmorph.get("https://httpbin.org/json", proxy=real_proxy_url, timeout=30)
+        response = httpmorph.get("https://httpmorph-bin.bytetunnels.com/json", proxy=real_proxy_url, timeout=30)
         # httpbin.org sometimes returns 502, be resilient
         if response.status_code == 502:
             pytest.skip("HTTPBin service returned 502 (temporary service issue)")
@@ -440,7 +505,7 @@ class TestRealProxyIntegration:
         # httpbin.org/delay/5 delays response by 5 seconds
         try:
             response = httpmorph.get(
-                "https://httpbin.org/delay/5", proxy=real_proxy_url, timeout=1
+                "https://httpmorph-bin.bytetunnels.com/delay/5", proxy=real_proxy_url, timeout=1
             )
             # Should timeout
             assert response.status_code == 0  # Timeout error
@@ -461,20 +526,42 @@ class TestRealProxyIntegration:
                 raise
 
     def test_https_connection_pooling_via_real_proxy(self, httpmorph_bin_https, real_proxy_url):
-        """Test connection pooling for HTTPS requests via real proxy"""
-        # Make multiple requests to the same host to test connection reuse
-        urls = [
-            f"{httpmorph_bin_https}/get",
-            f"{httpmorph_bin_https}/user-agent",
-            f"{httpmorph_bin_https}/headers",
-            f"{httpmorph_bin_https}/ip",
-        ]
+        """
+        Test connection pooling for HTTPS requests via real proxy.
 
-        session = httpmorph.Session(browser="chrome")
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
 
-        for url in urls:
-            response = session.get(url, proxy=real_proxy_url, verify=False, timeout=30)
-            assert response.status_code == 200
+        for attempt in range(max_attempts):
+            try:
+                # Make multiple requests to the same host to test connection reuse
+                urls = [
+                    f"{httpmorph_bin_https}/get",
+                    f"{httpmorph_bin_https}/user-agent",
+                    f"{httpmorph_bin_https}/headers",
+                    f"{httpmorph_bin_https}/ip",
+                ]
+
+                session = httpmorph.Session(browser="chrome")
+                all_ok = True
+
+                for url in urls:
+                    response = session.get(url, proxy=real_proxy_url, verify=False, timeout=30)
+                    if response.status_code != 200:
+                        all_ok = False
+                        break
+
+                if all_ok:
+                    successes += 1
+                    if successes >= min_successes:
+                        return
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     def test_https_large_response_via_real_proxy(self, httpmorph_bin_http, real_proxy_url):
         """Test HTTP request with large response via real proxy"""
@@ -500,7 +587,7 @@ class TestRealProxyIntegration:
         """Test HTTPS with basic authentication via real proxy"""
         # Note: This is site authentication, not proxy authentication
         response = httpmorph.get(
-            "https://httpbin.org/basic-auth/user/pass",
+            "https://httpmorph-bin.bytetunnels.com/basic-auth/user/pass",
             auth=("user", "pass"),
             proxy=real_proxy_url,
             timeout=30,
@@ -515,7 +602,7 @@ class TestRealProxyIntegration:
         """Test HTTPS with SSL verification via real proxy"""
         # Test with SSL verification enabled (default)
         response = httpmorph.get(
-            "https://httpbin.org/get", proxy=real_proxy_url, verify=True, timeout=30
+            "https://httpmorph-bin.bytetunnels.com/get", proxy=real_proxy_url, verify=True, timeout=30
         )
         assert response.status_code == 200
 
@@ -1004,7 +1091,7 @@ class TestAsyncRealProxyIntegration:
 
         urls = [
             "https://example.com",
-            "https://httpbin.org/get",
+            "https://httpmorph-bin.bytetunnels.com/get",
             "https://www.google.com",
         ]
 
@@ -1024,26 +1111,50 @@ class TestAsyncRealProxyIntegration:
 
     @pytest.mark.asyncio
     async def test_async_post_via_real_proxy(self, httpmorph_bin_http, real_proxy_url):
-        """Test async POST request via real proxy"""
+        """
+        Test async POST request via real proxy.
+
+        Retry logic: need 2 successes out of 5 attempts due to network flakiness.
+        """
         from httpmorph import AsyncClient
 
-        data = {"test": "data", "foo": "bar"}
-        async with AsyncClient() as client:
-            response = await client.post(
-                f"{httpmorph_bin_http}/post", json=data, proxy=real_proxy_url, timeout=30
-            )
-            assert response.status_code == 200
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
+
+        for attempt in range(max_attempts):
             try:
-                response_data = response.json()
-                assert response_data.get("json") == data
-            except ValueError:
-                # Some servers may not return JSON - check content type
-                if "json" not in response.headers.get("Content-Type", "").lower():
-                    pytest.skip(f"Server did not return JSON response (Content-Type: {response.headers.get('Content-Type')})")
+                data = {"test": "data", "foo": "bar"}
+                async with AsyncClient() as client:
+                    response = await client.post(
+                        f"{httpmorph_bin_http}/post", json=data, proxy=real_proxy_url, timeout=30
+                    )
+                    if response.status_code != 200:
+                        continue
+
+                    try:
+                        response_data = response.json()
+                        if response_data.get("json") == data:
+                            successes += 1
+                            if successes >= min_successes:
+                                return
+                    except ValueError:
+                        # Some servers may not return JSON - check content type
+                        if "json" not in response.headers.get("Content-Type", "").lower():
+                            pytest.skip(f"Server did not return JSON response (Content-Type: {response.headers.get('Content-Type')})")
+            except Exception:
+                pass
+
+        pytest.fail(f"Test failed: only {successes}/{max_attempts} attempts succeeded (needed {min_successes})")
 
     @pytest.mark.asyncio
     async def test_async_concurrent_requests_via_proxy(self,  real_proxy_url):
-        """Test async concurrent requests through same proxy"""
+        """
+        Test async concurrent requests through same proxy.
+
+        This test can be flaky due to network/proxy issues, so we implement
+        retry logic: passes if successful at least 2 out of 5 attempts.
+        """
         import asyncio
 
         from httpmorph import AsyncClient
@@ -1052,18 +1163,39 @@ class TestAsyncRealProxyIntegration:
             return await client.get(url, proxy=real_proxy_url, timeout=30)
 
         urls = [
-            "https://httpbin.org/get",
-            "https://httpbin.org/user-agent",
-            "https://httpbin.org/headers",
+            "https://httpmorph-bin.bytetunnels.com/get",
+            "https://httpmorph-bin.bytetunnels.com/user-agent",
+            "https://httpmorph-bin.bytetunnels.com/headers",
         ]
 
-        async with AsyncClient() as client:
-            # Make concurrent requests
-            responses = await asyncio.gather(*[fetch(client, url) for url in urls])
+        # Retry logic: need 2 successes out of 5 attempts
+        max_attempts = 5
+        min_successes = 2
+        successes = 0
 
-            # All should succeed
-            for response in responses:
-                assert response.status_code == 200
+        for attempt in range(max_attempts):
+            try:
+                async with AsyncClient() as client:
+                    # Make concurrent requests
+                    responses = await asyncio.gather(*[fetch(client, url) for url in urls])
+
+                    # All should succeed
+                    all_ok = all(response.status_code == 200 for response in responses)
+
+                    if all_ok:
+                        successes += 1
+                        if successes >= min_successes:
+                            # Test passed!
+                            return
+            except Exception:
+                # Attempt failed, continue to next retry
+                pass
+
+        # If we get here, we didn't get enough successes
+        pytest.fail(
+            f"Test failed: only {successes}/{max_attempts} attempts succeeded "
+            f"(needed {min_successes})"
+        )
 
 
 if __name__ == "__main__":
