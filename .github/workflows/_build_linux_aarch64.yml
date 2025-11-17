@@ -1,16 +1,13 @@
-name: Build Linux Wheels
+name: Build Linux aarch64 Wheels
 
 on:
   workflow_call:
 
 jobs:
-  build-linux:
-    name: Build Linux Wheels (${{ matrix.arch }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
+  build-linux-aarch64:
+    name: Build Linux aarch64 Wheels
+    # Use native ARM64 runners for much faster builds (vs QEMU emulation)
+    runs-on: ubuntu-latest-arm64
 
     steps:
     - uses: actions/checkout@v4
@@ -24,46 +21,20 @@ jobs:
         go-version: '1.21'
         cache: true
 
-    # Setup QEMU for ARM64 emulation (only needed for aarch64 builds on x86_64 runners)
-    - name: Set up QEMU
-      if: matrix.arch == 'aarch64'
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: arm64
-
-    # Cache vendor dependencies to speed up builds (separate cache per architecture)
-    - name: Restore vendor cache
-      id: cache-vendor
-      uses: actions/cache/restore@v4
-      with:
-        path: vendor
-        key: vendor-linux-${{ matrix.arch }}-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
-        restore-keys: |
-          vendor-linux-${{ matrix.arch }}-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
-
     # Build wheels with cibuildwheel (handles manylinux containers)
-    # The vendor directory is mounted into the container and shared across Python versions
-    # The setup script will skip rebuilding if libraries already exist
+    # Vendor dependencies are built inside the manylinux container and cached across Python versions
+    # Note: GitHub Actions cache doesn't work here since vendor dir is inside the container
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.3
       env:
-        # Build for all Python versions on the specific architecture
-        CIBW_BUILD: cp38-manylinux_${{ matrix.arch }} cp39-manylinux_${{ matrix.arch }} cp310-manylinux_${{ matrix.arch }} cp311-manylinux_${{ matrix.arch }} cp312-manylinux_${{ matrix.arch }} cp313-manylinux_${{ matrix.arch }} cp314-manylinux_${{ matrix.arch }}
+        # Build for all Python versions on aarch64
+        CIBW_BUILD: cp38-manylinux_aarch64 cp39-manylinux_aarch64 cp310-manylinux_aarch64 cp311-manylinux_aarch64 cp312-manylinux_aarch64 cp313-manylinux_aarch64 cp314-manylinux_aarch64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
-        # The script will detect cached libraries and skip rebuilding
-        CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+        # The script will detect cached libraries and skip rebuilding across Python versions
+        CIBW_ARCHS_LINUX: aarch64
 
-    # Save vendor cache after build
-    - name: Save vendor cache
-      if: steps.cache-vendor.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: vendor
-        key: vendor-linux-${{ matrix.arch }}-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
-
-    # Setup Python versions for testing (only for x86_64)
+    # Setup Python versions for testing
     - name: Setup Python versions
-      if: matrix.arch == 'x86_64'
       uses: actions/setup-python@v5
       with:
         python-version: |
@@ -76,9 +47,8 @@ jobs:
           3.14
         allow-prereleases: true
 
-    # Test the built wheels (only for x86_64 - aarch64 wheels cannot be tested on x86_64 runners)
+    # Test the built wheels on native ARM64
     - name: Test wheels
-      if: matrix.arch == 'x86_64'
       run: |
         # Test each wheel that was built
         for wheel in ./wheelhouse/*.whl; do
@@ -138,11 +108,11 @@ jobs:
         echo "All wheel tests PASSED"
         echo "========================================"
 
-    # Upload wheels as artifacts (separate artifact per architecture)
+    # Upload wheels as artifacts
     - name: Upload wheels
       uses: actions/upload-artifact@v4
       with:
-        name: wheels-linux-${{ matrix.arch }}
+        name: wheels-linux-aarch64
         path: ./wheelhouse/*.whl
         if-no-files-found: error
         retention-days: 5
