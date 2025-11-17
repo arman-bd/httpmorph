@@ -26,14 +26,15 @@ jobs:
         cache: true
 
     # Cache vendor dependencies to speed up builds
+    # Note: Cache is architecture-specific (ARM64 vs x86_64)
     - name: Restore vendor cache
       id: cache-vendor
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+        key: vendor-macos-${{ runner.arch }}-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/darwin/**/*.sh') }}-v10
         restore-keys: |
-          vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+          vendor-macos-${{ runner.arch }}-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/darwin/**/*.sh') }}-v10
 
     # Build vendor dependencies (always build to ensure clean state)
     - name: Build vendor dependencies
@@ -46,7 +47,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-macos-${{ hashFiles('scripts/darwin/setup_vendors.sh') }}-v10
+        key: vendor-macos-${{ runner.arch }}-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/darwin/**/*.sh') }}-v10
 
     # Verify vendor build
     - name: Verify vendor build
@@ -74,7 +75,7 @@ jobs:
 
     # Build wheels for all Python versions
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22.0
+      uses: pypa/cibuildwheel@v3.3
       env:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
@@ -152,8 +153,12 @@ jobs:
         echo "========================================"
 
     # Upload wheels as artifacts
-    - uses: actions/upload-artifact@v4
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
       with:
         name: wheels-macos
         path: ./wheelhouse/*.whl
         if-no-files-found: error
+        retention-days: 5
+      # Retry on transient failures
+      continue-on-error: false

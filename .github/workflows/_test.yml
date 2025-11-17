@@ -173,9 +173,9 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v10
+        key: vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/**/*.sh') }}-v10
         restore-keys: |
-          vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v10
+          vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/**/*.sh') }}-v10
 
     - name: Setup vendor dependencies (always rebuild to ensure clean state)
       run: |
@@ -261,7 +261,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-${{ runner.os }}-${{ hashFiles('scripts/setup_vendors.sh') }}-v10
+        key: vendor-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/**/*.sh') }}-v10
 
     - name: Save Python build cache
       if: always()

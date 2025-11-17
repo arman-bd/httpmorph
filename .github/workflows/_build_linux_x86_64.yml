@@ -1,0 +1,119 @@
+name: Build Linux x86_64 Wheels
+
+on:
+  workflow_call:
+
+jobs:
+  build-linux-x86_64:
+    name: Build Linux x86_64 Wheels
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # Setup Go for BoringSSL build
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+        cache: true
+
+    # Build wheels with cibuildwheel (handles manylinux containers)
+    # Vendor dependencies are built inside the manylinux container and cached across Python versions
+    # Note: GitHub Actions cache doesn't work here since vendor dir is inside the container
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v3.3
+      env:
+        # Build for all Python versions on x86_64
+        CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
+        # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
+        # The script will detect cached libraries and skip rebuilding across Python versions
+        CIBW_ARCHS_LINUX: x86_64
+
+    # Setup Python versions for testing
+    - name: Setup Python versions
+      uses: actions/setup-python@v5
+      with:
+        python-version: |
+          3.8
+          3.9
+          3.10
+          3.11
+          3.12
+          3.13
+          3.14
+        allow-prereleases: true
+
+    # Test the built wheels
+    - name: Test wheels
+      run: |
+        # Test each wheel that was built
+        for wheel in ./wheelhouse/*.whl; do
+          echo "========================================"
+          echo "Testing wheel: $(basename "$wheel")"
+          echo "========================================"
+
+          # Extract Python version from wheel filename (e.g., cp39, cp310)
+          python_tag=$(basename "$wheel" | grep -oE 'cp[0-9]+' | head -1)
+          python_version="${python_tag:2:1}.${python_tag:3}"
+
+          echo "Setting up Python $python_version..."
+
+          # Try to find the matching Python version
+          python_cmd=""
+          for cmd in "python${python_version}" "python3.${python_version#*.}" "python3"; do
+            if command -v "$cmd" &> /dev/null; then
+              # Verify this is the right version
+              version_check=$($cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+              if [ "$version_check" = "$python_version" ]; then
+                python_cmd="$cmd"
+                break
+              fi
+            fi
+          done
+
+          # Fall back to python3 if we couldn't find exact match
+          if [ -z "$python_cmd" ]; then
+            echo "WARNING: Python $python_version not found, using python3"
+            python_cmd="python3"
+          fi
+
+          echo "Using Python: $($python_cmd --version)"
+
+          # Install the wheel in a fresh environment
+          "$python_cmd" -m pip install --force-reinstall "$wheel"
+
+          # Run the test script
+          echo ""
+          echo "Running tests..."
+          "$python_cmd" scripts/test_local_build.py
+
+          # Check exit code
+          if [ $? -eq 0 ]; then
+            echo ""
+            echo "[OK] Wheel test PASSED: $(basename "$wheel")"
+          else
+            echo ""
+            echo "[FAIL] Wheel test FAILED: $(basename "$wheel")"
+            exit 1
+          fi
+
+          echo ""
+        done
+
+        echo "========================================"
+        echo "All wheel tests PASSED"
+        echo "========================================"
+
+    # Upload wheels as artifacts
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: wheels-linux-x86_64
+        path: ./wheelhouse/*.whl
+        if-no-files-found: error
+        retention-days: 5
+      # Retry on transient failures
+      continue-on-error: false

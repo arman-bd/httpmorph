@@ -32,9 +32,9 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
         restore-keys: |
-          vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+          vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
 
     # Build vendor dependencies (always build to ensure clean state)
     - name: Build vendor dependencies
@@ -48,7 +48,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
 
     # Verify vendor build
     - name: Verify vendor build
@@ -84,11 +84,12 @@ jobs:
 
     # Build wheels for all Python versions
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22.0
+      uses: pypa/cibuildwheel@v3.3
       env:
         # Skip before-build since we already built vendors
         CIBW_BEFORE_BUILD: ""
-        # Build for all Python versions
+        # Build for all Python versions on AMD64 only
+        # Note: ARM64 support requires vendor libraries to be built for ARM64, which needs separate build infrastructure
         CIBW_BUILD: cp38-win_amd64 cp39-win_amd64 cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64 cp314-win_amd64
 
     # Setup Python versions for testing
@@ -163,8 +164,12 @@ jobs:
       shell: bash
 
     # Upload wheels as artifacts
-    - uses: actions/upload-artifact@v4
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
       with:
         name: wheels-windows
         path: ./wheelhouse/*.whl
         if-no-files-found: error
+        retention-days: 5
+      # Retry on transient failures
+      continue-on-error: false

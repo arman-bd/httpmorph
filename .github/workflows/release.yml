@@ -42,11 +42,17 @@ jobs:
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     uses: ./.github/workflows/_build_windows.yml
 
-  build-linux:
-    name: Build Linux Wheels
+  build-linux-x86_64:
+    name: Build Linux x86_64 Wheels
     needs: [config, test]
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
-    uses: ./.github/workflows/_build_linux.yml
+    uses: ./.github/workflows/_build_linux_x86_64.yml
+
+  build-linux-aarch64:
+    name: Build Linux aarch64 Wheels
+    needs: [config, test]
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    uses: ./.github/workflows/_build_linux_aarch64.yml
 
   build-macos:
     name: Build macOS Wheels
@@ -56,7 +62,7 @@ jobs:
 
   publish:
     name: Publish Release
-    needs: [build-windows, build-linux, build-macos]
+    needs: [build-windows, build-linux-x86_64, build-linux-aarch64, build-macos]
     if: always() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
@@ -86,18 +92,45 @@ jobs:
         echo "Build Status Report"
         echo "===================="
 
-        for platform in windows linux macos; do
-          if [ -d "dist/wheels-$platform" ]; then
-            wheel_count=$(find "dist/wheels-$platform" -name "*.whl" 2>/dev/null | wc -l)
-            if [ "$wheel_count" -gt 0 ]; then
-              echo "✅ $platform: $wheel_count wheels built"
-            else
-              echo "❌ $platform: No wheels found"
-            fi
+        # Check Windows
+        if [ -d "dist/wheels-windows" ]; then
+          wheel_count=$(find "dist/wheels-windows" -name "*.whl" 2>/dev/null | wc -l)
+          if [ "$wheel_count" -gt 0 ]; then
+            echo "✅ Windows: $wheel_count wheels built"
           else
-            echo "❌ $platform: Build failed or artifacts missing"
+            echo "❌ Windows: No wheels found"
           fi
-        done
+        else
+          echo "❌ Windows: Build failed or artifacts missing"
+        fi
+
+        # Check Linux (both architectures)
+        linux_x86_64_count=0
+        linux_aarch64_count=0
+        if [ -d "dist/wheels-linux-x86_64" ]; then
+          linux_x86_64_count=$(find "dist/wheels-linux-x86_64" -name "*.whl" 2>/dev/null | wc -l)
+        fi
+        if [ -d "dist/wheels-linux-aarch64" ]; then
+          linux_aarch64_count=$(find "dist/wheels-linux-aarch64" -name "*.whl" 2>/dev/null | wc -l)
+        fi
+        linux_total=$((linux_x86_64_count + linux_aarch64_count))
+        if [ "$linux_total" -gt 0 ]; then
+          echo "✅ Linux: $linux_total wheels built (x86_64: $linux_x86_64_count, aarch64: $linux_aarch64_count)"
+        else
+          echo "❌ Linux: No wheels found"
+        fi
+
+        # Check macOS
+        if [ -d "dist/wheels-macos" ]; then
+          wheel_count=$(find "dist/wheels-macos" -name "*.whl" 2>/dev/null | wc -l)
+          if [ "$wheel_count" -gt 0 ]; then
+            echo "✅ macOS: $wheel_count wheels built"
+          else
+            echo "❌ macOS: No wheels found"
+          fi
+        else
+          echo "❌ macOS: Build failed or artifacts missing"
+        fi
 
         echo "===================="
 

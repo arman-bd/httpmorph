@@ -12,12 +12,14 @@ jobs:
   # Load Configuration
   # ============================================================
   load-config:
+    name: Load Configuration
     uses: ./.github/workflows/_config.yml
 
   # ============================================================
   # Test Job
   # ============================================================
   test:
+    name: Test
     needs: load-config
     if: needs.load-config.outputs.enable-tests == 'true'
     uses: ./.github/workflows/_test.yml
@@ -34,10 +36,15 @@ jobs:
   # ============================================================
   # Build Test Jobs
   # ============================================================
-  build-test-linux:
-    name: Build Test (Linux)
+  build-test-linux-x86_64:
+    name: Build Test (Linux x86_64)
     needs: load-config
-    uses: ./.github/workflows/_build_linux.yml
+    uses: ./.github/workflows/_build_linux_x86_64.yml
+
+  build-test-linux-aarch64:
+    name: Build Test (Linux aarch64)
+    needs: load-config
+    uses: ./.github/workflows/_build_linux_aarch64.yml
 
   build-test-macos:
     name: Build Test (macOS)
@@ -54,7 +61,7 @@ jobs:
   # ============================================================
   summary:
     name: CI Summary
-    needs: [load-config, test, build-test-linux, build-test-macos, build-test-windows]
+    needs: [load-config, test, build-test-linux-x86_64, build-test-linux-aarch64, build-test-macos, build-test-windows]
     if: always()
     runs-on: ubuntu-latest
 
@@ -82,13 +89,23 @@ jobs:
         echo ""
         echo "Build Tests:"
 
-        # Linux
-        if [ "${{ needs.build-test-linux.result }}" == "success" ]; then
-          echo "  ✅ Linux: PASSED"
-        elif [ "${{ needs.build-test-linux.result }}" == "skipped" ]; then
-          echo "  ⊘ Linux: SKIPPED"
+        # Linux x86_64
+        if [ "${{ needs.build-test-linux-x86_64.result }}" == "success" ]; then
+          echo "  ✅ Linux x86_64: PASSED"
+        elif [ "${{ needs.build-test-linux-x86_64.result }}" == "skipped" ]; then
+          echo "  ⊘ Linux x86_64: SKIPPED"
         else
-          echo "  ❌ Linux: FAILED"
+          echo "  ❌ Linux x86_64: FAILED"
+          EXIT_CODE=1
+        fi
+
+        # Linux aarch64
+        if [ "${{ needs.build-test-linux-aarch64.result }}" == "success" ]; then
+          echo "  ✅ Linux aarch64: PASSED"
+        elif [ "${{ needs.build-test-linux-aarch64.result }}" == "skipped" ]; then
+          echo "  ⊘ Linux aarch64: SKIPPED"
+        else
+          echo "  ❌ Linux aarch64: FAILED"
           EXIT_CODE=1
         fi
 

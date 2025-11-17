@@ -1,12 +1,13 @@
-name: Build Linux Wheels
+name: Build Linux aarch64 Wheels
 
 on:
   workflow_call:
 
 jobs:
-  build-linux:
-    name: Build Linux Wheels
-    runs-on: ubuntu-latest
+  build-linux-aarch64:
+    name: Build Linux aarch64 Wheels
+    # Use native ARM64 runners for much faster builds (vs QEMU emulation)
+    runs-on: ubuntu-24.04-arm
 
     steps:
     - uses: actions/checkout@v4
@@ -20,34 +21,17 @@ jobs:
         go-version: '1.21'
         cache: true
 
-    # Cache vendor dependencies to speed up builds
-    - name: Restore vendor cache
-      id: cache-vendor
-      uses: actions/cache/restore@v4
-      with:
-        path: vendor
-        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
-        restore-keys: |
-          vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
-
     # Build wheels with cibuildwheel (handles manylinux containers)
-    # The vendor directory is mounted into the container and shared across Python versions
-    # The setup script will skip rebuilding if libraries already exist
+    # Vendor dependencies are built inside the manylinux container and cached across Python versions
+    # Note: GitHub Actions cache doesn't work here since vendor dir is inside the container
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.22.0
+      uses: pypa/cibuildwheel@v3.3
       env:
-        # Build for all Python versions
-        CIBW_BUILD: cp38-manylinux_x86_64 cp39-manylinux_x86_64 cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64 cp314-manylinux_x86_64
+        # Build for all Python versions on aarch64
+        CIBW_BUILD: cp38-manylinux_aarch64 cp39-manylinux_aarch64 cp310-manylinux_aarch64 cp311-manylinux_aarch64 cp312-manylinux_aarch64 cp313-manylinux_aarch64 cp314-manylinux_aarch64
         # Vendor build happens inside manylinux container via before-build (from pyproject.toml)
-        # The script will detect cached libraries and skip rebuilding
-
-    # Save vendor cache after build
-    - name: Save vendor cache
-      if: steps.cache-vendor.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: vendor
-        key: vendor-linux-manylinux-${{ hashFiles('scripts/linux/setup_vendors.sh') }}-v11
+        # The script will detect cached libraries and skip rebuilding across Python versions
+        CIBW_ARCHS_LINUX: aarch64
 
     # Setup Python versions for testing
     - name: Setup Python versions
@@ -63,7 +47,7 @@ jobs:
           3.14
         allow-prereleases: true
 
-    # Test the built wheels
+    # Test the built wheels on native ARM64
     - name: Test wheels
       run: |
         # Test each wheel that was built
@@ -125,8 +109,12 @@ jobs:
         echo "========================================"
 
     # Upload wheels as artifacts
-    - uses: actions/upload-artifact@v4
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
       with:
-        name: wheels-linux
+        name: wheels-linux-aarch64
         path: ./wheelhouse/*.whl
         if-no-files-found: error
+        retention-days: 5
+      # Retry on transient failures
+      continue-on-error: false

@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "httpmorph"
-version = "0.2.5"
+version = "0.2.6"
 description = "A Python HTTP client focused on mimicking browser fingerprints."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -31,6 +31,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: C",
+    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
     "Topic :: Internet :: WWW/HTTP",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -118,10 +122,12 @@ markers = [
 
 [tool.cibuildwheel]
 build = "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
-skip = "*-musllinux_* *-win32"
+skip = "*-musllinux_* *-win32 *-win_arm64"
 build-verbosity = 1
 
 [tool.cibuildwheel.linux]
+# Enable both x86_64 and aarch64 (ARM64) builds
+archs = ["x86_64", "aarch64"]
 before-all = [
     "sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true",
     "sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true",
