@@ -457,6 +457,9 @@ cleanup:
             /* Server wants to close - don't pool */
             if (pooled_conn) {
                 pool_connection_destroy(pooled_conn);
+                /* Clear local references to prevent double-free - pool_connection_destroy already freed them */
+                sockfd = -1;
+                ssl = NULL;
                 pooled_conn = NULL;
             }
             /* Let normal cleanup close the connection */

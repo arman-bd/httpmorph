@@ -1707,6 +1707,7 @@ static int step_receiving_body(async_request_t *req) {
                     if (req->response->body) {
                         memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
                         req->response->body_len = req->content_length;
+                        req->response->_body_actual_size = req->content_length;  /* Track allocated size */
                     }
                 }
                 req->response->status_code = 200;  // TODO: Parse from headers
@@ -1914,6 +1915,7 @@ static int step_receiving_body(async_request_t *req) {
                     if (req->response->body) {
                         memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
                         req->response->body_len = req->content_length;
+                        req->response->_body_actual_size = req->content_length;  /* Track allocated size */
                     }
                 }
                 req->response->status_code = 200;  // TODO: Parse from headers
