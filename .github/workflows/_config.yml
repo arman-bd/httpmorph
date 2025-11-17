@@ -56,9 +56,9 @@ jobs:
           # Operating Systems to test
           # Comment out any OS you want to skip during development
           OS_MATRIX='[
-            "windows-latest", "ubuntu-latest", "macos-latest"
+            "ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "macos-15-intel", "windows-latest"
           ]'
-          # OS options: "windows-latest", "ubuntu-latest", "macos-latest"
+          # OS options: "windows-latest", "ubuntu-latest", "ubuntu-24.04-arm", "macos-latest", "macos-15-intel"
 
           # Python versions to test
           PYTHON_MATRIX='[
