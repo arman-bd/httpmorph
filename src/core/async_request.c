@@ -1339,6 +1339,43 @@ static int step_receiving_headers(async_request_t *req) {
                 }
                 async_request_set_error(req, -1, "SSL connection closed before complete headers");
                 return ASYNC_STATUS_ERROR;
+            } else if (err == SSL_ERROR_SYSCALL && received == 0) {
+                /* SSL_ERROR_SYSCALL with received==0 and errno==0 means clean connection close (EOF) */
+                #ifdef _WIN32
+                int sys_err = WSAGetLastError();
+                bool is_eof = (sys_err == 0);
+                #else
+                bool is_eof = (errno == 0);
+                #endif
+
+                if (is_eof) {
+                    /* Connection closed cleanly - treat like SSL_ERROR_ZERO_RETURN */
+                    if (req->recv_len >= 4) {
+                        bool has_complete_headers = false;
+                        for (size_t i = 0; i <= req->recv_len - 4; i++) {
+                            if (memcmp(req->recv_buf + i, "\r\n\r\n", 4) == 0) {
+                                has_complete_headers = true;
+                                break;
+                            }
+                        }
+                        if (has_complete_headers) {
+                            /* Have complete headers, process them */
+                            received = 0;  /* Set to 0 to skip recv_len increment below */
+                            goto ssl_process_headers;
+                        }
+                    }
+                    async_request_set_error(req, -1, "Connection closed by peer before complete headers");
+                    return ASYNC_STATUS_ERROR;
+                }
+                /* Fall through to regular error handling if not EOF */
+                #ifdef _WIN32
+                snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: system error %d (WSAERR)", sys_err);
+                #else
+                snprintf(req->error_msg, sizeof(req->error_msg), "SSL read failed: system error %d (errno)", errno);
+                #endif
+                req->state = ASYNC_STATE_ERROR;
+                req->error_code = err;
+                return ASYNC_STATUS_ERROR;
             } else {
                 /* Get detailed SSL error */
                 char err_buf[256];

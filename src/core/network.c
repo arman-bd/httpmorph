@@ -221,9 +221,24 @@ static void dns_cache_add(const char *hostname, uint16_t port,
         return;
     }
 
+    /* Allocate hostname with error checking */
     entry->hostname = strdup(hostname);
-    entry->port = port;
+    if (!entry->hostname) {
+        free(entry);
+        dns_cache_unlock();
+        return;
+    }
+
+    /* Deep copy addrinfo with error checking */
     entry->result = addrinfo_deep_copy(result);
+    if (!entry->result) {
+        free(entry->hostname);
+        free(entry);
+        dns_cache_unlock();
+        return;
+    }
+
+    entry->port = port;
     entry->expires = time(NULL) + DNS_CACHE_TTL_SECONDS;
     entry->next = dns_cache_head;
 

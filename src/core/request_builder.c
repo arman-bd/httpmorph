@@ -21,9 +21,20 @@ static int ensure_capacity(request_builder_t *builder, size_t needed) {
         return 0;  /* Enough space */
     }
 
-    /* Calculate new capacity */
+    /* Calculate new capacity with overflow protection */
     size_t new_capacity = builder->capacity;
-    while (new_capacity < builder->len + needed) {
+    size_t target = builder->len + needed;
+
+    /* Check for overflow in target calculation */
+    if (target < builder->len) {
+        return -1;  /* Overflow detected */
+    }
+
+    while (new_capacity < target) {
+        /* Check for overflow before multiplication */
+        if (new_capacity > SIZE_MAX / GROWTH_FACTOR) {
+            return -1;  /* Would overflow */
+        }
         new_capacity *= GROWTH_FACTOR;
     }
 

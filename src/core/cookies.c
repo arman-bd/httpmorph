@@ -112,11 +112,13 @@ char* httpmorph_get_cookies_for_request(httpmorph_session_t *session,
     if (!session || !domain || !path) return NULL;
     if (session->cookie_count == 0) return NULL;
 
-    /* Build cookie header value */
-    char *cookie_header = malloc(4096);
+    /* Build cookie header value with bounds checking */
+    const size_t buffer_size = 4096;
+    char *cookie_header = malloc(buffer_size);
     if (!cookie_header) return NULL;
 
     cookie_header[0] = '\0';
+    size_t used = 0;
     bool first = true;
 
     cookie_t *cookie = session->cookies;
@@ -128,12 +130,22 @@ char* httpmorph_get_cookies_for_request(httpmorph_session_t *session,
         bool secure_match = (!cookie->secure || is_secure);
 
         if (domain_match && path_match && secure_match) {
-            if (!first) {
-                strcat(cookie_header, "; ");
+            /* Calculate space needed: "; " + name + "=" + value */
+            size_t needed = strlen(cookie->name) + 1 + strlen(cookie->value);
+            if (!first) needed += 2;  /* "; " prefix */
+
+            /* Check if we have space (leave room for null terminator) */
+            if (used + needed >= buffer_size - 1) {
+                /* Buffer would overflow - stop adding cookies */
+                break;
             }
-            strcat(cookie_header, cookie->name);
-            strcat(cookie_header, "=");
-            strcat(cookie_header, cookie->value);
+
+            /* Safe concatenation with bounds checking */
+            if (!first) {
+                used += snprintf(cookie_header + used, buffer_size - used, "; ");
+            }
+            used += snprintf(cookie_header + used, buffer_size - used, "%s=%s",
+                           cookie->name, cookie->value);
             first = false;
         }
 
