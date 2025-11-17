@@ -6,7 +6,9 @@ connection reuse, cleanup, and error handling.
 """
 
 import os
+
 import pytest
+
 import httpmorph
 
 # Load environment variables from .env file
@@ -26,6 +28,55 @@ if not HTTPBIN_HOST:
 # =============================================================================
 # CONNECTION POOL CLEANUP TESTS
 # =============================================================================
+
+def test_double_free_bug_reproduction():
+    """
+    **CRITICAL BUG TEST** - Reproduces SSL double-free crash (Issue #33)
+
+    This test triggers the exact conditions that caused the SIGABRT crash:
+
+    BUG SCENARIO:
+    1. Client makes 4+ requests with non-empty bodies (connection pooled and reused)
+    2. Client makes 5th request that returns empty body
+    3. Server returns Connection: close (implicitly, due to body_len=0)
+    4. Client calls pool_connection_destroy(pooled_conn) -> frees SSL object
+    5. Client tries to free the same SSL object again via local ssl variable
+    6. CRASH: double-free detected -> SIGABRT (exit code 134)
+
+    THE FIX:
+    After pool_connection_destroy(), we now set ssl=NULL and sockfd=-1 to
+    prevent the double-free in the cleanup code (src/core/core.c:461-462).
+
+    Without the fix, this test would crash with exit code 134 (SIGABRT).
+    With the fix, the test passes successfully.
+
+    NOTE: This test uses real httpmorph-bin server. The /status/200 endpoint
+    returns empty body which triggers the server to close the connection,
+    reproducing the exact bug scenario.
+    """
+    session = httpmorph.Session()
+
+    # Make 4 requests that return bodies and keep connection alive
+    # These establish the connection pool
+    for i in range(1, 5):
+        response = session.get(f"https://{HTTPBIN_HOST}/get", timeout=30)
+        assert response.status_code == 200
+        assert len(response.body) > 0, f"Request {i} should have body"
+
+    # 5th request: /status/200 returns empty body
+    # This triggers Connection: close behavior
+    # WITHOUT THE FIX: This crashes with SIGABRT (double-free of SSL object)
+    # WITH THE FIX: This works correctly
+    response = session.get(f"https://{HTTPBIN_HOST}/status/200", timeout=30)
+    assert response.status_code == 200
+    assert len(response.body) == 0, "Status endpoint should return empty body"
+
+    # If we get here without crash, the bug is fixed!
+    # Verify connection pool can still create new connections
+    response = session.get(f"https://{HTTPBIN_HOST}/get", timeout=30)
+    assert response.status_code == 200
+    assert len(response.body) > 0
+
 
 @pytest.mark.integration
 def test_connection_pool_empty_body_after_multiple_requests():
