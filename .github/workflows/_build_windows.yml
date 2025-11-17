@@ -32,9 +32,9 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: vendor
-        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
         restore-keys: |
-          vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+          vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
 
     # Build vendor dependencies (always build to ensure clean state)
     - name: Build vendor dependencies
@@ -48,7 +48,7 @@ jobs:
       uses: actions/cache/save@v4
       with:
         path: vendor
-        key: vendor-windows-${{ hashFiles('scripts/windows/setup_vendors.sh') }}-v10
+        key: vendor-windows-${{ hashFiles('scripts/setup_vendors.sh', 'scripts/windows/**/*.sh') }}-v10
 
     # Verify vendor build
     - name: Verify vendor build

@@ -12,12 +12,14 @@ jobs:
   # Load Configuration
   # ============================================================
   load-config:
+    name: Load Configuration
     uses: ./.github/workflows/_config.yml
 
   # ============================================================
   # Test Job
   # ============================================================
   test:
+    name: Test
     needs: load-config
     if: needs.load-config.outputs.enable-tests == 'true'
     uses: ./.github/workflows/_test.yml
