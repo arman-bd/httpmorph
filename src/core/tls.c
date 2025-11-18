@@ -124,14 +124,27 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
         }
 
         if (name) {
+            size_t name_len = strlen(name);
             if (is_tls13) {
+                /* Check bounds before adding to TLS 1.3 buffer */
+                size_t space_needed = name_len + (p13 != tls13_ciphers ? 1 : 0);  /* +1 for ':' */
+                if ((size_t)(p13 - tls13_ciphers) + space_needed >= sizeof(tls13_ciphers)) {
+                    continue;  /* Skip this cipher - would overflow */
+                }
                 if (p13 != tls13_ciphers) *p13++ = ':';
-                strcpy(p13, name);
-                p13 += strlen(name);
+                memcpy(p13, name, name_len);
+                p13 += name_len;
+                *p13 = '\0';  /* Ensure null termination */
             } else {
+                /* Check bounds before adding to TLS 1.2 buffer */
+                size_t space_needed = name_len + (p12 != tls12_ciphers ? 1 : 0);  /* +1 for ':' */
+                if ((size_t)(p12 - tls12_ciphers) + space_needed >= sizeof(tls12_ciphers)) {
+                    continue;  /* Skip this cipher - would overflow */
+                }
                 if (p12 != tls12_ciphers) *p12++ = ':';
-                strcpy(p12, name);
-                p12 += strlen(name);
+                memcpy(p12, name, name_len);
+                p12 += name_len;
+                *p12 = '\0';  /* Ensure null termination */
             }
         }
     }
@@ -141,9 +154,9 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     if (strlen(tls13_ciphers) > 0 && strlen(tls12_ciphers) > 0) {
         snprintf(combined_ciphers, sizeof(combined_ciphers), "%s:%s", tls13_ciphers, tls12_ciphers);
     } else if (strlen(tls13_ciphers) > 0) {
-        strcpy(combined_ciphers, tls13_ciphers);
+        snprintf(combined_ciphers, sizeof(combined_ciphers), "%s", tls13_ciphers);
     } else if (strlen(tls12_ciphers) > 0) {
-        strcpy(combined_ciphers, tls12_ciphers);
+        snprintf(combined_ciphers, sizeof(combined_ciphers), "%s", tls12_ciphers);
     }
 
     /* Use strict cipher list to preserve exact order */

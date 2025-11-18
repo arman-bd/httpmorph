@@ -106,6 +106,11 @@ static int http2_on_header_callback(nghttp2_session *session,
         stream_data = (http2_stream_data_t *)user_data;
     }
 
+    /* Safety check: if stream_data is still NULL, reject callback */
+    if (!stream_data) {
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
     if (frame->hd.type != NGHTTP2_HEADERS || frame->headers.cat != NGHTTP2_HCAT_RESPONSE) {
         return 0;
     }
@@ -133,6 +138,11 @@ static int http2_on_data_chunk_recv_callback(nghttp2_session *session, uint8_t f
     http2_stream_data_t *stream_data = (http2_stream_data_t *)nghttp2_session_get_stream_user_data(session, stream_id);
     if (!stream_data) {
         stream_data = (http2_stream_data_t *)user_data;
+    }
+
+    /* Safety check: if stream_data is still NULL, reject callback */
+    if (!stream_data) {
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
     }
 
     /* Expand buffer if needed */

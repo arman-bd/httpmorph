@@ -166,6 +166,17 @@ httpmorph_response_t* httpmorph_request_execute(
                 ssl = pooled_conn->ssl;
                 use_http2 = pooled_conn->is_http2;  /* Use same protocol as pooled connection */
 
+                /* Restore TLS info from pooled connection BEFORE potential destruction */
+                if (sockfd >= 0) {
+                    /* Connection reused - no connect/TLS time */
+                    connect_time = 0;
+                    response->tls_time_us = 0;
+
+                    if (pooled_conn->ja3_fingerprint) {
+                        response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
+                    }
+                }
+
                 /* For SSL connections, verify still valid before reuse */
                 if (ssl) {
                     int shutdown_state = SSL_get_shutdown(ssl);
@@ -175,17 +186,6 @@ httpmorph_response_t* httpmorph_request_execute(
                         pooled_conn = NULL;
                         sockfd = -1;
                         ssl = NULL;
-                    }
-                }
-
-                if (sockfd >= 0) {
-                    /* Connection reused - no connect/TLS time */
-                    connect_time = 0;
-                    response->tls_time_us = 0;
-
-                    /* Restore TLS info from pooled connection */
-                    if (pooled_conn->ja3_fingerprint) {
-                        response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
                     }
                 }
             } else {
@@ -457,6 +457,9 @@ cleanup:
             /* Server wants to close - don't pool */
             if (pooled_conn) {
                 pool_connection_destroy(pooled_conn);
+                /* Clear local references to prevent double-free - pool_connection_destroy already freed them */
+                sockfd = -1;
+                ssl = NULL;
                 pooled_conn = NULL;
             }
             /* Let normal cleanup close the connection */
@@ -473,16 +476,27 @@ cleanup:
                 conn_to_pool = NULL;
             } else {
                 conn_to_pool = pool_connection_create(host, port, sockfd, ssl, use_http2);
-                /* Store TLS info in pooled connection for future reuse */
+                /* Store TLS info in pooled connection for future reuse with error checking */
                 if (conn_to_pool && ssl) {
+                    bool alloc_failed = false;
+
                     if (response->ja3_fingerprint) {
                         conn_to_pool->ja3_fingerprint = strdup(response->ja3_fingerprint);
+                        if (!conn_to_pool->ja3_fingerprint) alloc_failed = true;
                     }
-                    if (response->tls_version) {
+                    if (response->tls_version && !alloc_failed) {
                         conn_to_pool->tls_version = strdup(response->tls_version);
+                        if (!conn_to_pool->tls_version) alloc_failed = true;
                     }
-                    if (response->tls_cipher) {
+                    if (response->tls_cipher && !alloc_failed) {
                         conn_to_pool->tls_cipher = strdup(response->tls_cipher);
+                        if (!conn_to_pool->tls_cipher) alloc_failed = true;
+                    }
+
+                    /* If any allocation failed, destroy connection instead of pooling */
+                    if (alloc_failed) {
+                        pool_connection_destroy(conn_to_pool);
+                        conn_to_pool = NULL;
                     }
                 }
                 /* Store proxy info for proxy connections */
