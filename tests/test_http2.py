@@ -13,8 +13,8 @@ from tests.test_server import MockHTTPServer
 class TestClientHTTP2Flag:
     """Test Client class with HTTP/2 flag"""
 
-    def test_client_http2_default_false(self, httpbin_host):
-        """Test that Client http2 flag defaults to True (Chrome 142)"""
+    def test_client_http2_default_true(self, httpbin_host):
+        """Test that Client http2 flag defaults to True (Chrome-like behavior)"""
         client = httpmorph.Client()
         assert client.http2 is True
 
@@ -64,10 +64,10 @@ class TestClientHTTP2Flag:
 class TestSessionHTTP2Flag:
     """Test Session class with HTTP/2 flag"""
 
-    def test_session_http2_default_false(self):
-        """Test that Session http2 flag defaults to False"""
+    def test_session_http2_default_true(self):
+        """Test that Session http2 flag defaults to True (Chrome uses HTTP/2)"""
         session = httpmorph.Session(browser="chrome")
-        assert session.http2 is False
+        assert session.http2 is True
 
     def test_session_http2_true(self):
         """Test Session with http2=True"""

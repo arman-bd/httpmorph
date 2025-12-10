@@ -367,6 +367,13 @@ httpmorph_session_t* httpmorph_session_create(
 );
 
 /**
+ * Create a new session with browser name string (e.g., "chrome100", "chrome143")
+ */
+httpmorph_session_t* httpmorph_session_create_with_browser(
+    const char *browser_name
+);
+
+/**
  * Destroy a session
  */
 void httpmorph_session_destroy(httpmorph_session_t *session);

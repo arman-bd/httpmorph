@@ -13,9 +13,10 @@ A Python HTTP client focused on mimicking browser fingerprints.
 - **Requests-compatible API** - Drop-in replacement for most Python `requests` use cases
 - **High Performance** - Native C implementation with BoringSSL for HTTP/HTTPS
 - **HTTP/2 Support** - Full HTTP/2 with ALPN negotiation via nghttp2 (httpx-like API)
-- **Chrome 142 Fingerprint** - Perfect JA3N, JA4, and JA4_R matching
-- **Browser Fingerprinting** - Realistic Chrome 142 browser profile
-- **TLS Fingerprinting** - JA3/JA3N/JA4 fingerprint generation with post-quantum crypto
+- **Chrome 127-143 Fingerprints** - Perfect JA4 fingerprint matching
+- **Browser Fingerprinting** - Realistic Chrome browser profiles (127-143)
+- **TLS Fingerprinting** - JA3N/JA4/JA4_R fingerprint generation with post-quantum crypto
+- **HTTP/2 Fingerprinting** - Perfect Akamai HTTP/2 fingerprint matching
 - **Connection Pooling** - Automatic connection reuse for better performance
 - **Session Management** - Persistent cookies and headers across requests
 
@@ -74,14 +75,14 @@ print(response.http_version)  # '2.0'
 Mimic real browser behavior with pre-configured profiles:
 
 ```python
-# Use Chrome fingerprint (defaults to Chrome 142)
+# Use Chrome fingerprint (defaults to Chrome 143)
 response = httpmorph.get('https://example.com', browser='chrome')
 
-# Use specific Chrome version
-session = httpmorph.Session(browser='chrome142')
+# Use specific Chrome version (127-143 supported)
+session = httpmorph.Session(browser='chrome143')
 response = session.get('https://example.com')
 
-# Available browsers: chrome, chrome142
+# Available browsers: chrome, chrome127-chrome143
 ```
 
 ### OS-Specific User Agents
@@ -111,18 +112,19 @@ session = httpmorph.Session(browser='chrome', os='linux')
 
 The OS parameter only affects the User-Agent string, while all other fingerprinting characteristics (TLS, HTTP/2, JA3/JA4) remain consistent to match the specified browser profile.
 
-### Chrome 142 Fingerprint Matching
+### Chrome Fingerprint Matching
 
-httpmorph accurately mimics **Chrome 142** TLS fingerprints with:
+httpmorph accurately mimics **Chrome 127-143** TLS and HTTP/2 fingerprints with:
 
-- **JA3N** ✅ Perfect match
-- **JA4** ✅ Perfect match
+- **JA4** ✅ Perfect match (`t13d1516h2_8daaf6152771_d8a2da3f94cd`)
 - **JA4_R** ✅ Perfect match
-- **User-Agent**: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36`
+- **JA3N** ✅ Perfect match (normalized JA3: `dcefaf3f0e71d260d19dc1d0749c9278`)
+- **HTTP/2 Akamai** ✅ Perfect match (`1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`)
+- **User-Agent**: Version-specific Chrome user agents
 - **TLS 1.3** with correct cipher suites and extensions
-- **HTTP/2** with Chrome-specific SETTINGS frame
+- **HTTP/2** with Chrome-specific SETTINGS frame and pseudo-header order
 - **Post-quantum cryptography** (X25519MLKEM768)
-- **Certificate compression** (Brotli, Zlib)
+- **Certificate compression** (Brotli)
 
 **Verify your fingerprint:**
 
@@ -130,16 +132,14 @@ httpmorph accurately mimics **Chrome 142** TLS fingerprints with:
 import httpmorph
 
 # Make a request to fingerprint checker
-response = httpmorph.get('https://suip.biz/?act=ja4', browser='chrome142')
-print(response.text)
+response = httpmorph.get('https://tls.peet.ws/api/all', browser='chrome143')
+data = response.json()
+print(f"JA4: {data['tls']['ja4']}")
 
-# You should see perfect matches for:
-# - JA4 fingerprint ✅
-# - JA3N fingerprint ✅
-# - User-Agent: Chrome/142.0.0.0 ✅
+# Expected: t13d1516h2_8daaf6152771_d8a2da3f94cd ✅
 ```
 
-httpmorph achieves **perfect matches** for all modern fingerprints including JA3N, JA4, and JA4_R when tested against real Chrome 142 browsers.
+All Chrome 127-143 profiles produce **exact JA4 matches** with real Chrome browsers.
 
 ## Advanced Usage
 
@@ -148,19 +148,18 @@ httpmorph achieves **perfect matches** for all modern fingerprints including JA3
 httpmorph supports HTTP/2 with an httpx-like API:
 
 ```python
-# Enable HTTP/2 for a client (default is False)
-client = httpmorph.Client(http2=True)
+# Both Client and Session default to HTTP/2 (http2=True) like Chrome
+client = httpmorph.Client()
 response = client.get('https://www.google.com')
 print(response.http_version)  # '2.0'
 
-# Enable HTTP/2 for a session
-session = httpmorph.Session(browser='chrome', http2=True)
+session = httpmorph.Session(browser='chrome')
 response = session.get('https://www.google.com')
 print(response.http_version)  # '2.0'
 
-# Per-request HTTP/2 override
-client = httpmorph.Client(http2=False)  # Default disabled
-response = client.get('https://www.google.com', http2=True)  # Enable for this request
+# Per-request HTTP/2 override (disable for specific request)
+client = httpmorph.Client()  # Defaults to HTTP/2
+response = client.get('https://example.com', http2=False)  # Disable for this request
 ```
 
 ### Custom Headers
@@ -417,7 +416,7 @@ Please open an issue or pull request on GitHub.
 httpmorph has a comprehensive test suite with 350+ tests covering:
 
 - All HTTP methods and parameters
-- Chrome 142 fingerprint validation (JA3N, JA4, JA4_R)
+- Chrome 127-143 fingerprint validation (JA4, JA4_R)
 - TLS 1.2/1.3 with post-quantum cryptography
 - Certificate compression (Brotli, Zlib)
 - Redirect handling and history
@@ -439,16 +438,16 @@ pytest tests/ -v
 - Built on BoringSSL (Google) with post-quantum cryptography support
 - HTTP/2 support via nghttp2
 - Inspired by Python's requests and httpx libraries
-- Chrome 142 fingerprint matching with perfect JA3N, JA4, and JA4_R matches
-- Certificate compression support for Cloudflare-protected sites
+- Chrome 127-143 fingerprint matching with perfect JA4, JA3N, and HTTP/2 Akamai fingerprints
+- Certificate compression (Brotli) for Cloudflare-protected sites
 
 ## FAQ
 
 **Q: Why another HTTP client?**
 A: httpmorph combines the performance of native C with browser fingerprinting capabilities, making it ideal for applications that need both speed and realistic browser behavior.
 
-**Q: How accurate is the Chrome 142 fingerprint?**
-A: httpmorph achieves perfect matches for modern fingerprints including JA3N, JA4, and JA4_R. This is verified against real Chrome 142 browsers. Test your fingerprint at https://suip.biz/?act=ja4
+**Q: How accurate are the Chrome fingerprints?**
+A: httpmorph achieves perfect JA4 matches for Chrome 127-143. Test your fingerprint at https://tls.peet.ws/api/all
 
 **Q: Is it production-ready?**
 A: No, httpmorph is still in active development and not yet recommended for production use.
@@ -457,7 +456,7 @@ A: No, httpmorph is still in active development and not yet recommended for prod
 A: For most common use cases, yes! We've implemented the most widely-used requests API. Some advanced features may have slight differences.
 
 **Q: Does it work with Cloudflare-protected sites?**
-A: Yes! httpmorph supports certificate compression (Brotli, Zlib) which is required for many Cloudflare-protected sites. We successfully tested with icanhazip.com and postman-echo.com.
+A: Yes! httpmorph supports certificate compression (Brotli) which is required for many Cloudflare-protected sites. We successfully tested with icanhazip.com and postman-echo.com.
 
 **Q: How do I report a bug?**
 A: Please open an issue on GitHub with a minimal reproduction example and your environment details (OS, Python version, httpmorph version).

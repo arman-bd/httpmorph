@@ -147,6 +147,57 @@ fi
 
 cd "$VENDOR_DIR"
 
+#
+# 3. Brotli (for TLS certificate compression)
+#
+echo ""
+echo "==> Setting up Brotli..."
+
+BROTLI_VERSION="1.1.0"
+
+if [ ! -d "brotli" ]; then
+    echo "Downloading Brotli..."
+    curl -L "https://github.com/google/brotli/archive/refs/tags/v${BROTLI_VERSION}.tar.gz" \
+         -o brotli.tar.gz
+
+    tar xzf brotli.tar.gz
+    mv "brotli-${BROTLI_VERSION}" brotli
+    rm brotli.tar.gz
+fi
+
+cd brotli
+
+if [ ! -f "build/libbrotlidec.a" ]; then
+    echo "Building Brotli..."
+
+    # Clean build directory if it exists
+    if [ -d "build" ]; then
+        echo "Cleaning previous build..."
+        rm -rf build
+    fi
+
+    mkdir -p build
+    cd build
+
+    # Set deployment target for wheel compatibility (macOS 11.0 minimum)
+    export MACOSX_DEPLOYMENT_TARGET=11.0
+
+    # Build with correct deployment target and position-independent code
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+          -DBUILD_SHARED_LIBS=OFF \
+          ..
+
+    make -j$(sysctl -n hw.ncpu)
+
+    echo "✓ Brotli built successfully"
+else
+    echo "✓ Brotli already built"
+fi
+
+cd "$VENDOR_DIR"
+
 # Clean up downloaded archives to save cache space
 echo ""
 echo "==> Cleaning up downloaded archives..."
@@ -164,6 +215,7 @@ echo ""
 echo "Built libraries:"
 echo "  ✓ BoringSSL:  $VENDOR_DIR/boringssl/build"
 echo "  ✓ nghttp2:    $VENDOR_DIR/nghttp2/install"
+echo "  ✓ Brotli:     $VENDOR_DIR/brotli/build"
 echo ""
 echo "Library verification:"
 
@@ -189,6 +241,19 @@ if [ -f "$VENDOR_DIR/nghttp2/install/lib/libnghttp2.a" ]; then
     echo "  ✓ nghttp2 libnghttp2.a found"
 else
     echo "  ✗ nghttp2 libnghttp2.a NOT FOUND"
+fi
+
+# Verify Brotli
+if [ -f "$VENDOR_DIR/brotli/build/libbrotlidec.a" ]; then
+    echo "  ✓ Brotli libbrotlidec.a found"
+else
+    echo "  ✗ Brotli libbrotlidec.a NOT FOUND"
+fi
+
+if [ -f "$VENDOR_DIR/brotli/build/libbrotlicommon.a" ]; then
+    echo "  ✓ Brotli libbrotlicommon.a found"
+else
+    echo "  ✗ Brotli libbrotlicommon.a NOT FOUND"
 fi
 
 echo ""

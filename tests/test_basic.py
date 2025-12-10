@@ -51,10 +51,10 @@ def test_session_creation():
         pytest.skip("Session not yet implemented")
 
 
-def test_simple_get():
+def test_simple_get(httpbin_server):
     """Test simple GET request"""
-    response = httpmorph.get("https://ipapi.co/json/")
-    assert response.status_code in [200, 402]  # httpbingo returns 402 for HTTP/2
+    response = httpmorph.get(f"{httpbin_server}/get")
+    assert response.status_code == 200
     assert response.body is not None
 
 

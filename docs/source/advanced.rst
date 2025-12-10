@@ -9,11 +9,11 @@ TLS Fingerprinting
 Browser-Specific Fingerprints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-httpmorph generates accurate Chrome 142 TLS fingerprints with perfect JA3N, JA4, and JA4_R matching:
+httpmorph generates accurate Chrome 143 TLS fingerprints with perfect JA3N, JA4, JA4_R, and Akamai matching:
 
 .. code-block:: python
 
-   # Chrome 142 profile (default)
+   # Chrome 143 profile (default)
    session = httpmorph.Session(browser='chrome')
    response = session.get('https://example.com')
 
@@ -23,7 +23,7 @@ httpmorph generates accurate Chrome 142 TLS fingerprints with perfect JA3N, JA4,
    print('HTTP:', response.http_version)
 
    # Output example:
-   # JA3: 8e19337e7524d2573be54efb2b0784c9 (Chrome 142 normalized)
+   # JA3: dcefaf3f0e71d260d19dc1d0749c9278 (Chrome 143 normalized)
    # TLS: TLSv1.3
    # Cipher: TLS_AES_128_GCM_SHA256
    # HTTP: 2.0
@@ -53,7 +53,7 @@ Customize the User-Agent for different operating systems:
 GREASE Values
 ~~~~~~~~~~~~~
 
-Chrome 142 uses GREASE (Generate Random Extensions And Sustain Extensibility) values that are randomized per request to maintain TLS ecosystem extensibility:
+Chrome 143 uses GREASE (Generate Random Extensions And Sustain Extensibility) values that are randomized per request to maintain TLS ecosystem extensibility:
 
 .. code-block:: python
 

@@ -102,12 +102,12 @@ Mimic Chrome browser with realistic fingerprints:
 
 .. code-block:: python
 
-   # Chrome browser profile (defaults to Chrome 142)
+   # Chrome browser profile (defaults to Chrome 143)
    session = httpmorph.Session(browser='chrome')
    response = session.get('https://example.com')
 
-   # Use specific Chrome version
-   session = httpmorph.Session(browser='chrome142')
+   # Use specific Chrome version (127-143 supported)
+   session = httpmorph.Session(browser='chrome143')
    response = session.get('https://example.com')
 
    # Random browser selection
@@ -118,9 +118,10 @@ The Chrome browser profile includes:
 * Chrome-specific User-Agent
 * Chrome-specific TLS cipher suites and extensions
 * Post-quantum cryptography (X25519MLKEM768)
-* Certificate compression (Brotli, Zlib)
-* Chrome-specific HTTP/2 settings
-* Perfect JA3N, JA4, and JA4_R fingerprint matching
+* Certificate compression (Brotli, with zlib fallback)
+* Chrome-specific HTTP/2 settings and priority
+* Perfect JA3N, JA4, JA4_R, and Akamai fingerprint matching
+* Chrome-like default headers (sec-ch-ua, sec-fetch-*, etc.)
 
 OS-Specific User Agents
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -344,21 +345,22 @@ Upload files:
 HTTP/2
 ------
 
-Enable HTTP/2 support:
+Both Client and Session default to HTTP/2 to match Chrome behavior:
 
 .. code-block:: python
 
-   # For all requests in a client
-   client = httpmorph.Client(http2=True)
+   # Both Client and Session default to HTTP/2 (http2=True)
+   client = httpmorph.Client()
    response = client.get('https://www.google.com')
+   print(response.http_version)  # '2.0'
 
-   # For all requests in a session
-   session = httpmorph.Session(browser='chrome', http2=True)
+   session = httpmorph.Session(browser='chrome')
    response = session.get('https://www.google.com')
+   print(response.http_version)  # '2.0'
 
-   # Per-request override
-   client = httpmorph.Client(http2=False)
-   response = client.get('https://www.google.com', http2=True)
+   # Per-request override (disable HTTP/2 for specific request)
+   client = httpmorph.Client()  # Defaults to HTTP/2
+   response = client.get('https://example.com', http2=False)
 
 Check HTTP version:
 

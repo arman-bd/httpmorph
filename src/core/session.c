@@ -58,24 +58,97 @@ httpmorph_session_t* httpmorph_session_create(httpmorph_browser_t browser_type) 
     if (session->browser_profile) {
         session->client->browser_profile = session->browser_profile;
 
-        /* Protect SSL_CTX configuration with mutex */
+        /* Configure SSL_CTX only if not already configured for this profile.
+         * SSL_CTX configuration is done once per client because some functions
+         * like SSL_CTX_add_cert_compression_alg() add to context rather than replace. */
+        if (!session->client->ssl_ctx_configured) {
+            /* Protect SSL_CTX configuration with mutex */
 #ifndef _WIN32
-        pthread_mutex_lock(&ssl_ctx_config_mutex);
+            pthread_mutex_lock(&ssl_ctx_config_mutex);
 #else
-        if (ssl_ctx_mutex_initialized) {
-            EnterCriticalSection(&ssl_ctx_config_mutex);
-        }
+            if (ssl_ctx_mutex_initialized) {
+                EnterCriticalSection(&ssl_ctx_config_mutex);
+            }
 #endif
 
-        httpmorph_configure_ssl_ctx(session->client->ssl_ctx, session->browser_profile);
+            httpmorph_configure_ssl_ctx(session->client->ssl_ctx, session->browser_profile);
+            session->client->ssl_ctx_configured = true;
 
 #ifndef _WIN32
-        pthread_mutex_unlock(&ssl_ctx_config_mutex);
+            pthread_mutex_unlock(&ssl_ctx_config_mutex);
 #else
-        if (ssl_ctx_mutex_initialized) {
-            LeaveCriticalSection(&ssl_ctx_config_mutex);
-        }
+            if (ssl_ctx_mutex_initialized) {
+                LeaveCriticalSection(&ssl_ctx_config_mutex);
+            }
 #endif
+        }
+    }
+
+    /* Initialize cookie jar */
+    session->cookies = NULL;
+    session->cookie_count = 0;
+
+    /* Initialize connection pool for keep-alive */
+    session->pool = pool_create();
+    if (!session->pool) {
+        httpmorph_session_destroy(session);
+        return NULL;
+    }
+
+    return session;
+}
+
+/**
+ * Create a new session with browser name string (e.g., "chrome100", "chrome143")
+ */
+httpmorph_session_t* httpmorph_session_create_with_browser(const char *browser_name) {
+    httpmorph_session_t *session = calloc(1, sizeof(httpmorph_session_t));
+    if (!session) {
+        return NULL;
+    }
+
+    /* Create internal client */
+    session->client = httpmorph_client_create();
+    if (!session->client) {
+        free(session);
+        return NULL;
+    }
+
+    /* Get profile directly by name */
+    session->browser_profile = browser_profile_get(browser_name);
+
+    /* Fallback to default Chrome if not found */
+    if (!session->browser_profile) {
+        session->browser_profile = browser_profile_get("chrome");
+    }
+
+    if (session->browser_profile) {
+        session->client->browser_profile = session->browser_profile;
+
+        /* Configure SSL_CTX only if not already configured for this profile.
+         * SSL_CTX configuration is done once per client because some functions
+         * like SSL_CTX_add_cert_compression_alg() add to context rather than replace. */
+        if (!session->client->ssl_ctx_configured) {
+            /* Protect SSL_CTX configuration with mutex */
+#ifndef _WIN32
+            pthread_mutex_lock(&ssl_ctx_config_mutex);
+#else
+            if (ssl_ctx_mutex_initialized) {
+                EnterCriticalSection(&ssl_ctx_config_mutex);
+            }
+#endif
+
+            httpmorph_configure_ssl_ctx(session->client->ssl_ctx, session->browser_profile);
+            session->client->ssl_ctx_configured = true;
+
+#ifndef _WIN32
+            pthread_mutex_unlock(&ssl_ctx_config_mutex);
+#else
+            if (ssl_ctx_mutex_initialized) {
+                LeaveCriticalSection(&ssl_ctx_config_mutex);
+            }
+#endif
+        }
     }
 
     /* Initialize cookie jar */

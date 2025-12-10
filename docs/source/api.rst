@@ -90,13 +90,13 @@ Client Class
 
 .. code-block:: python
 
-   client = httpmorph.Client(http2=False)
+   client = httpmorph.Client(http2=True)
 
-HTTP client for making requests.
+HTTP client for making requests. Defaults to HTTP/2 to match Chrome behavior.
 
 **Constructor Parameters:**
 
-* ``http2`` (bool) - Enable HTTP/2. Default: ``False``
+* ``http2`` (bool) - Enable HTTP/2. Default: ``True``
 
 **Methods:**
 
@@ -127,15 +127,15 @@ Session Class
 
 .. code-block:: python
 
-   session = httpmorph.Session(browser='chrome', os='macos', http2=False)
+   session = httpmorph.Session(browser='chrome', os='macos', http2=True)
 
-HTTP session with persistent cookies and headers.
+HTTP session with persistent cookies and headers. Sessions default to HTTP/2 to match Chrome browser behavior.
 
 **Constructor Parameters:**
 
-* ``browser`` (str) - Browser profile to mimic. Options: ``'chrome'``, ``'chrome142'``, ``'random'``. Default: ``'chrome'``
+* ``browser`` (str) - Browser profile to mimic. Options: ``'chrome'``, ``'chrome127'``-``'chrome143'``, ``'random'``. Default: ``'chrome'`` (Chrome 143)
 * ``os`` (str) - Operating system for User-Agent. Options: ``'macos'``, ``'windows'``, ``'linux'``. Default: ``'macos'``
-* ``http2`` (bool) - Enable HTTP/2. Default: ``False``
+* ``http2`` (bool) - Enable HTTP/2. Default: ``True`` (matches Chrome behavior)
 
 **Attributes:**
 
@@ -423,42 +423,55 @@ Browser Profiles
 
 Available browser profiles for ``Session(browser=...)``:
 
-Chrome 142
-~~~~~~~~~~
+Chrome 143 (Default)
+~~~~~~~~~~~~~~~~~~~~
 
-The default and most accurate browser profile, mimicking Chrome 142:
+The default and most accurate browser profile, mimicking Chrome 143:
 
 **Fingerprint Characteristics:**
 
-* **JA3N**: ``8e19337e7524d2573be54efb2b0784c9`` (perfect match)
-* **JA4**: ``t13d1516h2_8daaf6152771_d8a2da3f94cd`` (perfect match)
-* **JA4_R**: ``t13d1516h2_002f,0035,009c,...`` (perfect match)
+* **JA4**: ``t13d1516h2_8daaf6152771_e5627efa2ab1`` (perfect match)
+* **JA3N**: ``dcefaf3f0e71d260d19dc1d0749c9278`` (perfect match)
+* **Peetprint**: ``1d4ffe9b0e34acac0bd883fa7f79d7b5`` (perfect match)
+* **Akamai HTTP/2**: ``1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`` (perfect match)
 * **TLS 1.3** with 15 cipher suites
 * **Post-quantum cryptography**: X25519MLKEM768 (curve 4588)
-* **Certificate compression**: Brotli, Zlib
+* **Certificate compression**: Brotli (zlib fallback for compatibility)
 * **GREASE**: Randomized per request
-* **HTTP/2**: Chrome-specific SETTINGS frame
+* **HTTP/2**: Chrome-specific SETTINGS frame, priority (weight=256, exclusive=1)
+* **Default headers**: sec-ch-ua, sec-fetch-*, accept-language, priority
 
 **User-Agent Variants:**
 
-* **macOS**: ``Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
-* **Windows**: ``Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
-* **Linux**: ``Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36``
+* **macOS**: ``Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36``
+* **Windows**: ``Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36``
+* **Linux**: ``Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36``
 
 **Usage:**
 
 .. code-block:: python
 
-   # Use Chrome 142 profile (default)
+   # Use Chrome 143 profile (default)
    session = httpmorph.Session(browser='chrome')
 
-   # Explicitly use Chrome 142
-   session = httpmorph.Session(browser='chrome142')
+   # Explicitly use Chrome 143
+   session = httpmorph.Session(browser='chrome143')
 
    # With specific OS
    session = httpmorph.Session(browser='chrome', os='windows')
 
+Chrome 127-142
+~~~~~~~~~~~~~~
+
+Older Chrome profiles are also available for compatibility testing:
+
+.. code-block:: python
+
+   session = httpmorph.Session(browser='chrome127')
+   session = httpmorph.Session(browser='chrome135')
+   # etc.
+
 Random
 ~~~~~~
 
-Randomly selects a browser profile for each session. Currently only Chrome 142 is available.
+Randomly selects a browser profile for each session from available Chrome profiles.

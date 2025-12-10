@@ -428,6 +428,16 @@ def get_library_paths():
             zlib_include = None
             zlib_lib = None
 
+        # brotli paths - vcpkg only (no vendor build on Windows)
+        if vcpkg_installed.exists() and (vcpkg_installed / "include" / "brotli").exists():
+            print(f"Using vcpkg brotli from: {vcpkg_installed}")
+            brotli_include = str(vcpkg_installed / "include")
+            brotli_lib = str(vcpkg_installed / "lib")
+        else:
+            print("WARNING: brotli not found. Install via vcpkg: vcpkg install brotli:x64-windows")
+            brotli_include = None
+            brotli_lib = None
+
         return {
             "openssl_include": boringssl_include,
             "openssl_lib": boringssl_lib,
@@ -435,6 +445,8 @@ def get_library_paths():
             "nghttp2_lib": nghttp2_lib,
             "zlib_include": zlib_include,
             "zlib_lib": zlib_lib,
+            "brotli_include": brotli_include,
+            "brotli_lib": brotli_lib,
         }
     else:
         # Other platforms - use default system paths
@@ -479,7 +491,7 @@ if not ON_READTHEDOCS:
             f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
         ]
         # BoringSSL and nghttp2 library names on Windows (without .lib extension)
-        # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
+        # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor), brotlidec.lib
         # Detect which zlib we're using
         vendor_dir = Path("vendor").resolve()
         vendor_zlib = vendor_dir / "zlib"
@@ -487,7 +499,8 @@ if not ON_READTHEDOCS:
             zlib_lib_name = "zlibstatic"
         else:
             zlib_lib_name = "zlib"
-        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
+        # brotlidec is needed for TLS certificate decompression
+        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name, "brotlidec", "brotlicommon"]
         EXT_LINK_ARGS = []  # No special linker flags for Windows
     else:
         # Production optimized build
@@ -511,10 +524,19 @@ if not ON_READTHEDOCS:
             # Use extra_objects for static linking (vendor .a files)
             # This ensures we link against vendor static libs, not system dynamic libs
             # Note: liburing will be linked statically via EXTRA_OBJECTS, not via -luring
-            EXT_LIBRARIES = ["z"]  # Only z (zlib)
+            # brotlidec is needed for compress_certificate extension (TLS cert decompression)
+            # On macOS, prefer vendor brotli (has correct deployment target for wheels)
+            vendor_dir = Path("vendor").resolve()
+            vendor_brotli_dec = vendor_dir / "brotli" / "build" / "libbrotlidec.a"
+            if IS_MACOS and vendor_brotli_dec.exists():
+                # Vendor brotli will be linked via EXTRA_OBJECTS
+                EXT_LIBRARIES = ["z"]
+            else:
+                # Use system brotli
+                EXT_LIBRARIES = ["z", "brotlidec"]
         else:
             # Other Unix - use library names (will find .a or .so)
-            EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
+            EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z", "brotlidec"]
 
     # Define C extension modules
     # Build library directories list
@@ -537,6 +559,34 @@ if not ON_READTHEDOCS:
 
     LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
 
+    # Add brotli include/lib directories (for compress_certificate extension)
+    if IS_MACOS:
+        # Prefer vendor brotli (built with correct deployment target for wheels)
+        vendor_dir = Path("vendor").resolve()
+        vendor_brotli_include = vendor_dir / "brotli" / "c" / "include"
+        vendor_brotli_lib = vendor_dir / "brotli" / "build"
+        if vendor_brotli_include.exists() and (vendor_brotli_lib / "libbrotlidec.a").exists():
+            print(f"Using vendor brotli from: {vendor_dir / 'brotli'}")
+            INCLUDE_DIRS.append(str(vendor_brotli_include))
+            # Library dir not needed - we'll use EXTRA_OBJECTS for static linking
+        else:
+            # Fall back to Homebrew paths for brotli (ARM64 and Intel)
+            # Note: Homebrew brotli may have higher deployment target than wheel
+            homebrew_prefix = "/opt/homebrew" if os.path.exists("/opt/homebrew") else "/usr/local"
+            brotli_include = os.path.join(homebrew_prefix, "include")
+            brotli_lib = os.path.join(homebrew_prefix, "lib")
+            if os.path.exists(os.path.join(brotli_include, "brotli")):
+                print(f"Using Homebrew brotli from: {homebrew_prefix}")
+                INCLUDE_DIRS.append(brotli_include)
+                LIBRARY_DIRS.append(brotli_lib)
+    elif IS_LINUX:
+        # Standard Linux paths
+        if os.path.exists("/usr/include/brotli"):
+            pass  # Already in default include path
+        elif os.path.exists("/usr/local/include/brotli"):
+            INCLUDE_DIRS.append("/usr/local/include")
+            LIBRARY_DIRS.append("/usr/local/lib")
+
     # Add zlib paths on Windows if available
     if IS_WINDOWS and LIB_PATHS.get("zlib_include"):
         zlib_inc = LIB_PATHS["zlib_include"]
@@ -545,6 +595,11 @@ if not ON_READTHEDOCS:
         else:
             INCLUDE_DIRS.append(zlib_inc)
         LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
+
+    # Add brotli paths on Windows if available
+    if IS_WINDOWS and LIB_PATHS.get("brotli_include"):
+        INCLUDE_DIRS.append(LIB_PATHS["brotli_include"])
+        LIBRARY_DIRS.append(LIB_PATHS["brotli_lib"])
 
     # On macOS and Linux, explicitly link against vendor static libraries
     EXTRA_OBJECTS = []
@@ -579,6 +634,15 @@ if not ON_READTHEDOCS:
                 if uring_path.exists():
                     static_libs.append(str(uring_path))
                     break
+
+        # Brotli static libraries (macOS vendor build for correct deployment target)
+        if IS_MACOS:
+            brotli_build = vendor_dir / "brotli" / "build"
+            brotli_dec = brotli_build / "libbrotlidec.a"
+            brotli_common = brotli_build / "libbrotlicommon.a"
+            if brotli_dec.exists() and brotli_common.exists():
+                static_libs.append(str(brotli_dec))
+                static_libs.append(str(brotli_common))
 
         if static_libs:
             print("\nUsing static libraries:")
