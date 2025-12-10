@@ -134,6 +134,11 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
         SSL_CTX_set_grease_enabled(ctx, 1);
     }
 
+    /* Enable extension permutation to match Chrome's behavior.
+     * Chrome randomizes extension order in ClientHello for each connection.
+     * Note: JA4 sorts extensions alphabetically, so this doesn't affect JA4 fingerprint. */
+    SSL_CTX_set_permute_extensions(ctx, 1);
+
     /* Check if compress_certificate (27) is in the profile's extension list */
     bool has_compress_cert = false;
     for (int i = 0; i < profile->extension_count; i++) {
@@ -144,13 +149,11 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     }
 
     /* Enable compress_certificate extension (0x001b) only if profile includes it.
-     * Chrome 143 advertises brotli (2) decompression support in the extension.
-     * However, some servers may still send zlib-compressed certs, so we register
-     * both decompression handlers for compatibility.
-     * The compress function is NULL since clients don't compress certificates. */
+     * Chrome 143 ONLY advertises brotli (2) in the compress_certificate extension.
+     * We must match this exactly for fingerprint accuracy - only register brotli.
+     * Servers will only send brotli-compressed certs since that's what we advertise. */
     if (has_compress_cert) {
         SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_brotli, NULL, cert_decompress_brotli);
-        SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_zlib, NULL, cert_decompress_zlib);
     }
 
     /* Force AES hardware preference to match Chrome's cipher order (AES-GCM before ChaCha20)
@@ -379,20 +382,14 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
         if (alpn_p > alpn_list) {
             SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
 
-            /* Enable ALPS (application_settings extension 0x44cd) only if profile includes it */
-            if (has_alps) {
-                for (int i = 0; i < browser_profile->alpn_protocol_count; i++) {
-                    /* Skip "h2" if HTTP/2 not enabled */
-                    if (!http2_enabled && strcmp(browser_profile->alpn_protocols[i], "h2") == 0) {
-                        continue;
-                    }
-
-                    const char *proto = browser_profile->alpn_protocols[i];
-                    /* Send empty ALPS settings (Chrome sends empty for most protocols) */
-                    SSL_add_application_settings(ssl,
-                        (const uint8_t *)proto, strlen(proto),
-                        (const uint8_t *)"", 0);
-                }
+            /* Enable ALPS (application_settings extension 0x44cd) only if profile includes it.
+             * Chrome 143 ONLY advertises "h2" in application_settings, NOT "http/1.1".
+             * We must match this exactly for fingerprint accuracy. */
+            if (has_alps && http2_enabled) {
+                /* Only add ALPS for "h2" protocol - Chrome doesn't advertise http/1.1 in ALPS */
+                SSL_add_application_settings(ssl,
+                    (const uint8_t *)"h2", 2,
+                    (const uint8_t *)"", 0);
             }
         }
     }
