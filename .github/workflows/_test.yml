@@ -57,7 +57,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool libnghttp2-dev
+        sudo apt-get install -y cmake ninja-build libssl-dev pkg-config autoconf automake libtool libnghttp2-dev libbrotli-dev
 
     - name: Cache Homebrew packages (macOS)
       if: runner.os == 'macOS'
@@ -73,7 +73,7 @@ jobs:
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
-      run: brew install cmake ninja openssl@3 libnghttp2
+      run: brew install cmake ninja openssl@3 libnghttp2 brotli
 
     - name: Install system dependencies (Windows)
       if: runner.os == 'Windows'
@@ -131,9 +131,9 @@ jobs:
         path: |
           C:/vcpkg/installed
           C:/vcpkg/packages
-        key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
+        key: vcpkg-nghttp2-zlib-brotli-${{ runner.os }}-v4
         restore-keys: |
-          vcpkg-nghttp2-zlib-${{ runner.os }}-
+          vcpkg-nghttp2-zlib-brotli-${{ runner.os }}-
 
     - name: Setup vcpkg (Windows)
       if: runner.os == 'Windows' && steps.cache-vcpkg-restore.outputs.cache-hit != 'true'
@@ -158,7 +158,7 @@ jobs:
       run: |
         export VCPKG_ROOT="C:/vcpkg"
         export PATH="$VCPKG_ROOT:$PATH"
-        vcpkg install nghttp2:x64-windows zlib:x64-windows --clean-after-build
+        vcpkg install nghttp2:x64-windows zlib:x64-windows brotli:x64-windows --clean-after-build
       shell: bash
 
     - name: Set vcpkg environment (Windows)
@@ -254,7 +254,7 @@ jobs:
         path: |
           C:/vcpkg/installed
           C:/vcpkg/packages
-        key: vcpkg-nghttp2-zlib-${{ runner.os }}-v3
+        key: vcpkg-nghttp2-zlib-brotli-${{ runner.os }}-v4
 
     - name: Save vendor cache
       if: always() && steps.cache-vendor.outputs.cache-hit != 'true'

@@ -428,6 +428,16 @@ def get_library_paths():
             zlib_include = None
             zlib_lib = None
 
+        # brotli paths - vcpkg only (no vendor build on Windows)
+        if vcpkg_installed.exists() and (vcpkg_installed / "include" / "brotli").exists():
+            print(f"Using vcpkg brotli from: {vcpkg_installed}")
+            brotli_include = str(vcpkg_installed / "include")
+            brotli_lib = str(vcpkg_installed / "lib")
+        else:
+            print("WARNING: brotli not found. Install via vcpkg: vcpkg install brotli:x64-windows")
+            brotli_include = None
+            brotli_lib = None
+
         return {
             "openssl_include": boringssl_include,
             "openssl_lib": boringssl_lib,
@@ -435,6 +445,8 @@ def get_library_paths():
             "nghttp2_lib": nghttp2_lib,
             "zlib_include": zlib_include,
             "zlib_lib": zlib_lib,
+            "brotli_include": brotli_include,
+            "brotli_lib": brotli_lib,
         }
     else:
         # Other platforms - use default system paths
@@ -479,7 +491,7 @@ if not ON_READTHEDOCS:
             f"/DHTTPMORPH_VERSION_PATCH={VERSION_PATCH}",
         ]
         # BoringSSL and nghttp2 library names on Windows (without .lib extension)
-        # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor)
+        # Links to: ssl.lib, crypto.lib, nghttp2.lib, zlib.lib (or zlibstatic.lib if vendor), brotlidec.lib
         # Detect which zlib we're using
         vendor_dir = Path("vendor").resolve()
         vendor_zlib = vendor_dir / "zlib"
@@ -487,7 +499,8 @@ if not ON_READTHEDOCS:
             zlib_lib_name = "zlibstatic"
         else:
             zlib_lib_name = "zlib"
-        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name]
+        # brotlidec is needed for TLS certificate decompression
+        EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", zlib_lib_name, "brotlidec", "brotlicommon"]
         EXT_LINK_ARGS = []  # No special linker flags for Windows
     else:
         # Production optimized build
@@ -563,6 +576,11 @@ if not ON_READTHEDOCS:
         else:
             INCLUDE_DIRS.append(zlib_inc)
         LIBRARY_DIRS.append(LIB_PATHS["zlib_lib"])
+
+    # Add brotli paths on Windows if available
+    if IS_WINDOWS and LIB_PATHS.get("brotli_include"):
+        INCLUDE_DIRS.append(LIB_PATHS["brotli_include"])
+        LIBRARY_DIRS.append(LIB_PATHS["brotli_lib"])
 
     # On macOS and Linux, explicitly link against vendor static libraries
     EXTRA_OBJECTS = []
