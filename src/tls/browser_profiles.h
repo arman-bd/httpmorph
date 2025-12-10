@@ -153,8 +153,24 @@ browser_profile_t* browser_profile_generate_variant(const browser_profile_t *bas
  */
 void browser_profile_destroy(browser_profile_t *profile);
 
-/* Predefined profiles */
-extern const browser_profile_t PROFILE_CHROME_142;  /* Chrome 142 - Current Chrome fingerprint */
+/* Predefined profiles - Chrome 127-143 (all with exact JA4 fingerprint matches) */
+extern const browser_profile_t PROFILE_CHROME_127;
+extern const browser_profile_t PROFILE_CHROME_128;
+extern const browser_profile_t PROFILE_CHROME_129;
+extern const browser_profile_t PROFILE_CHROME_130;
+extern const browser_profile_t PROFILE_CHROME_131;
+extern const browser_profile_t PROFILE_CHROME_132;
+extern const browser_profile_t PROFILE_CHROME_133;
+extern const browser_profile_t PROFILE_CHROME_134;
+extern const browser_profile_t PROFILE_CHROME_135;
+extern const browser_profile_t PROFILE_CHROME_136;
+extern const browser_profile_t PROFILE_CHROME_137;
+extern const browser_profile_t PROFILE_CHROME_138;
+extern const browser_profile_t PROFILE_CHROME_139;
+extern const browser_profile_t PROFILE_CHROME_140;
+extern const browser_profile_t PROFILE_CHROME_141;
+extern const browser_profile_t PROFILE_CHROME_142;
+extern const browser_profile_t PROFILE_CHROME_143;  /* Latest Chrome */
 
 #ifdef __cplusplus
 }

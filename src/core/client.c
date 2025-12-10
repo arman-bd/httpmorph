@@ -228,26 +228,12 @@ httpmorph_client_t* httpmorph_client_create(void) {
     client->max_redirects = 10;
     client->io_engine = default_io_engine;
 
-    /* Default to Chrome browser profile - protected by mutex since SSL_CTX_* functions are not thread-safe */
-    client->browser_profile = &PROFILE_CHROME_142;
-
-#ifndef _WIN32
-    pthread_mutex_lock(&ssl_ctx_config_mutex);
-#else
-    if (ssl_ctx_mutex_initialized) {
-        EnterCriticalSection(&ssl_ctx_config_mutex);
-    }
-#endif
-
-    httpmorph_configure_ssl_ctx(client->ssl_ctx, client->browser_profile);
-
-#ifndef _WIN32
-    pthread_mutex_unlock(&ssl_ctx_config_mutex);
-#else
-    if (ssl_ctx_mutex_initialized) {
-        LeaveCriticalSection(&ssl_ctx_config_mutex);
-    }
-#endif
+    /* Default to Chrome browser profile - but DON'T configure SSL_CTX here.
+     * SSL_CTX configuration happens in session.c when the actual profile is known.
+     * This is because SSL_CTX_add_cert_compression_alg() and similar functions
+     * ADD to the context rather than replacing, so we can't reconfigure later. */
+    client->browser_profile = &PROFILE_CHROME_143;
+    client->ssl_ctx_configured = false;  /* Mark as not yet configured */
 
     /* Create buffer pool for response bodies */
     client->buffer_pool = buffer_pool_create();

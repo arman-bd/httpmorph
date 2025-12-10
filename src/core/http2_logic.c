@@ -214,34 +214,30 @@ static int http2_init_or_reuse_session(nghttp2_session **session_ptr,
             return -1;
         }
 
-        /* Configure HTTP/2 settings to match Chrome 142 exactly */
-        nghttp2_settings_entry iv[6];
+        /* Configure HTTP/2 settings to match Chrome exactly
+         * Chrome sends only 4 settings: 1,2,4,6 (no settings 3 or 5)
+         * Akamai fingerprint: 1:65536;2:0;4:6291456;6:262144 */
+        nghttp2_settings_entry iv[4];
 
-        /* Chrome 142 HTTP/2 SETTINGS frame */
-        iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+        /* Chrome HTTP/2 SETTINGS frame - exactly 4 settings */
+        iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;      /* 1 */
         iv[0].value = 65536;
 
-        iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+        iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;            /* 2 */
         iv[1].value = 0;  /* Disable server push */
 
-        iv[2].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
-        iv[2].value = 1000;
+        iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;    /* 4 */
+        iv[2].value = 6291456;
 
-        iv[3].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
-        iv[3].value = 6291456;
+        iv[3].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;   /* 6 */
+        iv[3].value = 262144;
 
-        iv[4].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
-        iv[4].value = 16384;
+        /* Send connection preface and Chrome SETTINGS */
+        nghttp2_submit_settings(*session_ptr, NGHTTP2_FLAG_NONE, iv, 4);
 
-        iv[5].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
-        iv[5].value = 262144;
-
-        /* Send connection preface and Chrome 142 SETTINGS */
-        nghttp2_submit_settings(*session_ptr, NGHTTP2_FLAG_NONE, iv, 6);
-
-        /* Send Chrome 142 WINDOW_UPDATE for connection-level flow control */
+        /* Send Chrome WINDOW_UPDATE for connection-level flow control */
         nghttp2_submit_window_update(*session_ptr, NGHTTP2_FLAG_NONE, 0,
-                                      15663105);  /* Chrome 142 window update */
+                                      15663105);  /* Chrome window update */
 
         nghttp2_session_send(*session_ptr);
 
@@ -289,30 +285,26 @@ int httpmorph_http2_request(SSL *ssl, const httpmorph_request_t *request,
         return -1;
     }
 
-    /* Configure HTTP/2 settings to match Chrome 142 exactly */
-    nghttp2_settings_entry iv[6];
+    /* Configure HTTP/2 settings to match Chrome exactly
+     * Chrome sends only 4 settings: 1,2,4,6 (no settings 3 or 5)
+     * Akamai fingerprint: 1:65536;2:0;4:6291456;6:262144 */
+    nghttp2_settings_entry iv[4];
 
-    /* Chrome 142 HTTP/2 SETTINGS frame */
-    iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+    /* Chrome HTTP/2 SETTINGS frame - exactly 4 settings */
+    iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;      /* 1 */
     iv[0].value = 65536;
 
-    iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+    iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;            /* 2 */
     iv[1].value = 0;  /* Disable server push */
 
-    iv[2].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
-    iv[2].value = 1000;
+    iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;    /* 4 */
+    iv[2].value = 6291456;
 
-    iv[3].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
-    iv[3].value = 6291456;
+    iv[3].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;   /* 6 */
+    iv[3].value = 262144;
 
-    iv[4].settings_id = NGHTTP2_SETTINGS_MAX_FRAME_SIZE;
-    iv[4].value = 16384;
-
-    iv[5].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
-    iv[5].value = 262144;
-
-    /* Send connection preface and Chrome 142 SETTINGS */
-    nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 6);
+    /* Send connection preface and Chrome SETTINGS */
+    nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 4);
 
     /* Send Chrome 142 WINDOW_UPDATE for connection-level flow control */
     nghttp2_submit_window_update(session, NGHTTP2_FLAG_NONE, 0,
@@ -324,12 +316,13 @@ int httpmorph_http2_request(SSL *ssl, const httpmorph_request_t *request,
     nghttp2_nv hdrs[64];
     int nhdrs = 0;
 
-    /* Add pseudo-headers first */
+    /* Add pseudo-headers in Chrome order: m,a,s,p (method, authority, scheme, path)
+     * This matches the Akamai fingerprint pseudo-header order */
     const char *method_str = httpmorph_method_to_string(request->method);
     hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":method", (uint8_t *)method_str, 7, strlen(method_str), NGHTTP2_NV_FLAG_NONE};
-    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":path", (uint8_t *)path, 5, strlen(path), NGHTTP2_NV_FLAG_NONE};
-    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":scheme", (uint8_t *)"https", 7, 5, NGHTTP2_NV_FLAG_NONE};
     hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":authority", (uint8_t *)host, 10, strlen(host), NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":scheme", (uint8_t *)"https", 7, 5, NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":path", (uint8_t *)path, 5, strlen(path), NGHTTP2_NV_FLAG_NONE};
 
     /* Add custom headers */
     for (size_t i = 0; i < request->header_count && nhdrs < 60; i++) {
@@ -538,12 +531,13 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
     nghttp2_nv hdrs[64];
     int nhdrs = 0;
 
-    /* Add pseudo-headers first */
+    /* Add pseudo-headers in Chrome order: m,a,s,p (method, authority, scheme, path)
+     * This matches the Akamai fingerprint pseudo-header order */
     const char *method_str = httpmorph_method_to_string(request->method);
     hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":method", (uint8_t *)method_str, 7, strlen(method_str), NGHTTP2_NV_FLAG_NONE};
-    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":path", (uint8_t *)path, 5, strlen(path), NGHTTP2_NV_FLAG_NONE};
-    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":scheme", (uint8_t *)"https", 7, 5, NGHTTP2_NV_FLAG_NONE};
     hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":authority", (uint8_t *)host, 10, strlen(host), NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":scheme", (uint8_t *)"https", 7, 5, NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":path", (uint8_t *)path, 5, strlen(path), NGHTTP2_NV_FLAG_NONE};
 
     /* Add custom headers */
     for (size_t i = 0; i < request->header_count && nhdrs < 60; i++) {
@@ -720,7 +714,8 @@ int httpmorph_http2_request_concurrent(struct pooled_connection *conn,
     nghttp2_nv hdrs[64];
     int hdr_count = 0;
 
-    /* Mandatory pseudo-headers for HTTP/2 */
+    /* Mandatory pseudo-headers in Chrome order: m,a,s,p (method, authority, scheme, path)
+     * This matches the Akamai fingerprint pseudo-header order */
     const char *method_str = httpmorph_method_to_string(request->method);
     hdrs[hdr_count].name = (uint8_t *)":method";
     hdrs[hdr_count].namelen = 7;
@@ -729,10 +724,10 @@ int httpmorph_http2_request_concurrent(struct pooled_connection *conn,
     hdrs[hdr_count].flags = NGHTTP2_NV_FLAG_NONE;
     hdr_count++;
 
-    hdrs[hdr_count].name = (uint8_t *)":path";
-    hdrs[hdr_count].namelen = 5;
-    hdrs[hdr_count].value = (uint8_t *)path;
-    hdrs[hdr_count].valuelen = strlen(path);
+    hdrs[hdr_count].name = (uint8_t *)":authority";
+    hdrs[hdr_count].namelen = 10;
+    hdrs[hdr_count].value = (uint8_t *)host;
+    hdrs[hdr_count].valuelen = strlen(host);
     hdrs[hdr_count].flags = NGHTTP2_NV_FLAG_NONE;
     hdr_count++;
 
@@ -743,10 +738,10 @@ int httpmorph_http2_request_concurrent(struct pooled_connection *conn,
     hdrs[hdr_count].flags = NGHTTP2_NV_FLAG_NONE;
     hdr_count++;
 
-    hdrs[hdr_count].name = (uint8_t *)":authority";
-    hdrs[hdr_count].namelen = 10;
-    hdrs[hdr_count].value = (uint8_t *)host;
-    hdrs[hdr_count].valuelen = strlen(host);
+    hdrs[hdr_count].name = (uint8_t *)":path";
+    hdrs[hdr_count].namelen = 5;
+    hdrs[hdr_count].value = (uint8_t *)path;
+    hdrs[hdr_count].valuelen = strlen(path);
     hdrs[hdr_count].flags = NGHTTP2_NV_FLAG_NONE;
     hdr_count++;
 

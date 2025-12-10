@@ -126,12 +126,33 @@ cdef extern from "../include/httpmorph.h":
 
     # Session API
     httpmorph_session_t* httpmorph_session_create(httpmorph_browser_t browser_type) nogil
+    httpmorph_session_t* httpmorph_session_create_with_browser(const char *browser_name) nogil
     void httpmorph_session_destroy(httpmorph_session_t *session) nogil
     httpmorph_response* httpmorph_session_request(httpmorph_session_t *session, const httpmorph_request_t *request) nogil
     size_t httpmorph_session_cookie_count(httpmorph_session_t *session) nogil
 
     # Async I/O API
     int httpmorph_pool_get_connection_fd(httpmorph_pool_t *pool, const char *host, uint16_t port) nogil
+
+
+# Browser profile declarations
+cdef extern from "../tls/browser_profiles.h":
+    # OS types for user agent generation
+    ctypedef enum os_type_t:
+        OS_MACOS
+        OS_WINDOWS
+        OS_LINUX
+
+    # Browser profile structure (opaque)
+    ctypedef struct browser_profile_t:
+        const char *name
+        const char *user_agent
+        const char *user_agent_windows
+        const char *user_agent_linux
+
+    # Browser profile API
+    const browser_profile_t* browser_profile_get(const char *name) nogil
+    const char* browser_profile_get_user_agent(const browser_profile_t *profile, os_type_t os) nogil
 
 
 # Python classes
@@ -394,26 +415,16 @@ cdef class Session:
     cdef str _os
 
     def __cinit__(self, str browser="chrome", str os="macos"):
-        cdef httpmorph_browser_t browser_type
+        cdef bytes browser_bytes
 
         browser_lower = browser.lower()
         self._browser = browser_lower
         self._os = os.lower()
 
-        if browser_lower == "chrome" or browser_lower == "chrome142":
-            browser_type = HTTPMORPH_BROWSER_CHROME
-        elif browser_lower == "firefox":
-            browser_type = HTTPMORPH_BROWSER_FIREFOX
-        elif browser_lower == "safari":
-            browser_type = HTTPMORPH_BROWSER_SAFARI
-        elif browser_lower == "edge":
-            browser_type = HTTPMORPH_BROWSER_EDGE
-        elif browser_lower == "random":
-            browser_type = HTTPMORPH_BROWSER_RANDOM
-        else:
-            browser_type = HTTPMORPH_BROWSER_CHROME
-
-        self._session = httpmorph_session_create(browser_type)
+        # Use the new string-based API to preserve specific browser version
+        # e.g., "chrome127", "chrome143", etc.
+        browser_bytes = browser_lower.encode('utf-8')
+        self._session = httpmorph_session_create_with_browser(<const char*>browser_bytes)
         if self._session is NULL:
             raise MemoryError("Failed to create HTTP session")
 
@@ -457,6 +468,10 @@ cdef class Session:
         cdef httpmorph_response *resp
         cdef const char* c_username
         cdef const char* c_password
+        cdef const browser_profile_t* profile
+        cdef const char* ua_cstr
+        cdef os_type_t os_enum
+        cdef bytes browser_bytes_ua
 
         # Convert method string to enum
         method_upper = method.upper()
@@ -587,25 +602,25 @@ cdef class Session:
             if json_data and (headers is None or 'Content-Type' not in headers):
                 request_headers['Content-Type'] = 'application/json'
 
-            # Get browser-specific User-Agent based on OS
-            browser_user_agents = {
-                # Chrome user agents by OS
-                'chrome': {
-                    'macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                    'windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                    'linux': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                },
-                'chrome142': {
-                    'macos': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                    'windows': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                    'linux': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-                },
-            }
+            # Get browser-specific User-Agent based on OS from C browser profile
+            browser_bytes_ua = self._browser.encode('utf-8')
 
-            # Get user agent for browser and OS, defaulting to macOS if OS not found
-            browser_ua_dict = browser_user_agents.get(self._browser, {})
-            if isinstance(browser_ua_dict, dict):
-                default_ua = browser_ua_dict.get(self._os, browser_ua_dict.get('macos', f'httpmorph/{_get_httpmorph_version()}'))
+            # Map OS string to enum
+            if self._os == 'windows':
+                os_enum = OS_WINDOWS
+            elif self._os == 'linux':
+                os_enum = OS_LINUX
+            else:
+                os_enum = OS_MACOS
+
+            # Get profile and user agent from C API
+            profile = browser_profile_get(<const char*>browser_bytes_ua)
+            if profile != NULL:
+                ua_cstr = browser_profile_get_user_agent(profile, os_enum)
+                if ua_cstr != NULL:
+                    default_ua = ua_cstr.decode('utf-8')
+                else:
+                    default_ua = f'httpmorph/{_get_httpmorph_version()}'
             else:
                 default_ua = f'httpmorph/{_get_httpmorph_version()}'
 

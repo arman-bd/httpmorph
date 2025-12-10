@@ -511,10 +511,11 @@ if not ON_READTHEDOCS:
             # Use extra_objects for static linking (vendor .a files)
             # This ensures we link against vendor static libs, not system dynamic libs
             # Note: liburing will be linked statically via EXTRA_OBJECTS, not via -luring
-            EXT_LIBRARIES = ["z"]  # Only z (zlib)
+            # brotlidec is needed for compress_certificate extension (TLS cert decompression)
+            EXT_LIBRARIES = ["z", "brotlidec"]
         else:
             # Other Unix - use library names (will find .a or .so)
-            EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z"]
+            EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z", "brotlidec"]
 
     # Define C extension modules
     # Build library directories list
@@ -536,6 +537,23 @@ if not ON_READTHEDOCS:
         INCLUDE_DIRS.append(LIB_PATHS["liburing_include"])
 
     LIBRARY_DIRS = BORINGSSL_LIB_DIRS + [LIB_PATHS["nghttp2_lib"]]
+
+    # Add brotli include/lib directories (for compress_certificate extension)
+    if IS_MACOS:
+        # Homebrew paths for brotli (ARM64 and Intel)
+        homebrew_prefix = "/opt/homebrew" if os.path.exists("/opt/homebrew") else "/usr/local"
+        brotli_include = os.path.join(homebrew_prefix, "include")
+        brotli_lib = os.path.join(homebrew_prefix, "lib")
+        if os.path.exists(os.path.join(brotli_include, "brotli")):
+            INCLUDE_DIRS.append(brotli_include)
+            LIBRARY_DIRS.append(brotli_lib)
+    elif IS_LINUX:
+        # Standard Linux paths
+        if os.path.exists("/usr/include/brotli"):
+            pass  # Already in default include path
+        elif os.path.exists("/usr/local/include/brotli"):
+            INCLUDE_DIRS.append("/usr/local/include")
+            LIBRARY_DIRS.append("/usr/local/lib")
 
     # Add zlib paths on Windows if available
     if IS_WINDOWS and LIB_PATHS.get("zlib_include"):

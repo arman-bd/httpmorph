@@ -52,13 +52,63 @@ static inline int SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
     SSL_CTX_set_ecdh_auto(ctx, 1)
 #endif
 
-/* Stub certificate decompression function for compress_certificate extension */
-static int cert_decompress_stub(SSL *ssl, CRYPTO_BUFFER **out,
+/* Brotli decompression for compress_certificate extension */
+#include <brotli/decode.h>
+#include <zlib.h>
+
+static int cert_decompress_brotli(SSL *ssl, CRYPTO_BUFFER **out,
+                                   size_t uncompressed_len,
+                                   const uint8_t *in, size_t in_len) {
+    (void)ssl;
+
+    /* Allocate buffer for decompressed certificate */
+    uint8_t *decompressed = OPENSSL_malloc(uncompressed_len);
+    if (!decompressed) {
+        return 0;
+    }
+
+    /* Decompress using brotli */
+    size_t decoded_size = uncompressed_len;
+    BrotliDecoderResult result = BrotliDecoderDecompress(
+        in_len, in, &decoded_size, decompressed);
+
+    if (result != BROTLI_DECODER_RESULT_SUCCESS || decoded_size != uncompressed_len) {
+        OPENSSL_free(decompressed);
+        return 0;
+    }
+
+    /* Create CRYPTO_BUFFER with decompressed data */
+    *out = CRYPTO_BUFFER_new(decompressed, uncompressed_len, NULL);
+    OPENSSL_free(decompressed);
+
+    return *out != NULL ? 1 : 0;
+}
+
+static int cert_decompress_zlib(SSL *ssl, CRYPTO_BUFFER **out,
                                  size_t uncompressed_len,
                                  const uint8_t *in, size_t in_len) {
-    /* We only need to advertise support, not actually decompress */
-    (void)ssl; (void)out; (void)uncompressed_len; (void)in; (void)in_len;
-    return 0;  /* Return 0 to indicate we can't decompress, but extension is supported */
+    (void)ssl;
+
+    /* Allocate buffer for decompressed certificate */
+    uint8_t *decompressed = OPENSSL_malloc(uncompressed_len);
+    if (!decompressed) {
+        return 0;
+    }
+
+    /* Decompress using zlib */
+    uLongf dest_len = (uLongf)uncompressed_len;
+    int zresult = uncompress(decompressed, &dest_len, in, (uLong)in_len);
+
+    if (zresult != Z_OK || dest_len != uncompressed_len) {
+        OPENSSL_free(decompressed);
+        return 0;
+    }
+
+    /* Create CRYPTO_BUFFER with decompressed data */
+    *out = CRYPTO_BUFFER_new(decompressed, uncompressed_len, NULL);
+    OPENSSL_free(decompressed);
+
+    return *out != NULL ? 1 : 0;
 }
 
 /**
@@ -77,11 +127,30 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
 #endif
 
-    /* Enable certificate compression (Chrome 142 supports brotli, zlib)
-     * This is required for sites that send compressed certificates (e.g., Cloudflare)
-     * Passing NULL uses BoringSSL's built-in compression/decompression */
-    SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_brotli, NULL, NULL);
-    SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_zlib, NULL, NULL);
+    /* Enable GREASE (Generate Random Extensions And Sustain Extensibility)
+     * Chrome sends GREASE values in ciphers, extensions, groups, and versions
+     * to ensure servers handle unknown values gracefully */
+    if (profile->use_grease) {
+        SSL_CTX_set_grease_enabled(ctx, 1);
+    }
+
+    /* Check if compress_certificate (27) is in the profile's extension list */
+    bool has_compress_cert = false;
+    for (int i = 0; i < profile->extension_count; i++) {
+        if (profile->extensions[i] == 27) {
+            has_compress_cert = true;
+            break;
+        }
+    }
+
+    /* Enable compress_certificate extension (0x001b) only if profile includes it.
+     * Chrome advertises brotli (2) and zlib (1) decompression support.
+     * We provide actual decompression functions for servers that send compressed certs.
+     * The compress function is NULL since clients don't compress certificates. */
+    if (has_compress_cert) {
+        SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_brotli, NULL, cert_decompress_brotli);
+        SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_zlib, NULL, cert_decompress_zlib);
+    }
 
     /* Force AES hardware preference to match Chrome's cipher order (AES-GCM before ChaCha20)
      * This prevents BoringSSL from reordering ciphers based on ARM vs Intel CPU capabilities */
@@ -218,8 +287,19 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
      * The status_request extension appears to be added by BoringSSL automatically. */
     // SSL_CTX_enable_ocsp_stapling(ctx);
 
-    /* Enable signed_certificate_timestamp extension (0x0012) */
-    SSL_CTX_enable_signed_cert_timestamps(ctx);
+    /* Check if signed_certificate_timestamp (18) is in the profile's extension list */
+    bool has_sct = false;
+    for (int i = 0; i < profile->extension_count; i++) {
+        if (profile->extensions[i] == 18) {
+            has_sct = true;
+            break;
+        }
+    }
+
+    /* Enable signed_certificate_timestamp extension (0x0012) only if profile includes it */
+    if (has_sct) {
+        SSL_CTX_enable_signed_cert_timestamps(ctx);
+    }
 
     /* Configure signature algorithms (advertised in ClientHello) */
     if (profile->signature_algorithm_count > 0) {
@@ -228,11 +308,6 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
             profile->signature_algorithms,
             profile->signature_algorithm_count);
     }
-
-    /* Enable compress_certificate extension (0x001b) with brotli */
-    /* BoringSSL alg_id 0x0002 = brotli compression */
-    /* Provide decompress stub to advertise support */
-    SSL_CTX_add_cert_compression_alg(ctx, 0x0002, NULL, cert_decompress_stub);
 
     /* Note: application_settings (0x44cd/ALPS) and encrypted_client_hello
      * (0xfe0d/ECH) require per-connection setup. They will be enabled
@@ -254,12 +329,26 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
         return NULL;
     }
 
-    /* Enable ECH grease for encrypted_client_hello extension (0xfe0d) */
-    SSL_set_enable_ech_grease(ssl, 1);
+    /* Check which extensions the profile includes */
+    bool has_ech = false;
+    bool has_alps = false;
+    bool has_ocsp = false;
+    if (browser_profile) {
+        for (int i = 0; i < browser_profile->extension_count; i++) {
+            uint16_t ext = browser_profile->extensions[i];
+            if (ext == 65037) has_ech = true;   /* encrypted_client_hello */
+            if (ext == 17613 || ext == 17513) has_alps = true;  /* application_settings (NEW=17613/0x44cd, OLD=17513/0x4469) */
+            if (ext == 5) has_ocsp = true;      /* status_request */
+        }
+    }
 
-    /* Enable OCSP stapling for status_request extension (0x0005)
-     * Note: This may trigger padding extension (0x0015) depending on ClientHello size */
-    SSL_enable_ocsp_stapling(ssl);
+    /* Enable/disable ECH grease for encrypted_client_hello extension (0xfe0d) based on profile */
+    SSL_set_enable_ech_grease(ssl, has_ech ? 1 : 0);
+
+    /* Enable OCSP stapling for status_request extension (0x0005) only if profile includes it */
+    if (has_ocsp) {
+        SSL_enable_ocsp_stapling(ssl);
+    }
 
     /* Set SSL verification mode */
     if (verify_cert) {
@@ -289,18 +378,20 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
         if (alpn_p > alpn_list) {
             SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
 
-            /* Enable ALPS (application_settings extension 0x44cd) for each ALPN protocol */
-            for (int i = 0; i < browser_profile->alpn_protocol_count; i++) {
-                /* Skip "h2" if HTTP/2 not enabled */
-                if (!http2_enabled && strcmp(browser_profile->alpn_protocols[i], "h2") == 0) {
-                    continue;
-                }
+            /* Enable ALPS (application_settings extension 0x44cd) only if profile includes it */
+            if (has_alps) {
+                for (int i = 0; i < browser_profile->alpn_protocol_count; i++) {
+                    /* Skip "h2" if HTTP/2 not enabled */
+                    if (!http2_enabled && strcmp(browser_profile->alpn_protocols[i], "h2") == 0) {
+                        continue;
+                    }
 
-                const char *proto = browser_profile->alpn_protocols[i];
-                /* Send empty ALPS settings (Chrome sends empty for most protocols) */
-                SSL_add_application_settings(ssl,
-                    (const uint8_t *)proto, strlen(proto),
-                    (const uint8_t *)"", 0);
+                    const char *proto = browser_profile->alpn_protocols[i];
+                    /* Send empty ALPS settings (Chrome sends empty for most protocols) */
+                    SSL_add_application_settings(ssl,
+                        (const uint8_t *)proto, strlen(proto),
+                        (const uint8_t *)"", 0);
+                }
             }
         }
     }

@@ -99,6 +99,7 @@ struct httpmorph_client {
 
     /* Browser fingerprint */
     const browser_profile_t *browser_profile;
+    bool ssl_ctx_configured;  /* Whether SSL_CTX has been configured for this profile */
 };
 
 /**
