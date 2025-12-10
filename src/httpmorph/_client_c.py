@@ -654,7 +654,7 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
-    def __init__(self, browser="chrome", http2=False, os="macos"):
+    def __init__(self, browser="chrome", http2=True, os="macos"):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
         self._session = _httpmorph.Session(browser=browser, os=os)
