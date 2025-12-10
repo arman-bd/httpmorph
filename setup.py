@@ -525,7 +525,15 @@ if not ON_READTHEDOCS:
             # This ensures we link against vendor static libs, not system dynamic libs
             # Note: liburing will be linked statically via EXTRA_OBJECTS, not via -luring
             # brotlidec is needed for compress_certificate extension (TLS cert decompression)
-            EXT_LIBRARIES = ["z", "brotlidec"]
+            # On macOS, prefer vendor brotli (has correct deployment target for wheels)
+            vendor_dir = Path("vendor").resolve()
+            vendor_brotli_dec = vendor_dir / "brotli" / "build" / "libbrotlidec-static.a"
+            if IS_MACOS and vendor_brotli_dec.exists():
+                # Vendor brotli will be linked via EXTRA_OBJECTS
+                EXT_LIBRARIES = ["z"]
+            else:
+                # Use system brotli
+                EXT_LIBRARIES = ["z", "brotlidec"]
         else:
             # Other Unix - use library names (will find .a or .so)
             EXT_LIBRARIES = ["ssl", "crypto", "nghttp2", "z", "brotlidec"]
@@ -553,13 +561,24 @@ if not ON_READTHEDOCS:
 
     # Add brotli include/lib directories (for compress_certificate extension)
     if IS_MACOS:
-        # Homebrew paths for brotli (ARM64 and Intel)
-        homebrew_prefix = "/opt/homebrew" if os.path.exists("/opt/homebrew") else "/usr/local"
-        brotli_include = os.path.join(homebrew_prefix, "include")
-        brotli_lib = os.path.join(homebrew_prefix, "lib")
-        if os.path.exists(os.path.join(brotli_include, "brotli")):
-            INCLUDE_DIRS.append(brotli_include)
-            LIBRARY_DIRS.append(brotli_lib)
+        # Prefer vendor brotli (built with correct deployment target for wheels)
+        vendor_dir = Path("vendor").resolve()
+        vendor_brotli_include = vendor_dir / "brotli" / "c" / "include"
+        vendor_brotli_lib = vendor_dir / "brotli" / "build"
+        if vendor_brotli_include.exists() and (vendor_brotli_lib / "libbrotlidec-static.a").exists():
+            print(f"Using vendor brotli from: {vendor_dir / 'brotli'}")
+            INCLUDE_DIRS.append(str(vendor_brotli_include))
+            # Library dir not needed - we'll use EXTRA_OBJECTS for static linking
+        else:
+            # Fall back to Homebrew paths for brotli (ARM64 and Intel)
+            # Note: Homebrew brotli may have higher deployment target than wheel
+            homebrew_prefix = "/opt/homebrew" if os.path.exists("/opt/homebrew") else "/usr/local"
+            brotli_include = os.path.join(homebrew_prefix, "include")
+            brotli_lib = os.path.join(homebrew_prefix, "lib")
+            if os.path.exists(os.path.join(brotli_include, "brotli")):
+                print(f"Using Homebrew brotli from: {homebrew_prefix}")
+                INCLUDE_DIRS.append(brotli_include)
+                LIBRARY_DIRS.append(brotli_lib)
     elif IS_LINUX:
         # Standard Linux paths
         if os.path.exists("/usr/include/brotli"):
@@ -615,6 +634,15 @@ if not ON_READTHEDOCS:
                 if uring_path.exists():
                     static_libs.append(str(uring_path))
                     break
+
+        # Brotli static libraries (macOS vendor build for correct deployment target)
+        if IS_MACOS:
+            brotli_build = vendor_dir / "brotli" / "build"
+            brotli_dec = brotli_build / "libbrotlidec-static.a"
+            brotli_common = brotli_build / "libbrotlicommon-static.a"
+            if brotli_dec.exists() and brotli_common.exists():
+                static_libs.append(str(brotli_dec))
+                static_libs.append(str(brotli_common))
 
         if static_libs:
             print("\nUsing static libraries:")
