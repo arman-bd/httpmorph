@@ -144,11 +144,13 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     }
 
     /* Enable compress_certificate extension (0x001b) only if profile includes it.
-     * Chrome 143+ only advertises brotli (2) decompression support, NOT zlib.
-     * We provide actual decompression function for servers that send compressed certs.
+     * Chrome 143 advertises brotli (2) decompression support in the extension.
+     * However, some servers may still send zlib-compressed certs, so we register
+     * both decompression handlers for compatibility.
      * The compress function is NULL since clients don't compress certificates. */
     if (has_compress_cert) {
         SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_brotli, NULL, cert_decompress_brotli);
+        SSL_CTX_add_cert_compression_alg(ctx, TLSEXT_cert_compression_zlib, NULL, cert_decompress_zlib);
     }
 
     /* Force AES hardware preference to match Chrome's cipher order (AES-GCM before ChaCha20)

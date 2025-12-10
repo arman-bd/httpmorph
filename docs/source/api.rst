@@ -436,7 +436,7 @@ The default and most accurate browser profile, mimicking Chrome 143:
 * **Akamai HTTP/2**: ``1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`` (perfect match)
 * **TLS 1.3** with 15 cipher suites
 * **Post-quantum cryptography**: X25519MLKEM768 (curve 4588)
-* **Certificate compression**: Brotli only
+* **Certificate compression**: Brotli (zlib fallback for compatibility)
 * **GREASE**: Randomized per request
 * **HTTP/2**: Chrome-specific SETTINGS frame, priority (weight=256, exclusive=1)
 * **Default headers**: sec-ch-ua, sec-fetch-*, accept-language, priority

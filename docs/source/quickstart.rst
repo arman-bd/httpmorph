@@ -118,7 +118,7 @@ The Chrome browser profile includes:
 * Chrome-specific User-Agent
 * Chrome-specific TLS cipher suites and extensions
 * Post-quantum cryptography (X25519MLKEM768)
-* Certificate compression (Brotli)
+* Certificate compression (Brotli, with zlib fallback)
 * Chrome-specific HTTP/2 settings and priority
 * Perfect JA3N, JA4, JA4_R, and Akamai fingerprint matching
 * Chrome-like default headers (sec-ch-ua, sec-fetch-*, etc.)
