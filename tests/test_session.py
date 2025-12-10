@@ -188,10 +188,10 @@ class TestSessionHTTP2Flag:
     """Test Session with HTTP/2 flag (httpx-like API)"""
 
     def test_session_http2_flag_default(self):
-        """Test that Session http2 flag defaults to False"""
+        """Test that Session http2 flag defaults to True (Chrome uses HTTP/2)"""
         session = httpmorph.Session(browser="chrome")
         assert hasattr(session, "http2")
-        assert session.http2 is False
+        assert session.http2 is True
 
     def test_session_http2_flag_enabled(self, httpbin_host):
         """Test Session with http2=True"""

@@ -124,7 +124,7 @@ httpmorph accurately mimics **Chrome 127-143** TLS and HTTP/2 fingerprints with:
 - **TLS 1.3** with correct cipher suites and extensions
 - **HTTP/2** with Chrome-specific SETTINGS frame and pseudo-header order
 - **Post-quantum cryptography** (X25519MLKEM768)
-- **Certificate compression** (Brotli, Zlib)
+- **Certificate compression** (Brotli)
 
 **Verify your fingerprint:**
 
@@ -148,19 +148,18 @@ All Chrome 127-143 profiles produce **exact JA4 matches** with real Chrome brows
 httpmorph supports HTTP/2 with an httpx-like API:
 
 ```python
-# Enable HTTP/2 for a client (default is False)
-client = httpmorph.Client(http2=True)
+# Both Client and Session default to HTTP/2 (http2=True) like Chrome
+client = httpmorph.Client()
 response = client.get('https://www.google.com')
 print(response.http_version)  # '2.0'
 
-# Enable HTTP/2 for a session
-session = httpmorph.Session(browser='chrome', http2=True)
+session = httpmorph.Session(browser='chrome')
 response = session.get('https://www.google.com')
 print(response.http_version)  # '2.0'
 
-# Per-request HTTP/2 override
-client = httpmorph.Client(http2=False)  # Default disabled
-response = client.get('https://www.google.com', http2=True)  # Enable for this request
+# Per-request HTTP/2 override (disable for specific request)
+client = httpmorph.Client()  # Defaults to HTTP/2
+response = client.get('https://example.com', http2=False)  # Disable for this request
 ```
 
 ### Custom Headers
@@ -440,7 +439,7 @@ pytest tests/ -v
 - HTTP/2 support via nghttp2
 - Inspired by Python's requests and httpx libraries
 - Chrome 127-143 fingerprint matching with perfect JA4, JA3N, and HTTP/2 Akamai fingerprints
-- Certificate compression support for Cloudflare-protected sites
+- Certificate compression (Brotli) for Cloudflare-protected sites
 
 ## FAQ
 
@@ -457,7 +456,7 @@ A: No, httpmorph is still in active development and not yet recommended for prod
 A: For most common use cases, yes! We've implemented the most widely-used requests API. Some advanced features may have slight differences.
 
 **Q: Does it work with Cloudflare-protected sites?**
-A: Yes! httpmorph supports certificate compression (Brotli, Zlib) which is required for many Cloudflare-protected sites. We successfully tested with icanhazip.com and postman-echo.com.
+A: Yes! httpmorph supports certificate compression (Brotli) which is required for many Cloudflare-protected sites. We successfully tested with icanhazip.com and postman-echo.com.
 
 **Q: How do I report a bug?**
 A: Please open an issue on GitHub with a minimal reproduction example and your environment details (OS, Python version, httpmorph version).

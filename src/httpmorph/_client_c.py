@@ -654,6 +654,26 @@ class CookieDict(dict):
 class Session:
     """HTTP session with persistent fingerprint"""
 
+    # Chrome-like default headers for fingerprint matching
+    _CHROME_DEFAULT_HEADERS = {
+        # Client Hints (Chrome 143)
+        "sec-ch-ua": '"Chromium";v="143", "Google Chrome";v="143", "Not-A.Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+        # Fetch Metadata
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        # Standard headers
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "accept-language": "en-US,en;q=0.9",
+        "cache-control": "max-age=0",
+        "upgrade-insecure-requests": "1",
+        # HTTP/2 Priority header (Chrome 143 style)
+        "priority": "u=0, i",
+    }
+
     def __init__(self, browser="chrome", http2=True, os="macos"):
         if not HAS_C_EXTENSION:
             raise RuntimeError("C extension not available")
@@ -661,7 +681,8 @@ class Session:
         self.browser = browser
         self.os = os
         self.http2 = http2  # HTTP/2 enabled flag
-        self.headers = {}  # Persistent headers
+        # Initialize with Chrome-like default headers
+        self.headers = self._CHROME_DEFAULT_HEADERS.copy()
         self._cookies = CookieDict(self._session.cookie_jar)
 
     def __del__(self):

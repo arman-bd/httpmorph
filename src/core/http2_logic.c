@@ -348,16 +348,21 @@ int httpmorph_http2_request(SSL *ssl, const httpmorph_request_t *request,
         data_prd_ptr = &data_prd;
     }
 
-    /* Set up priority spec if priority is configured */
+    /* Set up priority spec - Chrome uses weight=256, exclusive=1, depends_on=0 by default */
     nghttp2_priority_spec pri_spec;
     nghttp2_priority_spec *pri_spec_ptr = NULL;
 
-    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16) {
-        /* Priority is configured - use it */
+    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16 ||
+        request->http2_priority_exclusive) {
+        /* Priority is explicitly configured - use it */
         nghttp2_priority_spec_init(&pri_spec,
                                    request->http2_stream_dependency,
                                    request->http2_priority_weight,
                                    request->http2_priority_exclusive ? 1 : 0);
+        pri_spec_ptr = &pri_spec;
+    } else {
+        /* Use Chrome default priority: weight=256, exclusive=1, depends_on=0 */
+        nghttp2_priority_spec_init(&pri_spec, 0, 256, 1);
         pri_spec_ptr = &pri_spec;
     }
 
@@ -563,16 +568,21 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
         data_prd_ptr = &data_prd;
     }
 
-    /* Set up priority spec if priority is configured */
+    /* Set up priority spec - Chrome uses weight=256, exclusive=1, depends_on=0 by default */
     nghttp2_priority_spec pri_spec;
     nghttp2_priority_spec *pri_spec_ptr = NULL;
 
-    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16) {
-        /* Priority is configured - use it */
+    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16 ||
+        request->http2_priority_exclusive) {
+        /* Priority is explicitly configured - use it */
         nghttp2_priority_spec_init(&pri_spec,
                                    request->http2_stream_dependency,
                                    request->http2_priority_weight,
                                    request->http2_priority_exclusive ? 1 : 0);
+        pri_spec_ptr = &pri_spec;
+    } else {
+        /* Use Chrome default priority: weight=256, exclusive=1, depends_on=0 */
+        nghttp2_priority_spec_init(&pri_spec, 0, 256, 1);
         pri_spec_ptr = &pri_spec;
     }
 
@@ -764,16 +774,21 @@ int httpmorph_http2_request_concurrent(struct pooled_connection *conn,
         data_prd_ptr = &data_prd;
     }
 
-    /* Set up priority spec if priority is configured */
+    /* Set up priority spec - Chrome uses weight=256, exclusive=1, depends_on=0 by default */
     nghttp2_priority_spec pri_spec;
     nghttp2_priority_spec *pri_spec_ptr = NULL;
 
-    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16) {
-        /* Priority is configured - use it */
+    if (request->http2_stream_dependency != 0 || request->http2_priority_weight != 16 ||
+        request->http2_priority_exclusive) {
+        /* Priority is explicitly configured - use it */
         nghttp2_priority_spec_init(&pri_spec,
                                    request->http2_stream_dependency,
                                    request->http2_priority_weight,
                                    request->http2_priority_exclusive ? 1 : 0);
+        pri_spec_ptr = &pri_spec;
+    } else {
+        /* Use Chrome default priority: weight=256, exclusive=1, depends_on=0 */
+        nghttp2_priority_spec_init(&pri_spec, 0, 256, 1);
         pri_spec_ptr = &pri_spec;
     }
 
