@@ -527,7 +527,7 @@ if not ON_READTHEDOCS:
             # brotlidec is needed for compress_certificate extension (TLS cert decompression)
             # On macOS, prefer vendor brotli (has correct deployment target for wheels)
             vendor_dir = Path("vendor").resolve()
-            vendor_brotli_dec = vendor_dir / "brotli" / "build" / "libbrotlidec-static.a"
+            vendor_brotli_dec = vendor_dir / "brotli" / "build" / "libbrotlidec.a"
             if IS_MACOS and vendor_brotli_dec.exists():
                 # Vendor brotli will be linked via EXTRA_OBJECTS
                 EXT_LIBRARIES = ["z"]
@@ -565,7 +565,7 @@ if not ON_READTHEDOCS:
         vendor_dir = Path("vendor").resolve()
         vendor_brotli_include = vendor_dir / "brotli" / "c" / "include"
         vendor_brotli_lib = vendor_dir / "brotli" / "build"
-        if vendor_brotli_include.exists() and (vendor_brotli_lib / "libbrotlidec-static.a").exists():
+        if vendor_brotli_include.exists() and (vendor_brotli_lib / "libbrotlidec.a").exists():
             print(f"Using vendor brotli from: {vendor_dir / 'brotli'}")
             INCLUDE_DIRS.append(str(vendor_brotli_include))
             # Library dir not needed - we'll use EXTRA_OBJECTS for static linking
@@ -638,8 +638,8 @@ if not ON_READTHEDOCS:
         # Brotli static libraries (macOS vendor build for correct deployment target)
         if IS_MACOS:
             brotli_build = vendor_dir / "brotli" / "build"
-            brotli_dec = brotli_build / "libbrotlidec-static.a"
-            brotli_common = brotli_build / "libbrotlicommon-static.a"
+            brotli_dec = brotli_build / "libbrotlidec.a"
+            brotli_common = brotli_build / "libbrotlicommon.a"
             if brotli_dec.exists() and brotli_common.exists():
                 static_libs.append(str(brotli_dec))
                 static_libs.append(str(brotli_common))

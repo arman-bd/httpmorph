@@ -167,7 +167,7 @@ fi
 
 cd brotli
 
-if [ ! -f "build/libbrotlidec-static.a" ]; then
+if [ ! -f "build/libbrotlidec.a" ]; then
     echo "Building Brotli..."
 
     # Clean build directory if it exists
@@ -244,16 +244,16 @@ else
 fi
 
 # Verify Brotli
-if [ -f "$VENDOR_DIR/brotli/build/libbrotlidec-static.a" ]; then
-    echo "  ✓ Brotli libbrotlidec-static.a found"
+if [ -f "$VENDOR_DIR/brotli/build/libbrotlidec.a" ]; then
+    echo "  ✓ Brotli libbrotlidec.a found"
 else
-    echo "  ✗ Brotli libbrotlidec-static.a NOT FOUND"
+    echo "  ✗ Brotli libbrotlidec.a NOT FOUND"
 fi
 
-if [ -f "$VENDOR_DIR/brotli/build/libbrotlicommon-static.a" ]; then
-    echo "  ✓ Brotli libbrotlicommon-static.a found"
+if [ -f "$VENDOR_DIR/brotli/build/libbrotlicommon.a" ]; then
+    echo "  ✓ Brotli libbrotlicommon.a found"
 else
-    echo "  ✗ Brotli libbrotlicommon-static.a NOT FOUND"
+    echo "  ✗ Brotli libbrotlicommon.a NOT FOUND"
 fi
 
 echo ""
