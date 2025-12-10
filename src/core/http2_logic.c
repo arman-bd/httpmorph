@@ -10,6 +10,7 @@
 #include "internal/response.h"
 #include "connection_pool.h"
 #include "http2_session_manager.h"
+#include "buffer_pool.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -445,15 +446,26 @@ int httpmorph_http2_request(SSL *ssl, const httpmorph_request_t *request,
         return -1;
     }
 
-    /* Copy data to response */
+    /* Copy data to response - must free/return original buffer first */
     if (stream_data.data_len > 0) {
+        /* Free the original response body buffer (return to pool if from pool) */
+        if (response->body) {
+            if (response->_buffer_pool) {
+                buffer_pool_put((httpmorph_buffer_pool_t*)response->_buffer_pool,
+                              response->body, response->_body_actual_size);
+            } else {
+                free(response->body);
+            }
+        }
+        /* Assign new malloc'd buffer - clear pool reference since new buffer is not from pool */
         response->body = stream_data.data_buf;
         response->body_len = stream_data.data_len;
         response->body_capacity = stream_data.data_capacity;
+        response->_body_actual_size = stream_data.data_capacity;  /* Track actual size for cleanup */
+        response->_buffer_pool = NULL;  /* New buffer is from malloc, not pool */
     } else {
         free(stream_data.data_buf);
-        response->body = NULL;
-        response->body_len = 0;
+        /* Keep original response body buffer for potential reuse */
     }
 
     nghttp2_session_del(session);
@@ -665,15 +677,26 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
         return -1;
     }
 
-    /* Copy data to response */
+    /* Copy data to response - must free/return original buffer first */
     if (stream_data.data_len > 0) {
+        /* Free the original response body buffer (return to pool if from pool) */
+        if (response->body) {
+            if (response->_buffer_pool) {
+                buffer_pool_put((httpmorph_buffer_pool_t*)response->_buffer_pool,
+                              response->body, response->_body_actual_size);
+            } else {
+                free(response->body);
+            }
+        }
+        /* Assign new malloc'd buffer - clear pool reference since new buffer is not from pool */
         response->body = stream_data.data_buf;
         response->body_len = stream_data.data_len;
         response->body_capacity = stream_data.data_capacity;
+        response->_body_actual_size = stream_data.data_capacity;  /* Track actual size for cleanup */
+        response->_buffer_pool = NULL;  /* New buffer is from malloc, not pool */
     } else {
         free(stream_data.data_buf);
-        response->body = NULL;
-        response->body_len = 0;
+        /* Keep original response body buffer for potential reuse */
     }
 
     /* Don't delete session - keep it for reuse in the connection pool */
@@ -816,17 +839,28 @@ int httpmorph_http2_request_concurrent(struct pooled_connection *conn,
     uint32_t timeout_ms = request->timeout_ms > 0 ? request->timeout_ms : 30000;
     rv = http2_session_manager_wait_for_stream(mgr, stream_id, timeout_ms);
 
-    /* Copy response body to response structure */
+    /* Copy response body to response structure - must free/return original buffer first */
     if (rv == 0 && stream_data->data_len > 0) {
+        /* Free the original response body buffer (return to pool if from pool) */
+        if (response->body) {
+            if (response->_buffer_pool) {
+                buffer_pool_put((httpmorph_buffer_pool_t*)response->_buffer_pool,
+                              response->body, response->_body_actual_size);
+            } else {
+                free(response->body);
+            }
+        }
+        /* Assign new malloc'd buffer - clear pool reference since new buffer is not from pool */
         response->body = stream_data->data_buf;
         response->body_len = stream_data->data_len;
         response->body_capacity = stream_data->data_capacity;
+        response->_body_actual_size = stream_data->data_capacity;  /* Track actual size for cleanup */
+        response->_buffer_pool = NULL;  /* New buffer is from malloc, not pool */
         /* Transfer ownership - don't free data_buf */
     } else {
         /* Error or no body */
         free(stream_data->data_buf);
-        response->body = NULL;
-        response->body_len = 0;
+        /* Keep original response body buffer for potential reuse */
     }
 
     /* Clean up stream tracking */
