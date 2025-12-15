@@ -11,17 +11,27 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-/* Buffer size tiers (powers of 2 for efficient allocation) */
+/* Buffer size tiers (powers of 2 for efficient allocation)
+ * Optimized for common HTTP response sizes:
+ * - 1KB: Small JSON responses, API errors
+ * - 4KB: Typical API responses
+ * - 16KB: Medium responses
+ * - 64KB: Larger responses, small files
+ * - 256KB: Large responses
+ * - 1MB: Very large responses, files
+ */
+#define BUFFER_SIZE_1KB    1024
 #define BUFFER_SIZE_4KB    4096
 #define BUFFER_SIZE_16KB   16384
 #define BUFFER_SIZE_64KB   65536
 #define BUFFER_SIZE_256KB  262144
+#define BUFFER_SIZE_1MB    1048576
 
-/* Number of buffers to keep per size tier */
-#define BUFFERS_PER_TIER   8
+/* Number of buffers to keep per size tier (increased for better concurrency) */
+#define BUFFERS_PER_TIER   16
 
 /* Total number of size tiers */
-#define NUM_TIERS          4
+#define NUM_TIERS          6
 
 /**
  * Buffer pool structure

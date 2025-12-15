@@ -130,6 +130,22 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
                                         int port);
 
 /**
+ * Get a proxy connection from the pool
+ * Returns an existing tunnel connection if available, NULL otherwise
+ * Uses proxy-aware key: "hostname:port@proxy_url"
+ *
+ * @param pool The connection pool
+ * @param host Target hostname (e.g., "example.com")
+ * @param port Target port number (e.g., 443)
+ * @param proxy_url Proxy URL (e.g., "http://proxy:8080")
+ * @return Pooled connection or NULL if not found
+ */
+pooled_connection_t* pool_get_proxy_connection(httpmorph_pool_t *pool,
+                                               const char *host,
+                                               int port,
+                                               const char *proxy_url);
+
+/**
  * Return a connection to the pool for reuse
  * If pool is full or connection is invalid, it will be closed
  *
@@ -157,6 +173,26 @@ pooled_connection_t* pool_connection_create(const char *host,
                                            bool is_http2);
 
 /**
+ * Create a pooled proxy connection wrapper
+ * Does NOT add to pool yet - call pool_put_connection() for that
+ * Uses proxy-aware key: "hostname:port@proxy_url"
+ *
+ * @param host Target hostname
+ * @param port Target port number
+ * @param sockfd Socket file descriptor (the tunneled connection)
+ * @param ssl SSL connection to destination (or NULL for HTTP)
+ * @param is_http2 Whether this is an HTTP/2 connection
+ * @param proxy_url Proxy URL used for this tunnel
+ * @return New pooled connection (caller must free or pool it)
+ */
+pooled_connection_t* pool_proxy_connection_create(const char *host,
+                                                  int port,
+                                                  int sockfd,
+                                                  SSL *ssl,
+                                                  bool is_http2,
+                                                  const char *proxy_url);
+
+/**
  * Close and free a pooled connection
  * Closes socket, frees SSL, frees memory
  */
@@ -182,6 +218,17 @@ bool pool_connection_validate(pooled_connection_t *conn);
  * @param key_out Buffer to write key (must be POOL_MAX_HOST_KEY_LEN bytes)
  */
 void pool_build_host_key(const char *host, int port, char *key_out);
+
+/**
+ * Build a host key for proxy connections
+ * Format: "hostname:port@proxy_url" (includes proxy to differentiate tunnels)
+ *
+ * @param host Target hostname
+ * @param port Target port number
+ * @param proxy_url Proxy URL (e.g., "http://proxy:8080") or NULL for direct
+ * @param key_out Buffer to write key (must be POOL_MAX_HOST_KEY_LEN bytes)
+ */
+void pool_build_proxy_host_key(const char *host, int port, const char *proxy_url, char *key_out);
 
 /**
  * Count connections for a specific host

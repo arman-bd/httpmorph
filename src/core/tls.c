@@ -12,6 +12,8 @@ extern void httpmorph_set_aes_hw_override(SSL_CTX *ctx, int override_value);
 #include <windows.h>
 #include <wincrypt.h>
 #pragma comment(lib, "crypt32.lib")
+#else
+#include <pthread.h>
 #endif
 
 /* OpenSSL 1.0.x compatibility */
@@ -55,6 +57,143 @@ static inline int SSL_CTX_set_max_proto_version(SSL_CTX *ctx, int version) {
 /* Brotli decompression for compress_certificate extension */
 #include <brotli/decode.h>
 #include <zlib.h>
+
+/* ====================================================================
+ * GLOBAL TLS SESSION CACHE (for async requests without client context)
+ * ==================================================================== */
+
+#define GLOBAL_SESSION_CACHE_SIZE 64
+#define GLOBAL_SESSION_TTL_SECONDS 300  /* 5 minutes */
+
+typedef struct global_session_entry {
+    char host[256];
+    uint16_t port;
+    SSL_SESSION *session;
+    time_t created;
+    bool valid;
+} global_session_entry_t;
+
+static global_session_entry_t g_session_cache[GLOBAL_SESSION_CACHE_SIZE];
+static int g_session_cache_initialized = 0;
+
+#ifdef _WIN32
+static CRITICAL_SECTION g_session_cache_mutex;
+#else
+static pthread_mutex_t g_session_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+static void global_session_cache_init(void) {
+    if (!g_session_cache_initialized) {
+#ifdef _WIN32
+        InitializeCriticalSection(&g_session_cache_mutex);
+#endif
+        memset(g_session_cache, 0, sizeof(g_session_cache));
+        g_session_cache_initialized = 1;
+    }
+}
+
+static void global_session_cache_lock(void) {
+#ifdef _WIN32
+    EnterCriticalSection(&g_session_cache_mutex);
+#else
+    pthread_mutex_lock(&g_session_cache_mutex);
+#endif
+}
+
+static void global_session_cache_unlock(void) {
+#ifdef _WIN32
+    LeaveCriticalSection(&g_session_cache_mutex);
+#else
+    pthread_mutex_unlock(&g_session_cache_mutex);
+#endif
+}
+
+/* Get a TLS session from the global cache */
+SSL_SESSION* global_session_cache_get(const char *host, uint16_t port) {
+    if (!host) return NULL;
+
+    global_session_cache_init();
+    global_session_cache_lock();
+
+    SSL_SESSION *session = NULL;
+    time_t now = time(NULL);
+
+    for (int i = 0; i < GLOBAL_SESSION_CACHE_SIZE; i++) {
+        if (g_session_cache[i].valid &&
+            g_session_cache[i].port == port &&
+            strcmp(g_session_cache[i].host, host) == 0) {
+
+            /* Check if entry is expired */
+            if (now - g_session_cache[i].created > GLOBAL_SESSION_TTL_SECONDS) {
+                /* Expired - invalidate and continue */
+                SSL_SESSION_free(g_session_cache[i].session);
+                g_session_cache[i].valid = false;
+                g_session_cache[i].session = NULL;
+                break;
+            }
+
+            session = g_session_cache[i].session;
+            break;
+        }
+    }
+
+    global_session_cache_unlock();
+    return session;
+}
+
+/* Store a TLS session in the global cache */
+void global_session_cache_put(const char *host, uint16_t port, SSL_SESSION *session) {
+    if (!host || !session) return;
+
+    global_session_cache_init();
+    global_session_cache_lock();
+
+    int free_idx = -1;
+    int oldest_idx = 0;
+    time_t oldest_time = time(NULL);
+
+    /* Look for existing entry or find free/oldest slot */
+    for (int i = 0; i < GLOBAL_SESSION_CACHE_SIZE; i++) {
+        if (!g_session_cache[i].valid) {
+            if (free_idx < 0) free_idx = i;
+            continue;
+        }
+
+        /* Update existing entry */
+        if (g_session_cache[i].port == port &&
+            strcmp(g_session_cache[i].host, host) == 0) {
+            SSL_SESSION_free(g_session_cache[i].session);
+            SSL_SESSION_up_ref(session);
+            g_session_cache[i].session = session;
+            g_session_cache[i].created = time(NULL);
+            global_session_cache_unlock();
+            return;
+        }
+
+        /* Track oldest for eviction */
+        if (g_session_cache[i].created < oldest_time) {
+            oldest_time = g_session_cache[i].created;
+            oldest_idx = i;
+        }
+    }
+
+    /* Use free slot or evict oldest */
+    int target_idx = (free_idx >= 0) ? free_idx : oldest_idx;
+
+    if (g_session_cache[target_idx].session) {
+        SSL_SESSION_free(g_session_cache[target_idx].session);
+    }
+
+    strncpy(g_session_cache[target_idx].host, host, sizeof(g_session_cache[target_idx].host) - 1);
+    g_session_cache[target_idx].host[sizeof(g_session_cache[target_idx].host) - 1] = '\0';
+    g_session_cache[target_idx].port = port;
+    SSL_SESSION_up_ref(session);
+    g_session_cache[target_idx].session = session;
+    g_session_cache[target_idx].created = time(NULL);
+    g_session_cache[target_idx].valid = true;
+
+    global_session_cache_unlock();
+}
 
 static int cert_decompress_brotli(SSL *ssl, CRYPTO_BUFFER **out,
                                    size_t uncompressed_len,
@@ -320,6 +459,112 @@ int httpmorph_configure_ssl_ctx(SSL_CTX *ctx, const browser_profile_t *profile) 
     return 0;
 }
 
+/* ==================================================================
+ * TLS SESSION CACHE
+ * ================================================================== */
+
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
+/**
+ * Store a TLS session in the client's cache
+ * Note: We increment the reference count rather than duplicating,
+ * since BoringSSL doesn't have SSL_SESSION_dup.
+ */
+void httpmorph_session_cache_put(httpmorph_client_t *client, const char *host,
+                                   uint16_t port, SSL_SESSION *session) {
+    if (!client || !host || !session) return;
+
+#ifdef _WIN32
+    EnterCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_lock(&client->session_cache_mutex);
+#endif
+
+    /* Look for existing entry to update */
+    for (int i = 0; i < client->session_cache_count; i++) {
+        if (client->session_cache[i].port == port &&
+            strcmp(client->session_cache[i].host, host) == 0) {
+            /* Replace existing session */
+            SSL_SESSION_free(client->session_cache[i].session);
+            SSL_SESSION_up_ref(session);  /* Increment ref count */
+            client->session_cache[i].session = session;
+            client->session_cache[i].created = time(NULL);
+            goto unlock;
+        }
+    }
+
+    /* Add new entry */
+    if (client->session_cache_count < MAX_SESSION_CACHE_ENTRIES) {
+        int idx = client->session_cache_count++;
+        strncpy(client->session_cache[idx].host, host, sizeof(client->session_cache[idx].host) - 1);
+        client->session_cache[idx].host[sizeof(client->session_cache[idx].host) - 1] = '\0';
+        client->session_cache[idx].port = port;
+        SSL_SESSION_up_ref(session);  /* Increment ref count */
+        client->session_cache[idx].session = session;
+        client->session_cache[idx].created = time(NULL);
+    } else {
+        /* Cache full - replace oldest entry */
+        int oldest_idx = 0;
+        time_t oldest_time = client->session_cache[0].created;
+        for (int i = 1; i < MAX_SESSION_CACHE_ENTRIES; i++) {
+            if (client->session_cache[i].created < oldest_time) {
+                oldest_time = client->session_cache[i].created;
+                oldest_idx = i;
+            }
+        }
+        SSL_SESSION_free(client->session_cache[oldest_idx].session);
+        strncpy(client->session_cache[oldest_idx].host, host, sizeof(client->session_cache[oldest_idx].host) - 1);
+        client->session_cache[oldest_idx].host[sizeof(client->session_cache[oldest_idx].host) - 1] = '\0';
+        client->session_cache[oldest_idx].port = port;
+        SSL_SESSION_up_ref(session);  /* Increment ref count */
+        client->session_cache[oldest_idx].session = session;
+        client->session_cache[oldest_idx].created = time(NULL);
+    }
+
+unlock:
+#ifdef _WIN32
+    LeaveCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_unlock(&client->session_cache_mutex);
+#endif
+}
+
+/**
+ * Get a TLS session from the client's cache
+ * Returns NULL if not found, or a reference to the cached session.
+ * Caller should NOT free the returned session - it's owned by the cache.
+ */
+SSL_SESSION* httpmorph_session_cache_get(httpmorph_client_t *client, const char *host, uint16_t port) {
+    if (!client || !host) return NULL;
+
+    SSL_SESSION *session = NULL;
+
+#ifdef _WIN32
+    EnterCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_lock(&client->session_cache_mutex);
+#endif
+
+    for (int i = 0; i < client->session_cache_count; i++) {
+        if (client->session_cache[i].port == port &&
+            strcmp(client->session_cache[i].host, host) == 0) {
+            /* Return the cached session directly - caller should not free it */
+            session = client->session_cache[i].session;
+            break;
+        }
+    }
+
+#ifdef _WIN32
+    LeaveCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_unlock(&client->session_cache_mutex);
+#endif
+
+    return session;
+}
+
 /**
  * Establish TLS connection on existing socket
  */
@@ -469,6 +714,157 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
     }
 
     *tls_time_us = httpmorph_get_time_us() - start_time;
+    return ssl;
+}
+
+/**
+ * Establish TLS connection with session caching support
+ * Uses cached TLS sessions to speed up repeated connections to the same host
+ */
+SSL* httpmorph_tls_connect_cached(httpmorph_client_t *client, int sockfd,
+                                   const char *hostname, uint16_t port,
+                                   bool http2_enabled, bool verify_cert,
+                                   uint64_t *tls_time) {
+    if (!client || !hostname) {
+        return NULL;
+    }
+
+    uint64_t start_time = httpmorph_get_time_us();
+
+    SSL *ssl = SSL_new(client->ssl_ctx);
+    if (!ssl) {
+        return NULL;
+    }
+
+    /* Try to reuse a cached session for faster resumption */
+    SSL_SESSION *cached_session = httpmorph_session_cache_get(client, hostname, port);
+    if (cached_session) {
+        SSL_set_session(ssl, cached_session);
+        /* Don't free - cache owns the session */
+    }
+
+    /* Check which extensions the profile includes */
+    const browser_profile_t *browser_profile = client->browser_profile;
+    bool has_ech = false;
+    bool has_alps = false;
+    bool has_ocsp = false;
+    if (browser_profile) {
+        for (int i = 0; i < browser_profile->extension_count; i++) {
+            uint16_t ext = browser_profile->extensions[i];
+            if (ext == 65037) has_ech = true;
+            if (ext == 17613 || ext == 17513) has_alps = true;
+            if (ext == 5) has_ocsp = true;
+        }
+    }
+
+    /* Enable/disable ECH grease */
+    SSL_set_enable_ech_grease(ssl, has_ech ? 1 : 0);
+
+    /* Enable OCSP stapling if profile includes it */
+    if (has_ocsp) {
+        SSL_enable_ocsp_stapling(ssl);
+    }
+
+    /* Set SSL verification mode */
+    if (verify_cert) {
+        SSL_set_verify(ssl, SSL_VERIFY_PEER, NULL);
+    } else {
+        SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
+    }
+
+    /* Set ALPN protocols */
+    if (browser_profile && browser_profile->alpn_protocol_count > 0) {
+        unsigned char alpn_list[256];
+        unsigned char *alpn_p = alpn_list;
+
+        for (int i = 0; i < browser_profile->alpn_protocol_count; i++) {
+            if (!http2_enabled && strcmp(browser_profile->alpn_protocols[i], "h2") == 0) {
+                continue;
+            }
+
+            size_t len = strlen(browser_profile->alpn_protocols[i]);
+            *alpn_p++ = (unsigned char)len;
+            memcpy(alpn_p, browser_profile->alpn_protocols[i], len);
+            alpn_p += len;
+        }
+
+        if (alpn_p > alpn_list) {
+            SSL_set_alpn_protos(ssl, alpn_list, alpn_p - alpn_list);
+
+            if (has_alps && http2_enabled) {
+                SSL_add_application_settings(ssl,
+                    (const uint8_t *)"h2", 2,
+                    (const uint8_t *)"", 0);
+            }
+        }
+    }
+
+    /* Set SNI hostname */
+    SSL_set_tlsext_host_name(ssl, hostname);
+
+    /* Attach to socket */
+    if (SSL_set_fd(ssl, sockfd) != 1) {
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    /* Perform TLS handshake */
+    int ret;
+    int ssl_err;
+    uint64_t handshake_timeout_us = 30000000;
+    uint64_t deadline = start_time + handshake_timeout_us;
+
+    while (1) {
+        ret = SSL_connect(ssl);
+        if (ret == 1) {
+            break;  /* Success */
+        }
+
+        ssl_err = SSL_get_error(ssl, ret);
+
+        if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+            uint64_t now = httpmorph_get_time_us();
+            if (now >= deadline) {
+                SSL_free(ssl);
+                return NULL;  /* Timeout */
+            }
+
+            fd_set read_fds, write_fds;
+            struct timeval tv;
+            uint64_t remaining_us = deadline - now;
+
+            FD_ZERO(&read_fds);
+            FD_ZERO(&write_fds);
+
+            if (ssl_err == SSL_ERROR_WANT_READ) {
+                FD_SET(sockfd, &read_fds);
+            } else {
+                FD_SET(sockfd, &write_fds);
+            }
+
+            tv.tv_sec = remaining_us / 1000000;
+            tv.tv_usec = remaining_us % 1000000;
+
+            int select_ret = select(SELECT_NFDS(sockfd), &read_fds, &write_fds, NULL, &tv);
+            if (select_ret <= 0) {
+                SSL_free(ssl);
+                return NULL;
+            }
+            continue;
+        }
+
+        /* Handshake failed */
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    /* Cache the session for future connections */
+    SSL_SESSION *new_session = SSL_get_session(ssl);
+    if (new_session) {
+        httpmorph_session_cache_put(client, hostname, port, new_session);
+    }
+
+    *tls_time = httpmorph_get_time_us() - start_time;
     return ssl;
 }
 

@@ -137,10 +137,17 @@ static void addrinfo_deep_free(struct addrinfo *ai) {
 }
 
 /**
+ * Free a DNS cache lookup result (deep copied addrinfo)
+ */
+void dns_cache_free_result(struct addrinfo *result) {
+    addrinfo_deep_free(result);
+}
+
+/**
  * Lookup hostname in DNS cache
  * Returns cached addrinfo if found and not expired, NULL otherwise
  */
-static struct addrinfo* dns_cache_lookup(const char *hostname, uint16_t port) {
+struct addrinfo* dns_cache_lookup(const char *hostname, uint16_t port) {
     if (!hostname) return NULL;
 
     dns_cache_init_mutex();
@@ -175,8 +182,8 @@ static struct addrinfo* dns_cache_lookup(const char *hostname, uint16_t port) {
 /**
  * Add entry to DNS cache
  */
-static void dns_cache_add(const char *hostname, uint16_t port,
-                          const struct addrinfo *result) {
+void dns_cache_add(const char *hostname, uint16_t port,
+                   const struct addrinfo *result) {
     if (!hostname || !result) return;
 
     dns_cache_init_mutex();
@@ -299,15 +306,203 @@ void dns_cache_clear(void) {
 }
 
 /* ====================================================================
- * TCP CONNECTION
+ * TCP CONNECTION WITH HAPPY EYEBALLS (RFC 8305)
  * ==================================================================== */
 
+/* Happy Eyeballs configuration */
+#define HAPPY_EYEBALLS_DELAY_MS 250   /* RFC 8305 recommends 250ms */
+#define MAX_PARALLEL_CONNECTIONS 2     /* IPv6 + IPv4 */
+
 /**
- * Establish a TCP connection to a host
+ * Configure socket with performance options
+ */
+static void configure_socket_options(int sockfd) {
+    /* Enable TCP_NODELAY (disable Nagle's algorithm for lower latency) */
+    int nodelay = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
+
+    /* Enable SO_REUSEADDR for faster socket reuse */
+    int reuse = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+
+    /* Enable SO_KEEPALIVE for connection health monitoring */
+    int keepalive = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (char*)&keepalive, sizeof(keepalive));
+
+    /* Optimize send/receive buffer sizes (64KB each for better throughput) */
+    int bufsize = 65536;
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (char*)&bufsize, sizeof(bufsize));
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (char*)&bufsize, sizeof(bufsize));
+
+#ifdef TCP_QUICKACK
+    /* Enable TCP_QUICKACK on Linux for faster ACKs */
+    int quickack = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_QUICKACK, (char*)&quickack, sizeof(quickack));
+#endif
+
+#ifdef SO_REUSEPORT
+    /* Enable SO_REUSEPORT if available (Linux 3.9+, BSD) */
+    int reuseport = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char*)&reuseport, sizeof(reuseport));
+#endif
+}
+
+/**
+ * Set socket to non-blocking mode
+ */
+static void set_socket_nonblocking(int sockfd) {
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(sockfd, FIONBIO, &mode);
+#else
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+#endif
+}
+
+/**
+ * Set socket to blocking mode
+ */
+static void set_socket_blocking(int sockfd) {
+#ifdef _WIN32
+    u_long mode = 0;
+    ioctlsocket(sockfd, FIONBIO, &mode);
+#else
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+#endif
+}
+
+/**
+ * Configure final socket options after successful connection
+ */
+static void configure_connected_socket(int sockfd, uint32_t timeout_ms) {
+    /* Set socket to blocking mode for HTTP/1.1 compatibility */
+    set_socket_blocking(sockfd);
+
+    /* Set performance options */
+    int opt = 1;
+#ifdef _WIN32
+    setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&opt, sizeof(opt));
+#else
+    setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
+    /* Enable TCP keep-alive to detect dead connections */
+    setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
+
+    #ifdef TCP_KEEPIDLE
+    int keepidle = 60;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    #endif
+
+    #ifdef TCP_KEEPINTVL
+    int keepintvl = 10;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    #endif
+
+    #ifdef TCP_KEEPCNT
+    int keepcnt = 3;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+    #endif
+
+    #ifdef __APPLE__
+    #ifdef TCP_FASTOPEN
+    int tfo = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_FASTOPEN, &tfo, sizeof(tfo));
+    #endif
+    #endif
+
+    #ifdef __linux__
+    #ifdef TCP_FASTOPEN_CONNECT
+    int tfo = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &tfo, sizeof(tfo));
+    #endif
+    #endif
+#endif
+
+    /* Set receive timeout to prevent indefinite blocking */
+#ifdef _WIN32
+    DWORD timeout_dw = timeout_ms;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout_dw, sizeof(timeout_dw));
+#else
+    struct timeval recv_timeout;
+    recv_timeout.tv_sec = timeout_ms / 1000;
+    recv_timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+#endif
+}
+
+/**
+ * Check if socket connection completed (success or failure)
+ * Returns: 1 = connected, 0 = still pending, -1 = failed
+ */
+static int check_socket_connected(int sockfd) {
+    int error = 0;
+    socklen_t len = sizeof(error);
+
+#ifdef _WIN32
+    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, (int*)&len) != 0) {
+        return -1;
+    }
+#else
+    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) != 0) {
+        return -1;
+    }
+#endif
+
+    if (error == 0) {
+        return 1;  /* Connected */
+    }
+    return -1;  /* Failed */
+}
+
+/**
+ * Start a non-blocking connection attempt
+ * Returns: socket fd on success (connection in progress), -1 on immediate failure
+ */
+static int start_connection_attempt(const struct addrinfo *addr) {
+    int sockfd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+    if (sockfd == -1) {
+        return -1;
+    }
+
+    configure_socket_options(sockfd);
+    set_socket_nonblocking(sockfd);
+
+    int ret = connect(sockfd, addr->ai_addr, addr->ai_addrlen);
+    if (ret == 0) {
+        /* Connected immediately (rare but possible on localhost) */
+        return sockfd;
+    }
+
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) {
+        return sockfd;  /* Connection in progress */
+    }
+#else
+    if (errno == EINPROGRESS) {
+        return sockfd;  /* Connection in progress */
+    }
+#endif
+
+    /* Immediate failure */
+    close(sockfd);
+    return -1;
+}
+
+/**
+ * Establish a TCP connection using Happy Eyeballs (RFC 8305)
+ *
+ * Algorithm:
+ * 1. Sort addresses: IPv6 first, then IPv4 (interleaved by family)
+ * 2. Start first (IPv6) connection immediately
+ * 3. After 250ms delay, start IPv4 connection if IPv6 not yet connected
+ * 4. Return whichever connection succeeds first
+ * 5. Cancel losing connection(s)
  */
 int httpmorph_tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
                           uint64_t *connect_time_us) {
-    struct addrinfo hints, *result, *rp;
+    struct addrinfo hints, *result;
     int sockfd = -1;
     uint64_t start_time = httpmorph_get_time_us();
     bool need_free_result = false;
@@ -315,7 +510,7 @@ int httpmorph_tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
     /* Try DNS cache first */
     result = dns_cache_lookup(host, port);
     if (result) {
-        need_free_result = true;  /* We own this copy */
+        need_free_result = true;
     } else {
         /* Cache miss - perform DNS lookup */
         memset(&hints, 0, sizeof(hints));
@@ -324,214 +519,196 @@ int httpmorph_tcp_connect(const char *host, uint16_t port, uint32_t timeout_ms,
         hints.ai_flags = 0;
         hints.ai_protocol = 0;
 
-        /* Convert port to string */
         char port_str[6];
         snprintf(port_str, sizeof(port_str), "%u", port);
 
-        /* Resolve hostname */
         int ret = getaddrinfo(host, port_str, &hints, &result);
         if (ret != 0) {
             return -1;
         }
 
-        /* Add to cache for future use */
         dns_cache_add(host, port, result);
-        need_free_result = false;  /* Will use freeaddrinfo() */
+        need_free_result = false;
     }
 
-    /* Try each address until we succeed */
-    int ret;
-    for (rp = result; rp != NULL; rp = rp->ai_next) {
-        sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sockfd == -1) {
-            continue;
+    /* Separate addresses by family (RFC 8305: prefer IPv6) */
+    struct addrinfo *ipv6_addrs[16];
+    struct addrinfo *ipv4_addrs[16];
+    int ipv6_count = 0, ipv4_count = 0;
+
+    for (struct addrinfo *rp = result; rp != NULL; rp = rp->ai_next) {
+        if (rp->ai_family == AF_INET6 && ipv6_count < 16) {
+            ipv6_addrs[ipv6_count++] = rp;
+        } else if (rp->ai_family == AF_INET && ipv4_count < 16) {
+            ipv4_addrs[ipv4_count++] = rp;
         }
+    }
 
-        /* Enable TCP_NODELAY (disable Nagle's algorithm for lower latency) */
-        int nodelay = 1;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelay, sizeof(nodelay));
+    /* Build interleaved address list (IPv6, IPv4, IPv6, IPv4, ...) per RFC 8305 */
+    struct addrinfo *sorted_addrs[32];
+    int sorted_count = 0;
+    int i6 = 0, i4 = 0;
 
-        /* Enable SO_REUSEADDR for faster socket reuse */
-        int reuse = 1;
-        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (char*)&reuse, sizeof(reuse));
+    while (i6 < ipv6_count || i4 < ipv4_count) {
+        if (i6 < ipv6_count) {
+            sorted_addrs[sorted_count++] = ipv6_addrs[i6++];
+        }
+        if (i4 < ipv4_count) {
+            sorted_addrs[sorted_count++] = ipv4_addrs[i4++];
+        }
+    }
 
-        /* Enable SO_KEEPALIVE for connection health monitoring */
-        int keepalive = 1;
-        setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (char*)&keepalive, sizeof(keepalive));
+    if (sorted_count == 0) {
+        /* No addresses found */
+        if (need_free_result) {
+            addrinfo_deep_free(result);
+        } else {
+            freeaddrinfo(result);
+        }
+        return -1;
+    }
 
-        /* Optimize send/receive buffer sizes (64KB each for better throughput) */
-        int bufsize = 65536;
-        setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (char*)&bufsize, sizeof(bufsize));
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (char*)&bufsize, sizeof(bufsize));
+    /* Happy Eyeballs: race connections with staggered starts */
+    int active_sockets[MAX_PARALLEL_CONNECTIONS] = {-1, -1};
+    int active_count = 0;
+    int next_addr_idx = 0;
+    uint64_t next_attempt_time = 0;
+    uint64_t deadline = start_time + (uint64_t)timeout_ms * 1000;
 
-#ifdef TCP_QUICKACK
-        /* Enable TCP_QUICKACK on Linux for faster ACKs */
-        int quickack = 1;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_QUICKACK, (char*)&quickack, sizeof(quickack));
-#endif
+    /* Start first connection immediately */
+    active_sockets[0] = start_connection_attempt(sorted_addrs[next_addr_idx++]);
+    if (active_sockets[0] >= 0) {
+        active_count = 1;
+        /* Schedule next attempt after 250ms delay */
+        next_attempt_time = httpmorph_get_time_us() + HAPPY_EYEBALLS_DELAY_MS * 1000;
+    }
 
-#ifdef SO_REUSEPORT
-        /* Enable SO_REUSEPORT if available (Linux 3.9+, BSD) */
-        int reuseport = 1;
-        setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, (char*)&reuseport, sizeof(reuseport));
-#endif
+    /* Poll until we have a winner or timeout */
+    while (active_count > 0) {
+        uint64_t now = httpmorph_get_time_us();
 
-        /* Set socket to non-blocking for timeout support */
-#ifdef _WIN32
-        u_long mode = 1;
-        ioctlsocket(sockfd, FIONBIO, &mode);
-#else
-        int flags = fcntl(sockfd, F_GETFL, 0);
-        fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
-#endif
-
-        /* Attempt connection */
-        ret = connect(sockfd, rp->ai_addr, rp->ai_addrlen);
-        if (ret == 0) {
-            /* Connected immediately */
+        /* Check timeout */
+        if (now >= deadline) {
             break;
         }
 
-#ifndef _WIN32
-        /* On Unix, check for immediate connection failure */
-        if (errno == ECONNREFUSED || errno == ENETUNREACH || errno == EHOSTUNREACH ||
-            errno == ETIMEDOUT || errno == ECONNRESET) {
-            /* Connection failed immediately - don't wait, try next address */
-            if (sockfd > 2) close(sockfd);
-            sockfd = -1;
-            continue;
+        /* Start next connection attempt if delay has passed and we have addresses left */
+        if (next_addr_idx < sorted_count && active_count < MAX_PARALLEL_CONNECTIONS && now >= next_attempt_time) {
+            int new_sock = start_connection_attempt(sorted_addrs[next_addr_idx++]);
+            if (new_sock >= 0) {
+                active_sockets[active_count++] = new_sock;
+                next_attempt_time = now + HAPPY_EYEBALLS_DELAY_MS * 1000;
+            }
         }
-#endif
 
-#ifdef _WIN32
-        if (WSAGetLastError() == WSAEWOULDBLOCK) {
-#else
-        if (errno == EINPROGRESS) {
-#endif
-            /* Connection in progress - wait with select using polling approach */
-            uint64_t poll_start = httpmorph_get_time_us();
-            uint64_t poll_timeout_us = (uint64_t)timeout_ms * 1000;
-            int connected = 0;
+        /* Build fd_set for select */
+        fd_set write_fds;
+        FD_ZERO(&write_fds);
+        int max_fd = -1;
 
-            while (httpmorph_get_time_us() - poll_start < poll_timeout_us) {
-                fd_set write_fds, except_fds;
-                struct timeval tv;
+        for (int i = 0; i < active_count; i++) {
+            if (active_sockets[i] >= 0) {
+                FD_SET(active_sockets[i], &write_fds);
+                if (active_sockets[i] > max_fd) {
+                    max_fd = active_sockets[i];
+                }
+            }
+        }
 
-                FD_ZERO(&write_fds);
-                FD_ZERO(&except_fds);
-                FD_SET(sockfd, &write_fds);
-                FD_SET(sockfd, &except_fds);
+        if (max_fd < 0) {
+            break;
+        }
 
-                /* Poll every 100ms to detect errors quickly */
-                tv.tv_sec = 0;
-                tv.tv_usec = 100000;  /* 100ms */
+        /* Calculate select timeout:
+         * - If we have more addresses to try, wait until next_attempt_time
+         * - Otherwise wait until deadline
+         */
+        uint64_t wait_until = deadline;
+        if (next_addr_idx < sorted_count && active_count < MAX_PARALLEL_CONNECTIONS) {
+            if (next_attempt_time < wait_until) {
+                wait_until = next_attempt_time;
+            }
+        }
 
-                ret = select(SELECT_NFDS(sockfd), NULL, &write_fds, &except_fds, &tv);
+        uint64_t wait_us = (wait_until > now) ? (wait_until - now) : 0;
+        /* Cap at 50ms for responsiveness */
+        if (wait_us > 50000) wait_us = 50000;
 
-                /* Check socket error after each poll */
-                int error = 0;
-                socklen_t len = sizeof(error);
-#ifdef _WIN32
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (char*)&error, (int*)&len) == 0) {
-#else
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
-#endif
-                    if (error == 0 && ret > 0 && (FD_ISSET(sockfd, &write_fds) || FD_ISSET(sockfd, &except_fds))) {
-                        /* Connection succeeded */
-                        connected = 1;
+        struct timeval tv;
+        tv.tv_sec = wait_us / 1000000;
+        tv.tv_usec = wait_us % 1000000;
+
+        int sel_ret = select(SELECT_NFDS(max_fd), NULL, &write_fds, NULL, &tv);
+
+        if (sel_ret > 0) {
+            /* Check which socket(s) are ready */
+            for (int i = 0; i < active_count; i++) {
+                if (active_sockets[i] >= 0 && FD_ISSET(active_sockets[i], &write_fds)) {
+                    int status = check_socket_connected(active_sockets[i]);
+                    if (status == 1) {
+                        /* Winner! This socket connected first */
+                        sockfd = active_sockets[i];
+                        active_sockets[i] = -1;
+
+                        /* Close all other active sockets */
+                        for (int j = 0; j < active_count; j++) {
+                            if (active_sockets[j] >= 0) {
+                                close(active_sockets[j]);
+                                active_sockets[j] = -1;
+                            }
+                        }
+                        active_count = 0;
                         break;
-                    } else if (error != 0) {
-                        /* Connection failed - don't wait, try next address */
-                        break;
+                    } else if (status == -1) {
+                        /* This socket failed, close it */
+                        close(active_sockets[i]);
+                        active_sockets[i] = -1;
                     }
                 }
             }
 
-            if (connected) {
-                break;  /* Successfully connected */
+            /* Compact the active_sockets array */
+            int write_idx = 0;
+            for (int i = 0; i < active_count; i++) {
+                if (active_sockets[i] >= 0) {
+                    active_sockets[write_idx++] = active_sockets[i];
+                }
             }
-            /* Connection failed or timed out - try next address */
+            active_count = write_idx;
+
+            if (sockfd >= 0) {
+                break;  /* We have a winner */
+            }
         }
 
-        /* Connection failed, try next address */
-        if (sockfd > 2) close(sockfd);
-        sockfd = -1;
+        /* If no active connections and we have more addresses, try next */
+        if (active_count == 0 && next_addr_idx < sorted_count) {
+            int new_sock = start_connection_attempt(sorted_addrs[next_addr_idx++]);
+            if (new_sock >= 0) {
+                active_sockets[0] = new_sock;
+                active_count = 1;
+                next_attempt_time = httpmorph_get_time_us() + HAPPY_EYEBALLS_DELAY_MS * 1000;
+            }
+        }
     }
 
-    /* Free result using appropriate method */
+    /* Cleanup any remaining active sockets */
+    for (int i = 0; i < active_count; i++) {
+        if (active_sockets[i] >= 0) {
+            close(active_sockets[i]);
+        }
+    }
+
+    /* Free DNS result */
     if (need_free_result) {
         addrinfo_deep_free(result);
     } else {
         freeaddrinfo(result);
     }
 
-    if (sockfd != -1) {
-        /* Set socket to blocking mode for HTTP/1.1 compatibility
-         * (HTTP/2 will set it back to non-blocking later if negotiated) */
-#ifdef _WIN32
-        u_long mode = 0;
-        ioctlsocket(sockfd, FIONBIO, &mode);
-#else
-        int flags = fcntl(sockfd, F_GETFL, 0);
-        fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
-#endif
-
-        /* Set performance options */
-        int opt = 1;
-#ifdef _WIN32
-        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char*)&opt, sizeof(opt));
-#else
-        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
-
-        /* Enable TCP keep-alive to detect dead connections */
-        setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &opt, sizeof(opt));
-
-        #ifdef TCP_KEEPIDLE
-        /* Start probing after 60 seconds of idle time */
-        int keepidle = 60;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
-        #endif
-
-        #ifdef TCP_KEEPINTVL
-        /* Send probes every 10 seconds */
-        int keepintvl = 10;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
-        #endif
-
-        #ifdef TCP_KEEPCNT
-        /* Drop connection after 3 failed probes */
-        int keepcnt = 3;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
-        #endif
-
-        #ifdef __APPLE__
-        /* Enable TCP Fast Open on macOS for reduced latency */
-        #ifdef TCP_FASTOPEN
-        int tfo = 1;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_FASTOPEN, &tfo, sizeof(tfo));
-        #endif
-        #endif
-
-        #ifdef __linux__
-        /* Enable TCP Fast Open on Linux */
-        #ifdef TCP_FASTOPEN_CONNECT
-        int tfo = 1;
-        setsockopt(sockfd, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &tfo, sizeof(tfo));
-        #endif
-        #endif
-#endif
-
-        /* Set receive timeout to prevent indefinite blocking */
-#ifdef _WIN32
-        DWORD timeout_dw = timeout_ms;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout_dw, sizeof(timeout_dw));
-#else
-        struct timeval recv_timeout;
-        recv_timeout.tv_sec = timeout_ms / 1000;
-        recv_timeout.tv_usec = (timeout_ms % 1000) * 1000;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
-#endif
-
+    /* Configure winning socket */
+    if (sockfd >= 0) {
+        configure_connected_socket(sockfd, timeout_ms);
         *connect_time_us = httpmorph_get_time_us() - start_time;
     }
 

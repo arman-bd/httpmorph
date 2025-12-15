@@ -21,6 +21,9 @@ extern "C" {
 /* Forward declaration for SSL_CTX */
 typedef struct ssl_ctx_st SSL_CTX;
 
+/* Forward declaration for connection pool */
+typedef struct httpmorph_pool httpmorph_pool_t;
+
 /**
  * Request manager structure
  */
@@ -30,6 +33,9 @@ typedef struct async_request_manager {
 
     /* SSL/TLS context */
     SSL_CTX *ssl_ctx;
+
+    /* Connection pool for reuse */
+    httpmorph_pool_t *pool;
 
     /* Request tracking */
     async_request_t **requests;
@@ -83,6 +89,15 @@ async_request_t* async_manager_get_request(
  * Cancel a request
  */
 int async_manager_cancel_request(
+    async_request_manager_t *mgr,
+    uint64_t request_id
+);
+
+/**
+ * Remove a completed request from the manager
+ * Should be called after extracting the response
+ */
+int async_manager_remove_request(
     async_request_manager_t *mgr,
     uint64_t request_id
 );

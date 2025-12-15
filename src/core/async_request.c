@@ -10,8 +10,12 @@
 
 #include "async_request.h"
 #include "io_engine.h"
+#include "connection_pool.h"
 #include "internal/proxy.h"
 #include "internal/util.h"
+#include "internal/network.h"
+#include "internal/tls.h"
+#include "../tls/browser_profiles.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,9 +25,50 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+/* HTTP/2 support */
+#ifdef HAVE_NGHTTP2
+#include <nghttp2/nghttp2.h>
+#include "internal/request.h"
+#include "internal/response.h"
+
+/**
+ * HTTP/2 stream data structure for async requests
+ * (defined early for use in destroy function)
+ */
+typedef struct {
+    void *req;                     /* Back-reference to async request (void* to avoid circular dep) */
+    httpmorph_response_t *response;
+    uint8_t *data_buf;             /* Response body buffer */
+    size_t data_capacity;
+    size_t data_len;
+    bool headers_complete;
+    bool stream_closed;
+    SSL *ssl;
+
+    /* Request body fields */
+    const uint8_t *req_body;
+    size_t req_body_len;
+    size_t req_body_sent;
+
+    /* Buffered I/O for non-blocking operation */
+    uint8_t *send_buf;             /* Buffer for nghttp2 output */
+    size_t send_capacity;
+    size_t send_len;               /* Data in send_buf waiting to be sent */
+    size_t send_pos;               /* Position of data already sent */
+
+    /* Receive buffer */
+    uint8_t *recv_buf;             /* Buffer for SSL_read data */
+    size_t recv_capacity;
+    size_t recv_len;               /* Data in recv_buf */
+
+    /* Track SSL errors for async handling */
+    int last_ssl_want;             /* SSL_ERROR_WANT_READ or SSL_ERROR_WANT_WRITE */
+} async_http2_stream_data_t;
+#endif
+
 /* Debug output control */
 #ifdef HTTPMORPH_DEBUG
-    #define DEBUG_PRINT(...) printf(__VA_ARGS__)
+    #define DEBUG_PRINT(...) do { printf(__VA_ARGS__); fflush(stdout); } while(0)
 #else
     #define DEBUG_PRINT(...) ((void)0)
 #endif
@@ -142,6 +187,9 @@ const char* async_request_state_name(async_request_state_t state) {
         case ASYNC_STATE_SENDING_REQUEST:   return "SENDING_REQUEST";
         case ASYNC_STATE_RECEIVING_HEADERS: return "RECEIVING_HEADERS";
         case ASYNC_STATE_RECEIVING_BODY:    return "RECEIVING_BODY";
+        case ASYNC_STATE_HTTP2_INIT:        return "HTTP2_INIT";
+        case ASYNC_STATE_HTTP2_SEND:        return "HTTP2_SEND";
+        case ASYNC_STATE_HTTP2_RECV:        return "HTTP2_RECV";
         case ASYNC_STATE_COMPLETE:          return "COMPLETE";
         case ASYNC_STATE_ERROR:             return "ERROR";
         default:                            return "UNKNOWN";
@@ -324,6 +372,28 @@ async_request_t* async_request_create(
             return NULL;
         }
 
+        /* Configure per-connection browser profile settings for Chrome 143 fingerprint.
+         * SSL_CTX sets cipher suites and base extensions, but some require per-SSL config:
+         * - ECH grease (encrypted_client_hello extension)
+         * - OCSP stapling (status_request extension)
+         * - ALPS (application_settings extension) */
+        const browser_profile_t *profile = &PROFILE_CHROME_143;
+        bool has_ech = false, has_alps = false, has_ocsp = false;
+        for (int i = 0; i < profile->extension_count; i++) {
+            uint16_t ext = profile->extensions[i];
+            if (ext == 65037) has_ech = true;   /* encrypted_client_hello */
+            if (ext == 17613 || ext == 17513) has_alps = true;  /* application_settings */
+            if (ext == 5) has_ocsp = true;      /* status_request */
+        }
+
+        /* Enable ECH grease for encrypted_client_hello extension */
+        SSL_set_enable_ech_grease(req->ssl, has_ech ? 1 : 0);
+
+        /* Enable OCSP stapling for status_request extension */
+        if (has_ocsp) {
+            SSL_enable_ocsp_stapling(req->ssl);
+        }
+
         /* Set SSL verification mode based on request setting */
         if (request->verify_ssl) {
             SSL_set_verify(req->ssl, SSL_VERIFY_PEER, NULL);
@@ -336,9 +406,154 @@ async_request_t* async_request_create(
             SSL_set_tlsext_host_name(req->ssl, request->host);
         }
 
-        /* Set SSL to non-blocking mode (will be done when socket is created) */
-        DEBUG_PRINT("[async_request] Created SSL object for HTTPS (id=%lu)\n",
+        /* Set ALPN and ALPS for HTTP/2 if enabled */
+        if (profile->alpn_protocol_count > 0) {
+            unsigned char alpn_list[256];
+            unsigned char *alpn_p = alpn_list;
+            for (int i = 0; i < profile->alpn_protocol_count; i++) {
+                size_t len = strlen(profile->alpn_protocols[i]);
+                *alpn_p++ = (unsigned char)len;
+                memcpy(alpn_p, profile->alpn_protocols[i], len);
+                alpn_p += len;
+            }
+            if (alpn_p > alpn_list) {
+                SSL_set_alpn_protos(req->ssl, alpn_list, alpn_p - alpn_list);
+                /* Enable ALPS (application_settings) for h2 */
+                if (has_alps) {
+                    SSL_add_application_settings(req->ssl,
+                        (const uint8_t *)"h2", 2,
+                        (const uint8_t *)"", 0);
+                }
+            }
+        }
+
+        DEBUG_PRINT("[async_request] Created SSL object with Chrome 143 profile (id=%lu)\n",
                (unsigned long)req->id);
+    }
+
+    /* Allocate response object using proper constructor (initializes headers array) */
+    req->response = httpmorph_response_create(NULL);  /* No buffer pool for async requests */
+    if (!req->response) {
+        /* Cleanup and return NULL */
+        if (req->ssl) {
+            SSL_free(req->ssl);
+        }
+        free(req->send_buf);
+        free(req->recv_buf);
+        free(req);
+        return NULL;
+    }
+    req->response->http_version = HTTPMORPH_VERSION_1_1;  /* Default, may be changed to HTTP/2 */
+    req->response->error = HTTPMORPH_OK;
+
+    return req;
+}
+
+/**
+ * Create a new async request with connection pool support
+ */
+async_request_t* async_request_create_pooled(
+    const httpmorph_request_t *request,
+    io_engine_t *io_engine,
+    SSL_CTX *ssl_ctx,
+    httpmorph_pool_t *pool,
+    uint32_t timeout_ms,
+    async_request_callback_t callback,
+    void *user_data)
+{
+    extern int httpmorph_parse_url(const char *url, char **scheme, char **host, uint16_t *port, char **path);
+
+    /* Parse URL to get host/port for pool lookup if not already set */
+    if (!request->host && request->url) {
+        char *scheme = NULL, *host = NULL, *path = NULL;
+        uint16_t port = 0;
+
+        if (httpmorph_parse_url(request->url, &scheme, &host, &port, &path) == 0) {
+            /* Store parsed values in request structure */
+            ((httpmorph_request_t*)request)->host = host;  /* Transfer ownership */
+            ((httpmorph_request_t*)request)->port = port;
+            ((httpmorph_request_t*)request)->use_tls = (scheme && strcmp(scheme, "https") == 0);
+
+            /* Free scheme and path as we don't need them */
+            free(scheme);
+            free(path);
+        }
+    }
+
+    /* Try to get a pooled connection (supports both HTTP/1.1 and HTTP/2)
+     * NOTE: Don't use pooled connections when using a proxy - proxy requests
+     * need to go through the proxy, not reuse direct connections to target host */
+    pooled_connection_t *pooled_conn = NULL;
+    if (pool && request->host && request->port > 0 &&
+        (!request->proxy_url || request->proxy_url[0] == '\0')) {
+        pooled_conn = pool_get_connection(pool, request->host, request->port);
+        if (pooled_conn && pool_connection_validate(pooled_conn)) {
+            DEBUG_PRINT("[async_request] Got pooled connection: host=%s, is_http2=%d, session=%p\n",
+                   request->host, pooled_conn->is_http2, pooled_conn->http2_session);
+        } else if (pooled_conn) {
+            /* Connection invalid, destroy it */
+            pool_connection_destroy(pooled_conn);
+            pooled_conn = NULL;
+        }
+    }
+
+    /* Create the async request normally */
+    async_request_t *req = async_request_create(request, io_engine, ssl_ctx,
+                                                 timeout_ms, callback, user_data);
+    if (!req) {
+        if (pooled_conn) {
+            pool_connection_destroy(pooled_conn);
+        }
+        return NULL;
+    }
+
+    /* Store pool reference for returning connection later */
+    req->pool = pool;
+
+    /* If we got a pooled connection, use it */
+    if (pooled_conn) {
+        req->pooled_conn = pooled_conn;
+        req->from_pool = true;
+
+        /* Free the SSL object we just created - we'll use the pooled one */
+        if (req->ssl) {
+            SSL_free(req->ssl);
+        }
+
+        /* Use the existing socket and SSL connection */
+        req->sockfd = pooled_conn->sockfd;
+        req->ssl = pooled_conn->ssl;
+        req->dns_resolved = true;
+        req->is_https = (pooled_conn->ssl != NULL);
+
+#ifdef HAVE_NGHTTP2
+        /* Restore HTTP/2 session from pooled connection if available */
+        if (pooled_conn->is_http2 && pooled_conn->http2_session) {
+            req->use_http2 = true;
+            req->http2_session = pooled_conn->http2_session;
+            req->http2_stream_data = pooled_conn->http2_stream_data;
+            req->http2_session_initialized = pooled_conn->preface_sent;
+            /* Set response HTTP version to HTTP/2 since we're reusing an HTTP/2 connection */
+            req->response->http_version = HTTPMORPH_VERSION_2_0;
+            /* Clear from pool - request now owns the session */
+            pooled_conn->http2_session = NULL;
+            pooled_conn->http2_stream_data = NULL;
+            /* For HTTP/2, skip to HTTP2_INIT which will submit a new request */
+            req->state = ASYNC_STATE_HTTP2_INIT;
+            DEBUG_PRINT("[async_request] Restored HTTP/2 session from pool: session=%p\n",
+                   req->http2_session);
+        } else {
+            /* HTTP/1.1 - skip directly to sending request */
+            req->state = ASYNC_STATE_SENDING_REQUEST;
+            DEBUG_PRINT("[async_request] Reusing pooled HTTP/1.1 connection fd=%d\n",
+                   req->sockfd);
+        }
+#else
+        /* No HTTP/2 support - skip directly to sending request */
+        req->state = ASYNC_STATE_SENDING_REQUEST;
+        DEBUG_PRINT("[async_request] Reusing pooled connection fd=%d (id=%lu)\n",
+               req->sockfd, (unsigned long)req->id);
+#endif
     }
 
     return req;
@@ -374,20 +589,83 @@ void async_request_destroy(async_request_t *req) {
     }
 #endif
 
-    /* Close socket (but never close stdin/stdout/stderr) */
-    if (req->sockfd > 2) {
-#ifdef _WIN32
-        closesocket(req->sockfd);
-#else
-        close(req->sockfd);
+    /* Handle connection pooling with HTTP/2 session preservation */
+    if (req->from_pool && req->pooled_conn) {
+        /* Return connection to pool if request succeeded, otherwise destroy it */
+        if (req->state == ASYNC_STATE_COMPLETE && req->pool) {
+#ifdef HAVE_NGHTTP2
+            /* Store HTTP/2 session back in pooled connection for reuse */
+            if (req->use_http2 && req->http2_session) {
+                req->pooled_conn->http2_session = req->http2_session;
+                req->pooled_conn->http2_stream_data = req->http2_stream_data;
+                req->pooled_conn->is_http2 = true;
+                req->pooled_conn->preface_sent = true;
+                /* Don't free the session - pool owns it now */
+                req->http2_session = NULL;
+                req->http2_stream_data = NULL;
+                DEBUG_PRINT("[async_request] Stored HTTP/2 session in pool fd=%d\n", req->sockfd);
+            }
 #endif
+            /* Update last used time and return to pool */
+            req->pooled_conn->last_used = get_time_us() / 1000000;  /* Convert to seconds */
+            pool_put_connection(req->pool, req->pooled_conn);
+            DEBUG_PRINT("[async_request] Returned connection to pool fd=%d\n", req->sockfd);
+        } else {
+            /* Request failed - destroy the connection */
+            pool_connection_destroy(req->pooled_conn);
+            DEBUG_PRINT("[async_request] Destroyed failed pooled connection fd=%d\n", req->sockfd);
+        }
+        /* Don't close socket or free SSL - pooled_conn owns them */
         req->sockfd = -1;
-    }
-
-    /* Clean up SSL */
-    if (req->ssl) {
-        SSL_free(req->ssl);
         req->ssl = NULL;
+        req->pooled_conn = NULL;
+    } else if (req->pool && req->state == ASYNC_STATE_COMPLETE &&
+               req->sockfd > 2 && req->request && req->request->host) {
+        /* New connection that completed successfully - add to pool */
+        DEBUG_PRINT("[async_request] Adding new connection to pool: host=%s, is_http2=%d\n",
+               req->request->host, req->use_http2);
+        pooled_connection_t *new_conn = pool_connection_create(
+            req->request->host, req->request->port, req->sockfd, req->ssl, req->use_http2);
+        if (new_conn) {
+#ifdef HAVE_NGHTTP2
+            /* Store HTTP/2 session in new pool entry for reuse */
+            if (req->use_http2 && req->http2_session) {
+                new_conn->http2_session = req->http2_session;
+                new_conn->http2_stream_data = req->http2_stream_data;
+                new_conn->preface_sent = true;
+                /* Don't free the session - pool owns it now */
+                req->http2_session = NULL;
+                req->http2_stream_data = NULL;
+                DEBUG_PRINT("[async_request] Stored HTTP/2 session in pool: session=%p\n",
+                       new_conn->http2_session);
+            }
+#endif
+            new_conn->last_used = get_time_us() / 1000000;
+            pool_put_connection(req->pool, new_conn);
+            /* Don't close socket or free SSL - pool owns them now */
+            req->sockfd = -1;
+            req->ssl = NULL;
+        } else {
+            /* Failed to create pool connection, fall through to normal cleanup */
+            goto normal_cleanup;
+        }
+    } else {
+normal_cleanup:
+        /* Close socket (but never close stdin/stdout/stderr) */
+        if (req->sockfd > 2) {
+#ifdef _WIN32
+            closesocket(req->sockfd);
+#else
+            close(req->sockfd);
+#endif
+            req->sockfd = -1;
+        }
+
+        /* Clean up SSL */
+        if (req->ssl) {
+            SSL_free(req->ssl);
+            req->ssl = NULL;
+        }
     }
 
     /* Free buffers */
@@ -400,6 +678,26 @@ void async_request_destroy(async_request_t *req) {
     free(req->proxy_password);
     free(req->target_host);
     free(req->proxy_recv_buf);
+
+#ifdef HAVE_NGHTTP2
+    /* Clean up HTTP/2 resources */
+    if (req->http2_session) {
+        nghttp2_session_del((nghttp2_session *)req->http2_session);
+        req->http2_session = NULL;
+    }
+    if (req->http2_callbacks) {
+        nghttp2_session_callbacks_del((nghttp2_session_callbacks *)req->http2_callbacks);
+        req->http2_callbacks = NULL;
+    }
+    if (req->http2_stream_data) {
+        async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)req->http2_stream_data;
+        free(stream_data->data_buf);
+        free(stream_data->send_buf);
+        free(stream_data->recv_buf);
+        free(stream_data);
+        req->http2_stream_data = NULL;
+    }
+#endif
 
     /* Free response if allocated */
     if (req->response) {
@@ -497,9 +795,6 @@ static int step_dns_lookup(async_request_t *req) {
         return ASYNC_STATUS_IN_PROGRESS;
     }
 
-    /* Perform blocking DNS lookup (for now) */
-    /* Note: In production, this should use async DNS (getaddrinfo_a or thread pool) */
-
     /* If using proxy, resolve proxy hostname instead of target hostname */
     const char *hostname;
     uint16_t port;
@@ -521,31 +816,49 @@ static int step_dns_lookup(async_request_t *req) {
         return ASYNC_STATUS_ERROR;
     }
 
-    /* Setup hints for getaddrinfo */
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;     /* Allow IPv4 or IPv6 */
-    hints.ai_socktype = SOCK_STREAM; /* TCP socket */
-    hints.ai_flags = AI_ADDRCONFIG;  /* Only return addresses we can use */
-
-    /* Convert port to string */
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%u", port);
-
-    /* Perform DNS lookup */
     struct addrinfo *result = NULL;
-    int ret = getaddrinfo(hostname, port_str, &hints, &result);
+    bool from_cache = false;
 
-    if (ret != 0) {
-        char error_buf[256];
-        snprintf(error_buf, sizeof(error_buf), "DNS lookup failed: %s", gai_strerror(ret));
-        async_request_set_error(req, ret, error_buf);
-        return ASYNC_STATUS_ERROR;
-    }
+    /* Try DNS cache first (shared with sync path) */
+    result = dns_cache_lookup(hostname, port);
+    if (result) {
+        from_cache = true;
+        DEBUG_PRINT("[async_request] DNS cache hit for %s:%u (id=%lu)\n",
+               hostname, port, (unsigned long)req->id);
+    } else {
+        /* Cache miss - perform blocking DNS lookup */
+        /* Note: In production, this should use async DNS (getaddrinfo_a or thread pool) */
+        DEBUG_PRINT("[async_request] DNS cache miss for %s:%u, performing lookup (id=%lu)\n",
+               hostname, port, (unsigned long)req->id);
 
-    if (!result) {
-        async_request_set_error(req, -1, "DNS lookup returned no results");
-        return ASYNC_STATUS_ERROR;
+        /* Setup hints for getaddrinfo */
+        struct addrinfo hints;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;     /* Allow IPv4 or IPv6 */
+        hints.ai_socktype = SOCK_STREAM; /* TCP socket */
+        hints.ai_flags = AI_ADDRCONFIG;  /* Only return addresses we can use */
+
+        /* Convert port to string */
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%u", port);
+
+        /* Perform DNS lookup */
+        int ret = getaddrinfo(hostname, port_str, &hints, &result);
+
+        if (ret != 0) {
+            char error_buf[256];
+            snprintf(error_buf, sizeof(error_buf), "DNS lookup failed: %s", gai_strerror(ret));
+            async_request_set_error(req, ret, error_buf);
+            return ASYNC_STATUS_ERROR;
+        }
+
+        if (!result) {
+            async_request_set_error(req, -1, "DNS lookup returned no results");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        /* Add to DNS cache for future use */
+        dns_cache_add(hostname, port, result);
     }
 
     /* Store the first result */
@@ -553,11 +866,15 @@ static int step_dns_lookup(async_request_t *req) {
     req->addr_len = result->ai_addrlen;
     req->dns_resolved = true;
 
-    DEBUG_PRINT("[async_request] DNS resolved for %s:%u (id=%lu)\n",
-           hostname, port, (unsigned long)req->id);
+    DEBUG_PRINT("[async_request] DNS resolved for %s:%u (from_cache=%d) (id=%lu)\n",
+           hostname, port, from_cache, (unsigned long)req->id);
 
     /* Free the result */
-    freeaddrinfo(result);
+    if (from_cache) {
+        dns_cache_free_result(result);
+    } else {
+        freeaddrinfo(result);
+    }
 
     /* Move to connecting state */
     req->state = ASYNC_STATE_CONNECTING;
@@ -917,6 +1234,9 @@ static int step_connecting(async_request_t *req) {
 
 /**
  * State: TLS handshake
+ *
+ * Performs non-blocking TLS handshake. Each call attempts one handshake step,
+ * returning NEED_READ or NEED_WRITE to allow the event loop to wait for I/O.
  */
 static int step_tls_handshake(async_request_t *req) {
     /* SSL object should exist for HTTPS */
@@ -925,19 +1245,34 @@ static int step_tls_handshake(async_request_t *req) {
         return ASYNC_STATUS_ERROR;
     }
 
+    int current_fd = SSL_get_fd(req->ssl);
+
     /* Bind SSL to socket if not already done */
-    if (SSL_get_fd(req->ssl) != req->sockfd) {
+    if (current_fd != req->sockfd) {
         if (SSL_set_fd(req->ssl, req->sockfd) != 1) {
             async_request_set_error(req, -1, "Failed to bind SSL to socket");
             return ASYNC_STATUS_ERROR;
         }
         /* Set connect state (client mode) */
         SSL_set_connect_state(req->ssl);
+
+        /* Try to resume a cached TLS session for faster handshake */
+        const char *hostname = req->request->host;
+        uint16_t port = req->request->port;
+        if (hostname && port > 0) {
+            SSL_SESSION *cached_session = global_session_cache_get(hostname, port);
+            if (cached_session) {
+                SSL_set_session(req->ssl, cached_session);
+                DEBUG_PRINT("[async_request] Using cached TLS session for %s:%u (id=%lu)\n",
+                       hostname, port, (unsigned long)req->id);
+            }
+        }
+
         DEBUG_PRINT("[async_request] SSL bound to socket fd=%d (id=%lu)\n",
                req->sockfd, (unsigned long)req->id);
     }
 
-    /* Perform non-blocking handshake */
+    /* Perform non-blocking handshake step */
     int ret = SSL_do_handshake(req->ssl);
 
     if (ret == 1) {
@@ -945,9 +1280,40 @@ static int step_tls_handshake(async_request_t *req) {
         DEBUG_PRINT("[async_request] TLS handshake complete (id=%lu)\n",
                (unsigned long)req->id);
 
+        /* Cache the session for future resumption */
+        const char *hostname = req->request->host;
+        uint16_t port = req->request->port;
+        if (hostname && port > 0) {
+            SSL_SESSION *session = SSL_get1_session(req->ssl);
+            if (session) {
+                global_session_cache_put(hostname, port, session);
+                SSL_SESSION_free(session);  /* Release our reference */
+                DEBUG_PRINT("[async_request] Cached TLS session for %s:%u (id=%lu)\n",
+                       hostname, port, (unsigned long)req->id);
+            }
+        }
+
+#ifdef HAVE_NGHTTP2
+        /* Check ALPN negotiated protocol */
+        const unsigned char *alpn_data = NULL;
+        unsigned int alpn_len = 0;
+        SSL_get0_alpn_selected(req->ssl, &alpn_data, &alpn_len);
+
+        if (alpn_data && alpn_len == 2 && memcmp(alpn_data, "h2", 2) == 0) {
+            /* HTTP/2 negotiated - transition to HTTP/2 state machine */
+            req->use_http2 = true;
+            req->response->http_version = HTTPMORPH_VERSION_2_0;
+            DEBUG_PRINT("[async_request] HTTP/2 negotiated via ALPN (id=%lu)\n",
+                   (unsigned long)req->id);
+            req->state = ASYNC_STATE_HTTP2_INIT;
+            /* Return NEED_WRITE since HTTP/2 init will send data */
+            return ASYNC_STATUS_NEED_WRITE;
+        }
+#endif
+
         req->state = ASYNC_STATE_SENDING_REQUEST;
-        /* Continue immediately to sending */
-        return ASYNC_STATUS_IN_PROGRESS;
+        /* Continue to sending - yield first to allow event loop to process */
+        return ASYNC_STATUS_NEED_WRITE;
     }
 
     /* Check error */
@@ -1041,6 +1407,13 @@ static int build_http_request(async_request_t *req) {
     /* Add Host header */
     written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
                        "Host: %s\r\n", request->host ? request->host : "localhost");
+    if (written >= (int)SEND_BUFFER_SIZE) {
+        return -1;
+    }
+
+    /* Add Connection: keep-alive for connection reuse */
+    written += snprintf(buf + written, SEND_BUFFER_SIZE - written,
+                       "Connection: keep-alive\r\n");
     if (written >= (int)SEND_BUFFER_SIZE) {
         return -1;
     }
@@ -1712,16 +2085,13 @@ static int step_receiving_body(async_request_t *req) {
         DEBUG_PRINT("[async_request] No body to receive (id=%lu)\n",
                (unsigned long)req->id);
 
-        /* Create response object for empty body */
-        if (!req->response) {
-            req->response = calloc(1, sizeof(httpmorph_response_t));
-            if (req->response) {
-                req->response->body = NULL;
-                req->response->body_len = 0;
-                req->response->status_code = 200;  /* TODO: Parse from headers */
-                req->response->http_version = HTTPMORPH_VERSION_1_1;
-                req->response->error = HTTPMORPH_OK;
-            }
+        /* Initialize response object for empty body */
+        if (req->response) {
+            req->response->body = NULL;
+            req->response->body_len = 0;
+            req->response->status_code = 200;  /* TODO: Parse from headers */
+            /* http_version already set during creation or ALPN negotiation */
+            req->response->error = HTTPMORPH_OK;
         }
 
         req->state = ASYNC_STATE_COMPLETE;
@@ -1733,24 +2103,21 @@ static int step_receiving_body(async_request_t *req) {
         DEBUG_PRINT("[async_request] Body already complete (%zu bytes) (id=%lu)\n",
                req->body_received, (unsigned long)req->id);
 
-        /* Create response object */
-        if (!req->response) {
-            req->response = calloc(1, sizeof(httpmorph_response_t));
-            if (req->response) {
-                /* Extract body from recv_buf (starts after headers) */
-                size_t body_start = req->headers_end_pos;
-                if (req->content_length > 0) {
-                    req->response->body = malloc(req->content_length);
-                    if (req->response->body) {
-                        memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
-                        req->response->body_len = req->content_length;
-                        req->response->_body_actual_size = req->content_length;  /* Track allocated size */
-                    }
+        /* Populate response object with body data */
+        if (req->response) {
+            /* Extract body from recv_buf (starts after headers) */
+            size_t body_start = req->headers_end_pos;
+            if (req->content_length > 0) {
+                req->response->body = malloc(req->content_length);
+                if (req->response->body) {
+                    memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
+                    req->response->body_len = req->content_length;
+                    req->response->_body_actual_size = req->content_length;  /* Track allocated size */
                 }
-                req->response->status_code = 200;  // TODO: Parse from headers
-                req->response->http_version = HTTPMORPH_VERSION_1_1;
-                req->response->error = HTTPMORPH_OK;
             }
+            req->response->status_code = 200;  // TODO: Parse from headers
+            /* http_version already set during creation or ALPN negotiation */
+            req->response->error = HTTPMORPH_OK;
         }
 
         req->state = ASYNC_STATE_COMPLETE;
@@ -1941,24 +2308,21 @@ static int step_receiving_body(async_request_t *req) {
         DEBUG_PRINT("[async_request] Body received (%zu bytes) (id=%lu)\n",
                req->body_received, (unsigned long)req->id);
 
-        /* Create response object */
-        if (!req->response) {
-            req->response = calloc(1, sizeof(httpmorph_response_t));
-            if (req->response) {
-                /* Extract body from recv_buf (starts after headers) */
-                size_t body_start = req->headers_end_pos;
-                if (req->content_length > 0) {
-                    req->response->body = malloc(req->content_length);
-                    if (req->response->body) {
-                        memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
-                        req->response->body_len = req->content_length;
-                        req->response->_body_actual_size = req->content_length;  /* Track allocated size */
-                    }
+        /* Populate response object with body data */
+        if (req->response) {
+            /* Extract body from recv_buf (starts after headers) */
+            size_t body_start = req->headers_end_pos;
+            if (req->content_length > 0) {
+                req->response->body = malloc(req->content_length);
+                if (req->response->body) {
+                    memcpy(req->response->body, req->recv_buf + body_start, req->content_length);
+                    req->response->body_len = req->content_length;
+                    req->response->_body_actual_size = req->content_length;  /* Track allocated size */
                 }
-                req->response->status_code = 200;  // TODO: Parse from headers
-                req->response->http_version = HTTPMORPH_VERSION_1_1;
-                req->response->error = HTTPMORPH_OK;
             }
+            req->response->status_code = 200;  // TODO: Parse from headers
+            /* http_version already set during creation or ALPN negotiation */
+            req->response->error = HTTPMORPH_OK;
         }
 
         req->state = ASYNC_STATE_COMPLETE;
@@ -2109,6 +2473,577 @@ static int step_proxy_connect(async_request_t *req) {
     return ASYNC_STATUS_IN_PROGRESS;
 }
 
+#ifdef HAVE_NGHTTP2
+
+/**
+ * HTTP/2 send callback for async - buffers data instead of direct SSL_write
+ * This allows proper non-blocking I/O handling
+ */
+static ssize_t async_http2_send_callback(nghttp2_session *session, const uint8_t *data,
+                                         size_t length, int flags, void *user_data) {
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)user_data;
+    if (!stream_data) {
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    /* Expand send buffer if needed */
+    size_t needed = stream_data->send_len + length;
+    if (needed > stream_data->send_capacity) {
+        size_t new_capacity = needed * 2;
+        if (new_capacity < 32768) new_capacity = 32768;
+        uint8_t *new_buf = realloc(stream_data->send_buf, new_capacity);
+        if (!new_buf) {
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+        stream_data->send_buf = new_buf;
+        stream_data->send_capacity = new_capacity;
+    }
+
+    /* Copy data to send buffer */
+    memcpy(stream_data->send_buf + stream_data->send_len, data, length);
+    stream_data->send_len += length;
+
+    return (ssize_t)length;
+}
+
+/**
+ * HTTP/2 recv callback for async - returns WOULDBLOCK since we use mem_recv
+ * We don't use this callback directly; instead we do SSL_read externally
+ * and feed data to nghttp2 via nghttp2_session_mem_recv
+ */
+static ssize_t async_http2_recv_callback(nghttp2_session *session, uint8_t *buf,
+                                         size_t length, int flags, void *user_data) {
+    /* Always return WOULDBLOCK - we handle recv externally */
+    return NGHTTP2_ERR_WOULDBLOCK;
+}
+
+/**
+ * HTTP/2 data provider read callback for request body
+ */
+static ssize_t async_http2_data_source_read_callback(nghttp2_session *session, int32_t stream_id,
+                                                      uint8_t *buf, size_t length, uint32_t *data_flags,
+                                                      nghttp2_data_source *source, void *user_data) {
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)user_data;
+
+    size_t remaining = stream_data->req_body_len - stream_data->req_body_sent;
+    size_t to_send = remaining < length ? remaining : length;
+
+    if (to_send > 0) {
+        memcpy(buf, stream_data->req_body + stream_data->req_body_sent, to_send);
+        stream_data->req_body_sent += to_send;
+    }
+
+    if (stream_data->req_body_sent >= stream_data->req_body_len) {
+        *data_flags |= NGHTTP2_DATA_FLAG_EOF;
+    }
+
+    return to_send;
+}
+
+/**
+ * HTTP/2 header callback for async
+ */
+static int async_http2_on_header_callback(nghttp2_session *session,
+                                           const nghttp2_frame *frame,
+                                           const uint8_t *name, size_t namelen,
+                                           const uint8_t *value, size_t valuelen,
+                                           uint8_t flags, void *user_data) {
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)nghttp2_session_get_stream_user_data(session, frame->hd.stream_id);
+    if (!stream_data) {
+        stream_data = (async_http2_stream_data_t *)user_data;
+    }
+    if (!stream_data) {
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    if (frame->hd.type != NGHTTP2_HEADERS || frame->headers.cat != NGHTTP2_HCAT_RESPONSE) {
+        return 0;
+    }
+
+    /* Handle :status pseudo-header */
+    if (namelen == 7 && memcmp(name, ":status", 7) == 0) {
+        char status_str[4] = {0};
+        size_t copy_len = valuelen > 3 ? 3 : valuelen;
+        memcpy(status_str, value, copy_len);
+        stream_data->response->status_code = atoi(status_str);
+        return 0;
+    }
+
+    /* Add regular header */
+    httpmorph_response_add_header_internal(stream_data->response, (const char *)name,
+                                           namelen, (const char *)value, valuelen);
+    return 0;
+}
+
+/**
+ * HTTP/2 data chunk recv callback for async
+ */
+static int async_http2_on_data_chunk_recv_callback(nghttp2_session *session, uint8_t flags,
+                                                    int32_t stream_id, const uint8_t *data,
+                                                    size_t len, void *user_data) {
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)nghttp2_session_get_stream_user_data(session, stream_id);
+    if (!stream_data) {
+        stream_data = (async_http2_stream_data_t *)user_data;
+    }
+    if (!stream_data) {
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    /* Expand buffer if needed */
+    if (stream_data->data_len + len > stream_data->data_capacity) {
+        size_t sum = stream_data->data_len + len;
+        if (sum > SIZE_MAX / 2) {
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+        size_t new_capacity = sum * 2;
+        uint8_t *new_buf = realloc(stream_data->data_buf, new_capacity);
+        if (!new_buf) return NGHTTP2_ERR_CALLBACK_FAILURE;
+        stream_data->data_buf = new_buf;
+        stream_data->data_capacity = new_capacity;
+    }
+
+    memcpy(stream_data->data_buf + stream_data->data_len, data, len);
+    stream_data->data_len += len;
+    return 0;
+}
+
+/**
+ * HTTP/2 frame recv callback for async
+ */
+static int async_http2_on_frame_recv_callback(nghttp2_session *session,
+                                               const nghttp2_frame *frame, void *user_data) {
+    async_http2_stream_data_t *stream_data = NULL;
+    if (frame->hd.stream_id > 0) {
+        stream_data = (async_http2_stream_data_t *)nghttp2_session_get_stream_user_data(session, frame->hd.stream_id);
+    }
+    if (!stream_data) {
+        stream_data = (async_http2_stream_data_t *)user_data;
+    }
+    if (!stream_data) {
+        return 0;
+    }
+
+    if (frame->hd.type == NGHTTP2_HEADERS &&
+        frame->headers.cat == NGHTTP2_HCAT_RESPONSE) {
+        stream_data->headers_complete = true;
+    }
+
+    /* Check if stream is closed */
+    if ((frame->hd.type == NGHTTP2_HEADERS || frame->hd.type == NGHTTP2_DATA) &&
+        (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) &&
+        frame->hd.stream_id > 0) {
+        stream_data->stream_closed = true;
+        /* Update async request state */
+        if (stream_data->req) {
+            ((async_request_t *)stream_data->req)->http2_stream_closed = true;
+        }
+    }
+    return 0;
+}
+
+/**
+ * State: Initialize HTTP/2 session
+ * Handles both new sessions and reused sessions from the connection pool
+ */
+static int step_http2_init(async_request_t *req) {
+    DEBUG_PRINT("[async_request] HTTP/2 init (id=%lu, reused=%d)\n",
+           (unsigned long)req->id, req->http2_session_initialized);
+
+    nghttp2_session *session = (nghttp2_session *)req->http2_session;
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)req->http2_stream_data;
+    bool is_reused_session = (session != NULL && req->http2_session_initialized);
+
+    /* For reused sessions, we need to prepare new stream data for this request */
+    if (is_reused_session) {
+        /* Reset/reallocate stream data for the new request */
+        if (stream_data) {
+            /* Reset existing stream data for reuse */
+            stream_data->req = req;
+            stream_data->response = req->response;
+            stream_data->ssl = req->ssl;
+            stream_data->data_len = 0;
+            stream_data->send_len = 0;
+            stream_data->send_pos = 0;
+            stream_data->recv_len = 0;
+            stream_data->stream_closed = false;
+            stream_data->headers_complete = false;
+            stream_data->req_body = (const uint8_t *)req->request->body;
+            stream_data->req_body_len = req->request->body_len;
+            stream_data->req_body_sent = 0;
+            stream_data->last_ssl_want = 0;
+
+            /* Update nghttp2 session's user data to point to the reset stream_data */
+            nghttp2_session_set_user_data(session, stream_data);
+        } else {
+            /* Need to create new stream data for reused session */
+            goto create_stream_data;
+        }
+    } else {
+create_stream_data:
+        /* Create new stream data structure */
+        stream_data = calloc(1, sizeof(async_http2_stream_data_t));
+        if (!stream_data) {
+            async_request_set_error(req, HTTPMORPH_ERROR_MEMORY, "Failed to allocate HTTP/2 stream data");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        stream_data->req = req;
+        stream_data->response = req->response;
+        stream_data->ssl = req->ssl;
+
+        /* Allocate response body buffer */
+        stream_data->data_capacity = 16384;
+        stream_data->data_buf = malloc(stream_data->data_capacity);
+        if (!stream_data->data_buf) {
+            free(stream_data);
+            async_request_set_error(req, HTTPMORPH_ERROR_MEMORY, "Failed to allocate HTTP/2 buffer");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        /* Allocate send buffer for nghttp2 output */
+        stream_data->send_capacity = 32768;
+        stream_data->send_buf = malloc(stream_data->send_capacity);
+        if (!stream_data->send_buf) {
+            free(stream_data->data_buf);
+            free(stream_data);
+            async_request_set_error(req, HTTPMORPH_ERROR_MEMORY, "Failed to allocate HTTP/2 send buffer");
+            return ASYNC_STATUS_ERROR;
+        }
+        stream_data->send_len = 0;
+        stream_data->send_pos = 0;
+
+        /* Allocate receive buffer for SSL_read data */
+        stream_data->recv_capacity = 16384;
+        stream_data->recv_buf = malloc(stream_data->recv_capacity);
+        if (!stream_data->recv_buf) {
+            free(stream_data->send_buf);
+            free(stream_data->data_buf);
+            free(stream_data);
+            async_request_set_error(req, HTTPMORPH_ERROR_MEMORY, "Failed to allocate HTTP/2 recv buffer");
+            return ASYNC_STATUS_ERROR;
+        }
+        stream_data->recv_len = 0;
+
+        /* Set up request body if present */
+        stream_data->req_body = (const uint8_t *)req->request->body;
+        stream_data->req_body_len = req->request->body_len;
+        stream_data->req_body_sent = 0;
+
+        req->http2_stream_data = stream_data;
+    }
+
+    /* For new sessions, create the nghttp2 session and send preface */
+    if (!is_reused_session) {
+        /* Create nghttp2 callbacks */
+        nghttp2_session_callbacks *callbacks = NULL;
+        int cb_rv = nghttp2_session_callbacks_new(&callbacks);
+
+        if (cb_rv != 0 || !callbacks) {
+            free(stream_data->recv_buf);
+            free(stream_data->send_buf);
+            free(stream_data->data_buf);
+            free(stream_data);
+            req->http2_stream_data = NULL;
+            async_request_set_error(req, -1, "Failed to create nghttp2 callbacks");
+            return ASYNC_STATUS_ERROR;
+        }
+
+        nghttp2_session_callbacks_set_send_callback(callbacks, async_http2_send_callback);
+        nghttp2_session_callbacks_set_recv_callback(callbacks, async_http2_recv_callback);
+        nghttp2_session_callbacks_set_on_header_callback(callbacks, async_http2_on_header_callback);
+        nghttp2_session_callbacks_set_on_data_chunk_recv_callback(callbacks, async_http2_on_data_chunk_recv_callback);
+        nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks, async_http2_on_frame_recv_callback);
+        req->http2_callbacks = callbacks;
+
+        /* Create HTTP/2 session */
+        int rv = nghttp2_session_client_new(&session, callbacks, stream_data);
+        if (rv != 0) {
+            nghttp2_session_callbacks_del(callbacks);
+            free(stream_data->recv_buf);
+            free(stream_data->send_buf);
+            free(stream_data->data_buf);
+            free(stream_data);
+            req->http2_stream_data = NULL;
+            req->http2_callbacks = NULL;
+            async_request_set_error(req, -1, "Failed to create HTTP/2 session");
+            return ASYNC_STATUS_ERROR;
+        }
+        req->http2_session = session;
+
+        /* Send HTTP/2 preface and settings (Chrome-like) - only for new sessions */
+        nghttp2_settings_entry iv[4];
+        iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+        iv[0].value = 65536;
+        iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+        iv[1].value = 0;
+        iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+        iv[2].value = 6291456;
+        iv[3].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
+        iv[3].value = 262144;
+
+        nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 4);
+        nghttp2_submit_window_update(session, NGHTTP2_FLAG_NONE, 0, 15663105);
+
+        DEBUG_PRINT("[async_request] Created new HTTP/2 session (id=%lu)\n", (unsigned long)req->id);
+    } else {
+        DEBUG_PRINT("[async_request] Reusing existing HTTP/2 session (id=%lu)\n", (unsigned long)req->id);
+    }
+
+    /* Prepare request headers */
+    nghttp2_nv hdrs[64];
+    int nhdrs = 0;
+
+    const char *method_str = httpmorph_method_to_string(req->request->method);
+    const char *host = req->request->host;
+
+    /* Extract path from URL */
+    const char *path = strchr(req->request->url, '/');
+    if (path && path[0] == '/' && path[1] == '/') {
+        path = strchr(path + 2, '/');
+    }
+    if (!path || path[0] != '/') {
+        path = "/";
+    }
+
+    /* Add pseudo-headers in Chrome order: m,a,s,p */
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":method", (uint8_t *)method_str, 7, strlen(method_str), NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":authority", (uint8_t *)host, 10, strlen(host), NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":scheme", (uint8_t *)"https", 7, 5, NGHTTP2_NV_FLAG_NONE};
+    hdrs[nhdrs++] = (nghttp2_nv){(uint8_t *)":path", (uint8_t *)path, 5, strlen(path), NGHTTP2_NV_FLAG_NONE};
+
+    /* Add custom headers */
+    for (size_t i = 0; i < req->request->header_count && nhdrs < 60; i++) {
+        if (strcasecmp(req->request->headers[i].key, "host") == 0) continue;
+        hdrs[nhdrs++] = (nghttp2_nv){
+            (uint8_t *)req->request->headers[i].key,
+            (uint8_t *)req->request->headers[i].value,
+            strlen(req->request->headers[i].key),
+            strlen(req->request->headers[i].value),
+            NGHTTP2_NV_FLAG_NONE
+        };
+    }
+
+    /* Set up data provider if request has a body */
+    nghttp2_data_provider data_prd;
+    nghttp2_data_provider *data_prd_ptr = NULL;
+    if (stream_data->req_body_len > 0) {
+        data_prd.source.ptr = NULL;
+        data_prd.read_callback = async_http2_data_source_read_callback;
+        data_prd_ptr = &data_prd;
+    }
+
+    /* Chrome default priority */
+    nghttp2_priority_spec pri_spec;
+    nghttp2_priority_spec_init(&pri_spec, 0, 256, 1);
+
+    /* Submit request to the session */
+    int32_t stream_id = nghttp2_submit_request(session, &pri_spec, hdrs, nhdrs, data_prd_ptr, stream_data);
+    if (stream_id < 0) {
+        async_request_set_error(req, -1, "Failed to submit HTTP/2 request");
+        return ASYNC_STATUS_ERROR;
+    }
+    req->http2_stream_id = stream_id;
+    req->http2_session_initialized = true;
+    req->http2_stream_closed = false;
+
+    DEBUG_PRINT("[async_request] HTTP/2 request submitted, stream_id=%d, reused=%d (id=%lu)\n",
+           stream_id, is_reused_session, (unsigned long)req->id);
+
+    /* Transition to send state - return NEED_WRITE to yield control to event loop */
+    req->state = ASYNC_STATE_HTTP2_SEND;
+    return ASYNC_STATUS_NEED_WRITE;
+}
+
+/**
+ * State: Send HTTP/2 frames
+ * Uses buffered I/O: nghttp2 writes to buffer, we do non-blocking SSL_write
+ */
+static int step_http2_send(async_request_t *req) {
+    nghttp2_session *session = (nghttp2_session *)req->http2_session;
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)req->http2_stream_data;
+
+    if (!session || !stream_data) {
+        async_request_set_error(req, -1, "HTTP/2 session or stream_data is NULL");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Check if stream already completed (from callback) */
+    if (stream_data && (stream_data->stream_closed || req->http2_stream_closed)) {
+        req->state = ASYNC_STATE_HTTP2_RECV;
+        return ASYNC_STATUS_NEED_READ;  /* Let recv state handle completion */
+    }
+
+    /* First, let nghttp2 generate any pending data into our buffer */
+    int rv = nghttp2_session_send(session);
+    if (rv < 0 && rv != NGHTTP2_ERR_WOULDBLOCK) {
+        char err_msg[128];
+        snprintf(err_msg, sizeof(err_msg), "HTTP/2 send error: %s", nghttp2_strerror(rv));
+        async_request_set_error(req, rv, err_msg);
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Now do actual SSL_write on buffered data */
+    while (stream_data->send_pos < stream_data->send_len) {
+        size_t remaining = stream_data->send_len - stream_data->send_pos;
+        ERR_clear_error();
+        int written = SSL_write(req->ssl, stream_data->send_buf + stream_data->send_pos, remaining);
+
+        if (written <= 0) {
+            int ssl_err = SSL_get_error(req->ssl, written);
+            if (ssl_err == SSL_ERROR_WANT_WRITE) {
+                stream_data->last_ssl_want = SSL_ERROR_WANT_WRITE;
+                return ASYNC_STATUS_NEED_WRITE;
+            } else if (ssl_err == SSL_ERROR_WANT_READ) {
+                /* TLS renegotiation - need to read first */
+                stream_data->last_ssl_want = SSL_ERROR_WANT_READ;
+                return ASYNC_STATUS_NEED_READ;
+            } else {
+                async_request_set_error(req, ssl_err, "HTTP/2 SSL write failed");
+                return ASYNC_STATUS_ERROR;
+            }
+        }
+
+        stream_data->send_pos += written;
+    }
+
+    /* All data sent - reset buffer */
+    stream_data->send_len = 0;
+    stream_data->send_pos = 0;
+
+    /* Check if nghttp2 wants to write more */
+    if (nghttp2_session_want_write(session)) {
+        /* Generate more data - but need to yield to event loop first */
+        /* Return NEED_WRITE so polling will wait for socket and re-enter */
+        return ASYNC_STATUS_NEED_WRITE;
+    }
+
+    /* Transition to receive state */
+    req->state = ASYNC_STATE_HTTP2_RECV;
+
+    /* Check if we need to read */
+    if (nghttp2_session_want_read(session)) {
+        return ASYNC_STATUS_NEED_READ;
+    }
+
+    /* Check if already complete */
+    if (stream_data && stream_data->stream_closed) {
+        /* Transition to recv state to finalize */
+        return ASYNC_STATUS_NEED_READ;
+    }
+
+    return ASYNC_STATUS_NEED_READ;
+}
+
+/**
+ * State: Receive HTTP/2 frames
+ * Uses buffered I/O: we do non-blocking SSL_read, then feed data to nghttp2_session_mem_recv
+ */
+static int step_http2_recv(async_request_t *req) {
+    nghttp2_session *session = (nghttp2_session *)req->http2_session;
+    async_http2_stream_data_t *stream_data = (async_http2_stream_data_t *)req->http2_stream_data;
+
+    if (!session || !stream_data) {
+        async_request_set_error(req, -1, "HTTP/2 recv: NULL session or stream_data");
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Check if stream already completed */
+    if (stream_data && (stream_data->stream_closed || req->http2_stream_closed)) {
+        goto complete;
+    }
+
+    /* Try non-blocking SSL_read */
+    ERR_clear_error();
+    int n = SSL_read(req->ssl, stream_data->recv_buf, stream_data->recv_capacity);
+
+    if (n <= 0) {
+        int ssl_err = SSL_get_error(req->ssl, n);
+        if (ssl_err == SSL_ERROR_WANT_READ) {
+            /* Check if we need to send (e.g., WINDOW_UPDATE) */
+            if (nghttp2_session_want_write(session)) {
+                req->state = ASYNC_STATE_HTTP2_SEND;
+                return ASYNC_STATUS_NEED_WRITE;
+            }
+            return ASYNC_STATUS_NEED_READ;
+        } else if (ssl_err == SSL_ERROR_WANT_WRITE) {
+            /* TLS renegotiation */
+            return ASYNC_STATUS_NEED_WRITE;
+        } else if (ssl_err == SSL_ERROR_ZERO_RETURN || n == 0) {
+            /* Connection closed - check if we got response */
+            if (stream_data && stream_data->headers_complete) {
+                goto complete;
+            }
+            async_request_set_error(req, -1, "HTTP/2 connection closed unexpectedly");
+            return ASYNC_STATUS_ERROR;
+        } else {
+            async_request_set_error(req, ssl_err, "HTTP/2 SSL read failed");
+            return ASYNC_STATUS_ERROR;
+        }
+    }
+
+    /* Feed received data to nghttp2 */
+    ssize_t rv = nghttp2_session_mem_recv(session, stream_data->recv_buf, n);
+
+    if (rv < 0) {
+        char err_msg[128];
+        snprintf(err_msg, sizeof(err_msg), "HTTP/2 recv error: %s", nghttp2_strerror((int)rv));
+        async_request_set_error(req, (int)rv, err_msg);
+        return ASYNC_STATUS_ERROR;
+    }
+
+    /* Check if stream is complete (from callback during recv) */
+    if (stream_data && (stream_data->stream_closed || req->http2_stream_closed)) {
+        goto complete;
+    }
+
+    /* Check if we need to send (e.g., WINDOW_UPDATE, PING response, SETTINGS ACK) */
+    if (nghttp2_session_want_write(session)) {
+        req->state = ASYNC_STATE_HTTP2_SEND;
+        return ASYNC_STATUS_NEED_WRITE;  /* Go send first */
+    }
+
+    /* Check if there might be more SSL data buffered */
+    if (SSL_pending(req->ssl) > 0) {
+        return ASYNC_STATUS_NEED_READ;  /* Read more - socket is ready */
+    }
+
+    /* Continue receiving if session wants to */
+    if (nghttp2_session_want_read(session)) {
+        return ASYNC_STATUS_NEED_READ;
+    }
+
+    /* Session doesn't want to read or write */
+    /* If we have headers, consider it complete (some servers don't send END_STREAM) */
+    if (stream_data && stream_data->headers_complete) {
+        goto complete;
+    }
+
+    /* Still waiting for headers - continue receiving */
+    return ASYNC_STATUS_NEED_READ;
+
+complete:
+    /* Set response body */
+    if (stream_data && stream_data->data_len > 0) {
+        req->response->body = malloc(stream_data->data_len + 1);
+        if (req->response->body) {
+            memcpy(req->response->body, stream_data->data_buf, stream_data->data_len);
+            req->response->body[stream_data->data_len] = '\0';
+            req->response->body_len = stream_data->data_len;
+        }
+    }
+
+    DEBUG_PRINT("[async_request] HTTP/2 complete, status=%d, body_len=%zu (id=%lu)\n",
+           req->response->status_code, req->response->body_len, (unsigned long)req->id);
+
+    req->state = ASYNC_STATE_COMPLETE;
+    if (req->on_complete) {
+        req->on_complete(req, ASYNC_STATUS_COMPLETE);
+    }
+    return ASYNC_STATUS_COMPLETE;
+}
+
+#endif /* HAVE_NGHTTP2 */
+
 /**
  * Step the async request state machine
  */
@@ -2153,6 +3088,17 @@ int async_request_step(async_request_t *req) {
 
         case ASYNC_STATE_RECEIVING_BODY:
             return step_receiving_body(req);
+
+#ifdef HAVE_NGHTTP2
+        case ASYNC_STATE_HTTP2_INIT:
+            return step_http2_init(req);
+
+        case ASYNC_STATE_HTTP2_SEND:
+            return step_http2_send(req);
+
+        case ASYNC_STATE_HTTP2_RECV:
+            return step_http2_recv(req);
+#endif
 
         case ASYNC_STATE_COMPLETE:
             /* Already complete */

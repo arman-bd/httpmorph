@@ -15,7 +15,12 @@ import asyncio
 import select
 import socket
 import sys
+import concurrent.futures
+from urllib.parse import urlparse
 from typing import Optional, Dict, Any
+
+# Thread pool for blocking operations (DNS)
+_dns_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="dns_")
 
 
 # External C declarations
@@ -90,6 +95,10 @@ cdef extern from "../core/async_request_manager.h":
         uint64_t request_id
     ) nogil
     int async_manager_cancel_request(
+        async_request_manager_t *mgr,
+        uint64_t request_id
+    ) nogil
+    int async_manager_remove_request(
         async_request_manager_t *mgr,
         uint64_t request_id
     ) nogil
@@ -268,9 +277,6 @@ cdef class AsyncRequestManager:
             httpmorph_request_set_verify_ssl(req, verify)
 
             # Set proxy if provided
-            # WARNING: Proxy support is NOT implemented in the async I/O engine yet.
-            # The proxy will be set on the request object but IGNORED during execution.
-            # See ASYNC_PROXY_BUG_REPORT.md for details and implementation plan.
             if proxy:
                 if isinstance(proxy, dict):
                     # Handle proxies dict like requests library: {'http': 'http://...', 'https': 'http://...'}
@@ -294,7 +300,6 @@ cdef class AsyncRequestManager:
                             c_password = <const char*>password_bytes
 
                     httpmorph_request_set_proxy(req, <const char*>proxy_bytes, c_username, c_password)
-                    # TODO: Raise warning or error until C-level proxy support is implemented
 
             # Add headers
             if headers:
@@ -336,97 +341,147 @@ cdef class AsyncRequestManager:
         finally:
             httpmorph_request_destroy(req)
 
-    async def _poll_request(self, uint64_t request_id, future):
-        """Poll a request until it completes"""
-        # Declare all cdef variables at the top
+    def _step_request_sync(self, uint64_t request_id):
+        """Synchronous step for use in thread pool (handles blocking DNS)"""
         cdef async_request_t *req = NULL
         cdef int status
         cdef int fd
+
+        req = async_manager_get_request(self._manager, request_id)
+        if req is NULL:
+            return (ASYNC_STATUS_ERROR, -1, "Request not found")
+
+        try:
+            with nogil:
+                status = async_request_step(req)
+            fd = async_request_get_fd(req)
+            return (status, fd, None)
+        finally:
+            async_request_unref(req)
+
+    async def _poll_request(self, uint64_t request_id, future):
+        """Poll a request until it completes using true async I/O.
+
+        Uses asyncio's add_reader/add_writer to wait for socket readiness
+        instead of busy-polling. DNS and initial connection steps run in
+        a thread pool since they can block.
+        """
+        cdef async_request_t *req = NULL
+        cdef async_request_manager_t *mgr = self._manager
+        cdef int status
+        cdef int fd
         cdef async_request_state_t state
-        cdef bint is_timeout
+
+        loop = asyncio.get_running_loop()
 
         while not future.done():
-            # Get request (adds a reference)
-            req = async_manager_get_request(self._manager, request_id)
-
+            # Get current request state
+            req = async_manager_get_request(mgr, request_id)
             if req is NULL:
                 future.set_exception(RuntimeError("Request not found"))
                 return
 
             try:
-                # Check for timeout
-                is_timeout = async_request_is_timeout(req)
-
-                if is_timeout:
-                    async_request_unref(req)
-                    future.set_exception(TimeoutError("Request timed out"))
-                    return
-
-                # Step the state machine (always, even without FD for early states)
-                status = async_request_step(req)
-
-                if status == ASYNC_STATUS_COMPLETE:
-                    # Request completed successfully
-                    response = self._extract_response(req)
-                    async_request_unref(req)
-                    future.set_result(response)
-                    return
-
-                elif status == ASYNC_STATUS_ERROR:
-                    # Request failed
-                    state = async_request_get_state(req)
-                    state_name = async_request_state_name(state).decode('utf-8') if state else "UNKNOWN"
-
-                    # Get error message from request
-                    error_msg_ptr = async_request_get_error_message(req)
-                    error_msg = error_msg_ptr.decode('utf-8') if error_msg_ptr is not NULL else "Unknown error"
-
-                    async_request_unref(req)
-                    future.set_exception(RuntimeError(f"Request failed in state {state_name}: {error_msg}"))
-                    return
-
-                elif status == ASYNC_STATUS_NEED_READ or status == ASYNC_STATUS_NEED_WRITE:
-                    # Get file descriptor for event loop integration
-                    fd = async_request_get_fd(req)
-
-                    if fd >= 0 and self._loop:
-                        try:
-                            # Try to use efficient event loop integration (Unix: epoll/kqueue)
-                            if status == ASYNC_STATUS_NEED_READ:
-                                # Wait for socket to be readable
-                                read_event = asyncio.Event()
-                                self._loop.add_reader(fd, read_event.set)
-                                try:
-                                    await asyncio.wait_for(read_event.wait(), timeout=0.1)
-                                except asyncio.TimeoutError:
-                                    pass  # Continue polling
-                                finally:
-                                    self._loop.remove_reader(fd)
-                            else:  # ASYNC_STATUS_NEED_WRITE
-                                # Wait for socket to be writable
-                                write_event = asyncio.Event()
-                                self._loop.add_writer(fd, write_event.set)
-                                try:
-                                    await asyncio.wait_for(write_event.wait(), timeout=0.1)
-                                except asyncio.TimeoutError:
-                                    pass  # Continue polling
-                                finally:
-                                    self._loop.remove_writer(fd)
-                        except NotImplementedError:
-                            # Windows ProactorEventLoop doesn't support add_reader/add_writer
-                            # Fall back to short sleep - select() doesn't work reliably with raw FDs on Windows
-                            await asyncio.sleep(0.001)
-                    else:
-                        # FD not ready yet, short sleep
-                        await asyncio.sleep(0.001)
-
-                else:
-                    # In progress, continue with short delay
-                    await asyncio.sleep(0.001)
-
+                state = async_request_get_state(req)
+                fd = async_request_get_fd(req)
             finally:
-                # Always unref the request we got at the start of the loop
                 async_request_unref(req)
+
+            # For DNS_LOOKUP and initial CONNECTING states, use thread pool
+            # since these can block (getaddrinfo is blocking)
+            if state in (ASYNC_STATE_INIT, ASYNC_STATE_DNS_LOOKUP, ASYNC_STATE_CONNECTING) and fd < 0:
+                result = await loop.run_in_executor(
+                    _dns_executor,
+                    self._step_request_sync,
+                    request_id
+                )
+                status, fd, error = result
+                if error:
+                    future.set_exception(RuntimeError(error))
+                    return
+            else:
+                # For states with a valid fd, use non-blocking step
+                req = async_manager_get_request(mgr, request_id)
+                if req is not NULL:
+                    with nogil:
+                        status = async_request_step(req)
+                        fd = async_request_get_fd(req)
+                    async_request_unref(req)
+                else:
+                    status = ASYNC_STATUS_ERROR
+
+            # Handle status
+            if status == ASYNC_STATUS_COMPLETE:
+                req = async_manager_get_request(mgr, request_id)
+                if req is not NULL:
+                    try:
+                        response = self._extract_response(req)
+                        future.set_result(response)
+                    finally:
+                        async_request_unref(req)
+                    # Remove from manager AFTER extracting response to avoid race conditions
+                    async_manager_remove_request(mgr, request_id)
+                else:
+                    future.set_exception(RuntimeError("Request completed but not found"))
+                return
+
+            elif status == ASYNC_STATUS_ERROR:
+                req = async_manager_get_request(mgr, request_id)
+                if req is not NULL:
+                    try:
+                        state = async_request_get_state(req)
+                        state_name = async_request_state_name(state).decode('utf-8') if state else "UNKNOWN"
+                        error_msg_ptr = async_request_get_error_message(req)
+                        error_msg = error_msg_ptr.decode('utf-8') if error_msg_ptr is not NULL else "Unknown error"
+                    finally:
+                        async_request_unref(req)
+                else:
+                    state_name = "UNKNOWN"
+                    error_msg = "Unknown error"
+                # Remove from manager AFTER extracting error info to avoid race conditions
+                async_manager_remove_request(mgr, request_id)
+                future.set_exception(RuntimeError(f"Request failed in state {state_name}: {error_msg}"))
+                return
+
+            elif status == ASYNC_STATUS_NEED_READ and fd >= 0:
+                # Wait for socket to become readable using asyncio
+                await self._wait_for_fd(loop, fd, read=True)
+
+            elif status == ASYNC_STATUS_NEED_WRITE and fd >= 0:
+                # Wait for socket to become writable using asyncio
+                await self._wait_for_fd(loop, fd, read=False)
+
+            else:
+                # ASYNC_STATUS_IN_PROGRESS or no fd yet - yield and continue
+                await asyncio.sleep(0)
+
+    async def _wait_for_fd(self, loop, int fd, bint read):
+        """Wait for a file descriptor to become ready using asyncio event loop."""
+        waiter = loop.create_future()
+
+        def callback():
+            if not waiter.done():
+                waiter.set_result(None)
+
+        try:
+            if read:
+                loop.add_reader(fd, callback)
+            else:
+                loop.add_writer(fd, callback)
+
+            # Wait with timeout to prevent infinite hangs
+            try:
+                await asyncio.wait_for(waiter, timeout=30.0)
+            except asyncio.TimeoutError:
+                pass  # Continue anyway, the C code will handle timeout
+        finally:
+            try:
+                if read:
+                    loop.remove_reader(fd)
+                else:
+                    loop.remove_writer(fd)
+            except (ValueError, OSError):
+                pass  # fd might be closed already
 
     cdef dict _extract_response(self, async_request_t *req):
         """Extract response from completed request"""
@@ -444,10 +499,14 @@ cdef class AsyncRequestManager:
             }
 
         # Build response dict
+        body_bytes = b''
+        if resp.body and resp.body_len > 0:
+            body_bytes = bytes(resp.body[:resp.body_len])
+
         result = {
             'status_code': resp.status_code,
             'headers': {},
-            'body': bytes(resp.body[:resp.body_len]) if resp.body else b'',
+            'body': body_bytes,
             'http_version': resp.http_version,
             'connect_time_us': resp.connect_time_us,
             'tls_time_us': resp.tls_time_us,

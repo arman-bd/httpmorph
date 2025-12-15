@@ -391,6 +391,63 @@ httpmorph_response_t* httpmorph_session_request(
  */
 size_t httpmorph_session_cookie_count(httpmorph_session_t *session);
 
+/* Connection Pool API */
+
+/**
+ * Pre-warm connections to a host
+ * Establishes connections proactively for faster subsequent requests
+ *
+ * @param client HTTP client to use for connection setup
+ * @param host Target hostname
+ * @param port Target port (0 uses default: 443 for TLS, 80 for HTTP)
+ * @param use_tls Whether to establish TLS connections
+ * @param count Number of connections to pre-warm
+ * @return Number of connections successfully pre-warmed
+ */
+int httpmorph_pool_prewarm(
+    httpmorph_client_t *client,
+    const char *host,
+    int port,
+    bool use_tls,
+    int count
+);
+
+/**
+ * Configure connection pool settings
+ *
+ * @param pool Connection pool to configure
+ * @param idle_timeout_seconds Idle timeout in seconds (0 = default 30s)
+ * @param max_connections_per_host Max connections per host (0 = default 6)
+ * @param max_total_connections Max total connections (0 = default 100)
+ */
+void httpmorph_pool_configure(
+    httpmorph_pool_t *pool,
+    int idle_timeout_seconds,
+    int max_connections_per_host,
+    int max_total_connections
+);
+
+/**
+ * Get connection pool statistics
+ *
+ * @param pool Connection pool
+ * @param total_connections Output: total connections in pool
+ * @param active_connections Output: active connections
+ */
+void httpmorph_pool_stats(
+    httpmorph_pool_t *pool,
+    int *total_connections,
+    int *active_connections
+);
+
+/**
+ * Clean up idle connections in the pool
+ * Removes connections that have been idle longer than the timeout
+ *
+ * @param pool Connection pool to clean up
+ */
+void httpmorph_pool_cleanup_idle(httpmorph_pool_t *pool);
+
 /* Async I/O API */
 
 /**

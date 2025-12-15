@@ -6,6 +6,7 @@
 #include "internal/tls.h"
 #include "internal/network.h"
 #include "buffer_pool.h"
+#include "connection_pool.h"
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -208,10 +209,12 @@ httpmorph_client_t* httpmorph_client_create(void) {
     SSL_CTX_set_default_verify_paths(client->ssl_ctx);
 #endif
 
-    /* Disable SSL session caching to avoid BoringSSL state issues */
-    SSL_CTX_set_session_cache_mode(client->ssl_ctx, SSL_SESS_CACHE_OFF);
+    /* Enable SSL session caching for TLS session resumption
+     * This significantly speeds up subsequent TLS connections to the same host
+     * by reusing the negotiated session parameters (0-RTT or 1-RTT resumption) */
+    SSL_CTX_set_session_cache_mode(client->ssl_ctx, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL);
 
-    /* Set session timeout (5 minutes = 300 seconds) - still set even if caching is off */
+    /* Set session timeout (5 minutes = 300 seconds) */
     SSL_CTX_set_timeout(client->ssl_ctx, 300);
 
     /* Enable session ticket support for TLS 1.3 and better TLS 1.2 resumption */
@@ -228,12 +231,13 @@ httpmorph_client_t* httpmorph_client_create(void) {
     client->max_redirects = 10;
     client->io_engine = default_io_engine;
 
-    /* Default to Chrome browser profile - but DON'T configure SSL_CTX here.
-     * SSL_CTX configuration happens in session.c when the actual profile is known.
-     * This is because SSL_CTX_add_cert_compression_alg() and similar functions
-     * ADD to the context rather than replacing, so we can't reconfigure later. */
+    /* Default to Chrome 143 browser profile for proper TLS fingerprinting */
     client->browser_profile = &PROFILE_CHROME_143;
-    client->ssl_ctx_configured = false;  /* Mark as not yet configured */
+
+    /* Configure SSL_CTX with browser profile for Chrome-like TLS fingerprint.
+     * This sets cipher suites, extensions, GREASE, etc. to match Chrome. */
+    httpmorph_configure_ssl_ctx(client->ssl_ctx, client->browser_profile);
+    client->ssl_ctx_configured = true;
 
     /* Create buffer pool for response bodies */
     client->buffer_pool = buffer_pool_create();
@@ -242,6 +246,23 @@ httpmorph_client_t* httpmorph_client_create(void) {
         free(client);
         return NULL;
     }
+
+    /* Create connection pool for keep-alive */
+    client->pool = pool_create();
+    if (!client->pool) {
+        buffer_pool_destroy(client->buffer_pool);
+        SSL_CTX_free(client->ssl_ctx);
+        free(client);
+        return NULL;
+    }
+
+    /* Initialize TLS session cache mutex */
+    client->session_cache_count = 0;
+#ifdef _WIN32
+    InitializeCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_init(&client->session_cache_mutex, NULL);
+#endif
 
     return client;
 }
@@ -279,6 +300,23 @@ void httpmorph_client_destroy(httpmorph_client_t *client) {
     if (!client) {
         return;
     }
+
+    /* Destroy connection pool first (closes all pooled connections) */
+    if (client->pool) {
+        pool_destroy(client->pool);
+    }
+
+    /* Free TLS session cache entries */
+    for (int i = 0; i < client->session_cache_count; i++) {
+        if (client->session_cache[i].session) {
+            SSL_SESSION_free(client->session_cache[i].session);
+        }
+    }
+#ifdef _WIN32
+    DeleteCriticalSection(&client->session_cache_mutex);
+#else
+    pthread_mutex_destroy(&client->session_cache_mutex);
+#endif
 
     if (client->ssl_ctx) {
         SSL_CTX_free(client->ssl_ctx);
