@@ -3,7 +3,9 @@
  */
 
 #include "async_request_manager.h"
+#include "connection_pool.h"
 #include "internal/tls.h"
+#include "../tls/browser_profiles.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +52,7 @@ async_request_manager_t* async_manager_create(void) {
         return NULL;
     }
 
-    /* Configure SSL context */
+    /* Configure SSL context - use minimal configuration for async to avoid conflicts */
     SSL_CTX_set_verify(mgr->ssl_ctx, SSL_VERIFY_PEER, NULL);
 #ifdef _WIN32
     /* On Windows, load certificates from Windows Certificate Store */
@@ -60,10 +62,29 @@ async_request_manager_t* async_manager_create(void) {
     SSL_CTX_set_default_verify_paths(mgr->ssl_ctx);
 #endif
 
+    /* Enable SSL session caching for TLS session resumption */
+    SSL_CTX_set_session_cache_mode(mgr->ssl_ctx, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL);
+    SSL_CTX_set_timeout(mgr->ssl_ctx, 300);  /* 5 minute session timeout */
+
+    /* Configure SSL_CTX with Chrome 143 browser profile for proper TLS fingerprinting.
+     * This sets cipher suites, extensions, GREASE, ALPN, etc. to match Chrome's JA4 fingerprint.
+     * Note: httpmorph_configure_ssl_ctx already configures ALPN for HTTP/2 from the profile. */
+    httpmorph_configure_ssl_ctx(mgr->ssl_ctx, &PROFILE_CHROME_143);
+
+    /* Create connection pool for reuse */
+    mgr->pool = pool_create();
+    if (!mgr->pool) {
+        SSL_CTX_free(mgr->ssl_ctx);
+        io_engine_destroy(mgr->io_engine);
+        free(mgr);
+        return NULL;
+    }
+
     /* Allocate request array */
     mgr->request_capacity = INITIAL_CAPACITY;
     mgr->requests = calloc(mgr->request_capacity, sizeof(async_request_t*));
     if (!mgr->requests) {
+        pool_destroy(mgr->pool);
         SSL_CTX_free(mgr->ssl_ctx);
         io_engine_destroy(mgr->io_engine);
         free(mgr);
@@ -149,6 +170,11 @@ void async_manager_destroy(async_request_manager_t *mgr) {
     free(mgr->requests);
     pthread_mutex_unlock(&mgr->mutex);
 
+    /* Destroy connection pool */
+    if (mgr->pool) {
+        pool_destroy(mgr->pool);
+    }
+
     /* Destroy SSL context */
     if (mgr->ssl_ctx) {
         SSL_CTX_free(mgr->ssl_ctx);
@@ -206,11 +232,12 @@ uint64_t async_manager_submit_request(
 
     pthread_mutex_lock(&mgr->mutex);
 
-    /* Create async request */
-    async_request_t *req = async_request_create(
+    /* Create async request with connection pooling support */
+    async_request_t *req = async_request_create_pooled(
         request,
         mgr->io_engine,
         mgr->ssl_ctx,
+        mgr->pool,
         timeout_ms,
         callback,
         user_data
@@ -236,7 +263,7 @@ uint64_t async_manager_submit_request(
 
     /* Add to array */
     mgr->requests[mgr->request_count++] = req;
-    async_request_ref(req);  /* Manager holds a reference */
+    /* Note: The initial refcount=1 from creation IS the manager's reference */
 
     pthread_mutex_unlock(&mgr->mutex);
 
@@ -314,7 +341,46 @@ int async_manager_cancel_request(
 }
 
 /**
+ * Remove a completed request from the manager
+ * Should be called after extracting the response to prevent memory leaks
+ */
+int async_manager_remove_request(
+    async_request_manager_t *mgr,
+    uint64_t request_id)
+{
+    if (!mgr) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&mgr->mutex);
+    for (size_t i = 0; i < mgr->request_count; i++) {
+        if (mgr->requests[i] && mgr->requests[i]->id == request_id) {
+            async_request_t *req = mgr->requests[i];
+
+            /* Remove from array by shifting remaining elements */
+            for (size_t j = i; j < mgr->request_count - 1; j++) {
+                mgr->requests[j] = mgr->requests[j + 1];
+            }
+            mgr->request_count--;
+            mgr->requests[mgr->request_count] = NULL;
+
+            /* Release manager's reference */
+            async_request_unref(req);
+
+            pthread_mutex_unlock(&mgr->mutex);
+            DEBUG_PRINT("[async_manager] Removed request id=%lu\n", (unsigned long)request_id);
+            return 0;
+        }
+    }
+    pthread_mutex_unlock(&mgr->mutex);
+    return -1;  /* Request not found */
+}
+
+/**
  * Poll for events
+ * Note: Does NOT automatically clean up completed requests to avoid race conditions
+ * with concurrent Python coroutines. Python must call async_manager_remove_request()
+ * after extracting the response.
  */
 int async_manager_poll(async_request_manager_t *mgr, uint32_t timeout_ms) {
     if (!mgr) {
@@ -355,8 +421,9 @@ int async_manager_poll(async_request_manager_t *mgr, uint32_t timeout_ms) {
         }
     }
 
-    /* Clean up completed requests */
-    cleanup_completed_requests(mgr);
+    /* NOTE: We intentionally do NOT clean up completed requests here.
+     * Python coroutines must explicitly call async_manager_remove_request()
+     * after extracting the response to avoid race conditions. */
 
     pthread_mutex_unlock(&mgr->mutex);
 

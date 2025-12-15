@@ -629,6 +629,74 @@ class Client:
         """Execute an OPTIONS request"""
         return self.request("OPTIONS", url, **kwargs)
 
+    def prewarm(self, host, port=0, use_tls=True, count=1):
+        """Pre-warm connections to a host for faster subsequent requests
+
+        Establishes TCP/TLS connections proactively to eliminate connection
+        setup latency from subsequent requests.
+
+        Args:
+            host: Target hostname to pre-warm connections to
+            port: Target port (0 = default: 443 for TLS, 80 for HTTP)
+            use_tls: Whether to establish TLS connections (default: True)
+            count: Number of connections to pre-warm (default: 1)
+
+        Returns:
+            int: Number of connections successfully pre-warmed
+
+        Example:
+            >>> client = Client()
+            >>> client.prewarm('api.example.com', count=3)
+            3
+            >>> # Subsequent requests will reuse pre-warmed connections
+            >>> client.get('https://api.example.com/endpoint')
+        """
+        return self._client.prewarm(host, port, use_tls, count)
+
+    def configure_pool(self, idle_timeout_seconds=0, max_connections_per_host=0, max_total_connections=0):
+        """Configure connection pool settings
+
+        Args:
+            idle_timeout_seconds: Idle timeout before closing connections (default: 30s, 0 = keep default)
+            max_connections_per_host: Max connections per host (default: 6, 0 = keep default)
+            max_total_connections: Max total connections (default: 100, 0 = keep default)
+
+        Example:
+            >>> client = Client()
+            >>> # Keep connections alive for 60 seconds
+            >>> client.configure_pool(idle_timeout_seconds=60)
+            >>> # Allow more concurrent connections
+            >>> client.configure_pool(max_connections_per_host=10, max_total_connections=200)
+        """
+        return self._client.configure_pool(idle_timeout_seconds, max_connections_per_host, max_total_connections)
+
+    def pool_stats(self):
+        """Get connection pool statistics
+
+        Returns:
+            dict: Dictionary with 'total_connections' and 'active_connections'
+
+        Example:
+            >>> client = Client()
+            >>> client.get('https://example.com')
+            >>> stats = client.pool_stats()
+            >>> print(f"Total: {stats['total_connections']}, Active: {stats['active_connections']}")
+        """
+        return self._client.pool_stats()
+
+    def cleanup_idle_connections(self):
+        """Clean up idle connections in the pool
+
+        Removes connections that have been idle longer than the idle timeout.
+        Call this periodically for long-running applications to free resources.
+
+        Example:
+            >>> client = Client()
+            >>> # ... use client for a while ...
+            >>> client.cleanup_idle_connections()
+        """
+        return self._client.cleanup_idle_connections()
+
 
 class CookieDict(dict):
     """Dict-like wrapper for cookie jar with Set-Cookie parsing"""

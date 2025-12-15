@@ -83,6 +83,15 @@
 /* Forward declare buffer pool */
 typedef struct httpmorph_buffer_pool httpmorph_buffer_pool_t;
 
+/* TLS session cache entry (for session resumption across connections) */
+#define MAX_SESSION_CACHE_ENTRIES 64
+typedef struct tls_session_entry {
+    char host[256];
+    uint16_t port;
+    SSL_SESSION *session;
+    time_t created;
+} tls_session_entry_t;
+
 /**
  * HTTP client structure
  */
@@ -91,6 +100,15 @@ struct httpmorph_client {
     io_engine_t *io_engine;
     httpmorph_pool_t *pool;
     httpmorph_buffer_pool_t *buffer_pool;  /* Buffer pool for response bodies */
+
+    /* TLS session cache for session resumption */
+    tls_session_entry_t session_cache[MAX_SESSION_CACHE_ENTRIES];
+    int session_cache_count;
+#ifdef _WIN32
+    CRITICAL_SECTION session_cache_mutex;
+#else
+    pthread_mutex_t session_cache_mutex;
+#endif
 
     /* Configuration */
     uint32_t timeout_ms;

@@ -52,6 +52,45 @@ SSL* httpmorph_tls_connect(SSL_CTX *ctx, int sockfd, const char *hostname,
                             bool http2_enabled, bool verify_cert, uint64_t *tls_time);
 
 /**
+ * Establish TLS connection with session caching support
+ *
+ * @param client HTTP client (for session cache)
+ * @param sockfd Socket file descriptor
+ * @param hostname Hostname for SNI
+ * @param port Target port
+ * @param http2_enabled Whether HTTP/2 is enabled
+ * @param verify_cert Whether to verify server certificate
+ * @param tls_time Output: TLS handshake time in microseconds
+ * @return SSL* on success, NULL on error
+ */
+SSL* httpmorph_tls_connect_cached(httpmorph_client_t *client, int sockfd,
+                                   const char *hostname, uint16_t port,
+                                   bool http2_enabled, bool verify_cert,
+                                   uint64_t *tls_time);
+
+/**
+ * Store a TLS session in the client's cache
+ */
+void httpmorph_session_cache_put(httpmorph_client_t *client, const char *host,
+                                   uint16_t port, SSL_SESSION *session);
+
+/**
+ * Get a TLS session from the client's cache
+ */
+SSL_SESSION* httpmorph_session_cache_get(httpmorph_client_t *client, const char *host, uint16_t port);
+
+/**
+ * Get a TLS session from the global cache (for async requests)
+ * Returns NULL if not found. Caller should NOT free the returned session.
+ */
+SSL_SESSION* global_session_cache_get(const char *host, uint16_t port);
+
+/**
+ * Store a TLS session in the global cache (for async requests)
+ */
+void global_session_cache_put(const char *host, uint16_t port, SSL_SESSION *session);
+
+/**
  * Calculate JA3 fingerprint from SSL connection
  *
  * @param ssl SSL connection

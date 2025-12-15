@@ -131,6 +131,12 @@ cdef extern from "../include/httpmorph.h":
     httpmorph_response* httpmorph_session_request(httpmorph_session_t *session, const httpmorph_request_t *request) nogil
     size_t httpmorph_session_cookie_count(httpmorph_session_t *session) nogil
 
+    # Connection Pool API
+    int httpmorph_pool_prewarm(httpmorph_client_t *client, const char *host, int port, bint use_tls, int count) nogil
+    void httpmorph_pool_configure(httpmorph_pool_t *pool, int idle_timeout_seconds, int max_connections_per_host, int max_total_connections) nogil
+    void httpmorph_pool_stats(httpmorph_pool_t *pool, int *total_connections, int *active_connections) nogil
+    void httpmorph_pool_cleanup_idle(httpmorph_pool_t *pool) nogil
+
     # Async I/O API
     int httpmorph_pool_get_connection_fd(httpmorph_pool_t *pool, const char *host, uint16_t port) nogil
 
@@ -406,6 +412,91 @@ cdef class Client:
         host_bytes = host.encode('utf-8')
         cdef int fd = httpmorph_pool_get_connection_fd(pool, <const char*>host_bytes, port)
         return fd
+
+    def prewarm(self, str host, int port=0, bint use_tls=True, int count=1):
+        """Pre-warm connections to a host for faster subsequent requests
+
+        Establishes TCP/TLS connections proactively to eliminate connection
+        setup latency from subsequent requests.
+
+        Args:
+            host: Target hostname to pre-warm connections to
+            port: Target port (0 = default: 443 for TLS, 80 for HTTP)
+            use_tls: Whether to establish TLS connections (default: True)
+            count: Number of connections to pre-warm (default: 1)
+
+        Returns:
+            int: Number of connections successfully pre-warmed
+
+        Example:
+            >>> client = Client()
+            >>> client.prewarm('api.example.com', count=3)
+            3
+            >>> # Subsequent requests will reuse pre-warmed connections
+            >>> client.get('https://api.example.com/endpoint')
+        """
+        cdef bytes host_bytes = host.encode('utf-8')
+        cdef const char* c_host = <const char*>host_bytes
+        cdef int result
+        with nogil:
+            result = httpmorph_pool_prewarm(self._client, c_host, port, use_tls, count)
+        return result
+
+    def configure_pool(self, int idle_timeout_seconds=0, int max_connections_per_host=0, int max_total_connections=0):
+        """Configure connection pool settings
+
+        Args:
+            idle_timeout_seconds: Idle timeout before closing connections (default: 30s, 0 = keep default)
+            max_connections_per_host: Max connections per host (default: 6, 0 = keep default)
+            max_total_connections: Max total connections (default: 100, 0 = keep default)
+
+        Example:
+            >>> client = Client()
+            >>> # Keep connections alive for 60 seconds
+            >>> client.configure_pool(idle_timeout_seconds=60)
+            >>> # Allow more concurrent connections
+            >>> client.configure_pool(max_connections_per_host=10, max_total_connections=200)
+        """
+        cdef httpmorph_pool_t* pool = httpmorph_client_get_pool(self._client)
+        if pool is not NULL:
+            with nogil:
+                httpmorph_pool_configure(pool, idle_timeout_seconds, max_connections_per_host, max_total_connections)
+
+    def pool_stats(self):
+        """Get connection pool statistics
+
+        Returns:
+            dict: Dictionary with 'total_connections' and 'active_connections'
+
+        Example:
+            >>> client = Client()
+            >>> client.get('https://example.com')
+            >>> stats = client.pool_stats()
+            >>> print(f"Total: {stats['total_connections']}, Active: {stats['active_connections']}")
+        """
+        cdef httpmorph_pool_t* pool = httpmorph_client_get_pool(self._client)
+        cdef int total = 0
+        cdef int active = 0
+        if pool is not NULL:
+            with nogil:
+                httpmorph_pool_stats(pool, &total, &active)
+        return {'total_connections': total, 'active_connections': active}
+
+    def cleanup_idle_connections(self):
+        """Clean up idle connections in the pool
+
+        Removes connections that have been idle longer than the idle timeout.
+        Call this periodically for long-running applications to free resources.
+
+        Example:
+            >>> client = Client()
+            >>> # ... use client for a while ...
+            >>> client.cleanup_idle_connections()
+        """
+        cdef httpmorph_pool_t* pool = httpmorph_client_get_pool(self._client)
+        if pool is not NULL:
+            with nogil:
+                httpmorph_pool_cleanup_idle(pool)
 
 
 cdef class Session:

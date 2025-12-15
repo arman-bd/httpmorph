@@ -19,6 +19,12 @@ extern "C" {
  */
 typedef struct ssl_st SSL;
 
+/* Forward declaration for pooled connection */
+typedef struct pooled_connection pooled_connection_t;
+
+/* Forward declaration for connection pool */
+typedef struct httpmorph_pool httpmorph_pool_t;
+
 
 
 /**
@@ -30,9 +36,13 @@ typedef enum {
     ASYNC_STATE_CONNECTING,          /* TCP connection in progress */
     ASYNC_STATE_PROXY_CONNECT,       /* Proxy CONNECT tunnel establishment */
     ASYNC_STATE_TLS_HANDSHAKE,       /* TLS handshake in progress */
-    ASYNC_STATE_SENDING_REQUEST,     /* Sending HTTP request */
-    ASYNC_STATE_RECEIVING_HEADERS,   /* Receiving response headers */
-    ASYNC_STATE_RECEIVING_BODY,      /* Receiving response body */
+    ASYNC_STATE_SENDING_REQUEST,     /* Sending HTTP request (HTTP/1.x) */
+    ASYNC_STATE_RECEIVING_HEADERS,   /* Receiving response headers (HTTP/1.x) */
+    ASYNC_STATE_RECEIVING_BODY,      /* Receiving response body (HTTP/1.x) */
+    /* HTTP/2 states */
+    ASYNC_STATE_HTTP2_INIT,          /* Initialize HTTP/2 session */
+    ASYNC_STATE_HTTP2_SEND,          /* Send HTTP/2 frames */
+    ASYNC_STATE_HTTP2_RECV,          /* Receive HTTP/2 frames */
     ASYNC_STATE_COMPLETE,            /* Request completed successfully */
     ASYNC_STATE_ERROR                /* Request failed */
 } async_request_state_t;
@@ -134,6 +144,22 @@ struct async_request {
     /* Reference counting */
     int refcount;
 
+    /* Connection pooling support */
+    pooled_connection_t *pooled_conn;  /* Reused connection from pool */
+    httpmorph_pool_t *pool;            /* Connection pool to return to */
+    bool from_pool;                    /* True if connection was from pool */
+
+    /* HTTP/2 support */
+#ifdef HAVE_NGHTTP2
+    bool use_http2;                    /* True if HTTP/2 was negotiated via ALPN */
+    void *http2_session;               /* nghttp2_session* */
+    void *http2_callbacks;             /* nghttp2_session_callbacks* */
+    void *http2_stream_data;           /* http2_stream_data_t* for current stream */
+    int32_t http2_stream_id;           /* Current stream ID */
+    bool http2_session_initialized;    /* True if HTTP/2 preface was sent */
+    bool http2_stream_closed;          /* True if stream finished */
+#endif
+
     /* Windows IOCP support */
 #ifdef _WIN32
     void *overlapped_connect;   /* OVERLAPPED* for ConnectEx */
@@ -157,6 +183,19 @@ async_request_t* async_request_create(
     const httpmorph_request_t *request,
     io_engine_t *io_engine,
     SSL_CTX *ssl_ctx,
+    uint32_t timeout_ms,
+    async_request_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Create a new async request with connection pool support
+ */
+async_request_t* async_request_create_pooled(
+    const httpmorph_request_t *request,
+    io_engine_t *io_engine,
+    SSL_CTX *ssl_ctx,
+    httpmorph_pool_t *pool,
     uint32_t timeout_ms,
     async_request_callback_t callback,
     void *user_data

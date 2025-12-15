@@ -249,6 +249,81 @@ pooled_connection_t* pool_get_connection(httpmorph_pool_t *pool,
     return result;
 }
 
+pooled_connection_t* pool_get_proxy_connection(httpmorph_pool_t *pool,
+                                               const char *host,
+                                               int port,
+                                               const char *proxy_url) {
+    if (!pool || !host || !proxy_url) {
+        return NULL;
+    }
+
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
+    /* Build proxy-aware host key */
+    char host_key[POOL_MAX_HOST_KEY_LEN];
+    pool_build_proxy_host_key(host, port, proxy_url, host_key);
+
+    /* Search for matching connection */
+    pooled_connection_t **curr = &pool->connections;
+    pooled_connection_t *result = NULL;
+
+    while (*curr) {
+        pooled_connection_t *conn = *curr;
+
+        if (strcmp(conn->host_key, host_key) == 0) {
+            /* Found matching proxy tunnel - validate it */
+            if (pool_connection_validate(conn)) {
+                /* HTTP/2 connections can be shared (multiplexing) */
+                if (conn->is_http2 && conn->ref_count > 0) {
+                    /* Connection already in use - increment ref_count and share it */
+                    conn->ref_count++;
+                    conn->last_used = time(NULL);
+                    result = conn;
+                    break;
+                }
+
+                /* For HTTP/1.1 or first use of HTTP/2: remove from pool */
+                *curr = conn->next;
+                pool->total_connections--;
+                pool->active_connections++;
+
+                /* Update last used time and increment reference count */
+                conn->last_used = time(NULL);
+                conn->ref_count = 1;  /* First reference */
+                conn->next = NULL;
+
+                result = conn;
+                break;
+            } else {
+                /* Connection is dead - remove and destroy it */
+                *curr = conn->next;
+                pool->total_connections--;
+                pool_connection_destroy(conn);
+                /* Continue searching */
+            }
+        } else {
+            /* Move to next */
+            curr = &conn->next;
+        }
+    }
+
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+
+    return result;
+}
+
 bool pool_put_connection(httpmorph_pool_t *pool, pooled_connection_t *conn) {
     if (!pool || !conn) {
         return false;
@@ -394,6 +469,69 @@ pooled_connection_t* pool_connection_create(const char *host,
     return conn;
 }
 
+pooled_connection_t* pool_proxy_connection_create(const char *host,
+                                                  int port,
+                                                  int sockfd,
+                                                  SSL *ssl,
+                                                  bool is_http2,
+                                                  const char *proxy_url) {
+    if (!host || sockfd < 0 || !proxy_url) {
+        return NULL;
+    }
+
+    /* Ensure socket is in blocking mode for HTTP/1.1 compatibility
+     * (HTTP/2 connections are already non-blocking) */
+    if (!is_http2) {
+#ifdef _WIN32
+        u_long mode = 0;  /* 0 = blocking */
+        ioctlsocket(sockfd, FIONBIO, &mode);
+#else
+        int flags = fcntl(sockfd, F_GETFL, 0);
+        if (flags != -1) {
+            fcntl(sockfd, F_SETFL, flags & ~O_NONBLOCK);
+        }
+#endif
+    }
+
+    pooled_connection_t *conn = (pooled_connection_t*)calloc(1, sizeof(pooled_connection_t));
+    if (!conn) {
+        return NULL;
+    }
+
+    /* Build proxy-aware host key: "hostname:port@proxy_url" */
+    pool_build_proxy_host_key(host, port, proxy_url, conn->host_key);
+
+    /* Initialize connection */
+    conn->sockfd = sockfd;
+    conn->ssl = ssl;
+    conn->is_http2 = is_http2;
+    conn->is_valid = true;
+    conn->preface_sent = false;  /* Will be set to true after first HTTP/2 preface */
+    conn->state = POOL_CONN_IDLE;
+    conn->ref_count = 0;  /* No references yet */
+    conn->last_used = time(NULL);
+    conn->next = NULL;
+
+    /* Initialize proxy info fields */
+    conn->is_proxy = true;
+    conn->proxy_url = strdup(proxy_url);
+    conn->target_host = strdup(host);
+    conn->target_port = port;
+
+    /* Initialize TLS info fields */
+    conn->ja3_fingerprint = NULL;
+    conn->tls_version = NULL;
+    conn->tls_cipher = NULL;
+
+#ifdef HAVE_NGHTTP2
+    conn->http2_session = NULL;
+    conn->http2_stream_data = NULL;
+    conn->http2_session_manager = NULL;
+#endif
+
+    return conn;
+}
+
 void pool_connection_destroy(pooled_connection_t *conn) {
     if (!conn) {
         return;
@@ -463,20 +601,29 @@ bool pool_connection_validate(pooled_connection_t *conn) {
         return false;
     }
 
-    /* For SSL connections, just check shutdown state */
+    /* For SSL connections, check shutdown state */
     if (conn->ssl) {
         int shutdown_state = SSL_get_shutdown(conn->ssl);
         if (shutdown_state != 0) {
             return false;
         }
-        /* Trust the connection - if it fails, we'll handle it during actual use */
-        return true;
     }
 
-    /* For non-SSL connections, also just trust them */
-    /* The cost of validation (fcntl, recv) is higher than just trying to use
-     * the connection and handling failures. If the connection is dead, the
-     * next request will fail and we'll create a new one. */
+#ifdef HAVE_NGHTTP2
+    /* For HTTP/2 connections, validate nghttp2 session if present */
+    if (conn->is_http2 && conn->http2_session) {
+        nghttp2_session *session = (nghttp2_session *)conn->http2_session;
+        /* Check if session received GOAWAY and has no active streams.
+         * Note: An idle session (no active streams) will have want_read=0 and want_write=0,
+         * but that doesn't mean it's invalid - it's just idle and can accept new requests. */
+        if (nghttp2_session_get_remote_settings(session, NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS) == 0) {
+            /* Server doesn't allow any streams - session is unusable */
+            return false;
+        }
+    }
+#endif
+
+    /* Trust the connection - if it fails, we'll handle it during actual use */
     return true;
 }
 
@@ -488,6 +635,20 @@ void pool_build_host_key(const char *host, int port, char *key_out) {
     }
 
     snprintf(key_out, POOL_MAX_HOST_KEY_LEN, "%s:%d", host, port);
+}
+
+void pool_build_proxy_host_key(const char *host, int port, const char *proxy_url, char *key_out) {
+    if (!host || !key_out) {
+        return;
+    }
+
+    if (proxy_url) {
+        /* For proxy connections: "hostname:port@proxy_url" */
+        snprintf(key_out, POOL_MAX_HOST_KEY_LEN, "%s:%d@%s", host, port, proxy_url);
+    } else {
+        /* No proxy - same as regular key */
+        snprintf(key_out, POOL_MAX_HOST_KEY_LEN, "%s:%d", host, port);
+    }
 }
 
 int pool_count_connections_for_host(httpmorph_pool_t *pool, const char *host_key) {
@@ -671,4 +832,109 @@ int httpmorph_connection_on_writable(pooled_connection_t *conn,
 
     (void)user_data;  /* Unused in Phase A */
     return 0;  /* Success (no-op) */
+}
+
+/* === Public API Wrappers === */
+
+/**
+ * Pre-warm connections to a host (public API)
+ */
+int httpmorph_pool_prewarm(
+    httpmorph_client_t *client,
+    const char *host,
+    int port,
+    bool use_tls,
+    int count)
+{
+    if (!client || !host || count <= 0) {
+        return 0;
+    }
+
+    httpmorph_pool_t *pool = client->pool;
+    if (!pool) {
+        return 0;
+    }
+
+    return pool_prewarm_connections(pool, client, host, port, use_tls, count);
+}
+
+/**
+ * Configure connection pool settings (public API)
+ */
+void httpmorph_pool_configure(
+    httpmorph_pool_t *pool,
+    int idle_timeout_seconds,
+    int max_connections_per_host,
+    int max_total_connections)
+{
+    if (!pool) {
+        return;
+    }
+
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
+    if (idle_timeout_seconds > 0) {
+        pool->idle_timeout_seconds = idle_timeout_seconds;
+    }
+    if (max_connections_per_host > 0) {
+        pool->max_connections_per_host = max_connections_per_host;
+    }
+    if (max_total_connections > 0) {
+        pool->max_total_connections = max_total_connections;
+    }
+
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+}
+
+/**
+ * Get connection pool statistics (public API)
+ */
+void httpmorph_pool_stats(
+    httpmorph_pool_t *pool,
+    int *total_connections,
+    int *active_connections)
+{
+    if (!pool) {
+        if (total_connections) *total_connections = 0;
+        if (active_connections) *active_connections = 0;
+        return;
+    }
+
+    /* Lock pool for thread safety */
+#ifdef _WIN32
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION*)pool->mutex;
+    if (cs) EnterCriticalSection(cs);
+#else
+    pthread_mutex_t *mutex = (pthread_mutex_t*)pool->mutex;
+    if (mutex) pthread_mutex_lock(mutex);
+#endif
+
+    if (total_connections) *total_connections = pool->total_connections;
+    if (active_connections) *active_connections = pool->active_connections;
+
+    /* Unlock pool */
+#ifdef _WIN32
+    if (cs) LeaveCriticalSection(cs);
+#else
+    if (mutex) pthread_mutex_unlock(mutex);
+#endif
+}
+
+/**
+ * Clean up idle connections (public API wrapper)
+ */
+void httpmorph_pool_cleanup_idle(httpmorph_pool_t *pool) {
+    pool_cleanup_idle(pool);
 }

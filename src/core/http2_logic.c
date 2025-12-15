@@ -47,9 +47,17 @@ static ssize_t http2_send_callback(nghttp2_session *session, const uint8_t *data
                                     size_t length, int flags, void *user_data) {
     http2_stream_data_t *stream_data = (http2_stream_data_t *)user_data;
     if (stream_data && stream_data->ssl) {
-        return SSL_write(stream_data->ssl, data, length);
+        ssize_t rv = SSL_write(stream_data->ssl, data, length);
+        if (rv < 0) {
+            int ssl_err = SSL_get_error(stream_data->ssl, rv);
+            if (ssl_err == SSL_ERROR_WANT_WRITE) {
+                return NGHTTP2_ERR_WOULDBLOCK;
+            }
+            return NGHTTP2_ERR_CALLBACK_FAILURE;
+        }
+        return rv;
     }
-    return -1;
+    return NGHTTP2_ERR_CALLBACK_FAILURE;
 }
 
 /* Helper: Data provider callback for sending request body */
@@ -501,9 +509,9 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
     stream_data.req_body_len = request->body_len;
     stream_data.req_body_sent = 0;
 
-    /* If no session exists, create one */
+    /* Create nghttp2 session if needed */
     if (session == NULL) {
-        /* Initialize nghttp2 callbacks */
+        /* New session - need to send preface */
         nghttp2_session_callbacks_new(&callbacks);
         nghttp2_session_callbacks_set_send_callback(callbacks, http2_send_callback);
         nghttp2_session_callbacks_set_recv_callback(callbacks, http2_recv_callback);
@@ -511,8 +519,8 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
         nghttp2_session_callbacks_set_on_data_chunk_recv_callback(callbacks, http2_on_data_chunk_recv_callback);
         nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks, http2_on_frame_recv_callback);
 
-        /* Create session and send preface */
-        rv = http2_init_or_reuse_session(&session, callbacks, &stream_data, conn->ssl, &session_created);
+        /* Create session */
+        rv = nghttp2_session_client_new(&session, callbacks, &stream_data);
         nghttp2_session_callbacks_del(callbacks);
 
         if (rv != 0) {
@@ -520,28 +528,27 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
             return -1;
         }
 
-        /* Store session in connection for reuse */
+        /* Send HTTP/2 connection preface (SETTINGS + WINDOW_UPDATE) */
+        nghttp2_settings_entry iv[4];
+        iv[0].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+        iv[0].value = 65536;
+        iv[1].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+        iv[1].value = 0;
+        iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+        iv[2].value = 6291456;
+        iv[3].settings_id = NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
+        iv[3].value = 262144;
+
+        nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 4);
+        nghttp2_submit_window_update(session, NGHTTP2_FLAG_NONE, 0, 15663105);
+        nghttp2_session_send(session);
+
+        /* Store session in connection */
         conn->http2_session = session;
         conn->preface_sent = true;
-
-        /* Create and start session manager for concurrent multiplexing */
-        http2_session_manager_t *mgr = http2_session_manager_create(
-            session,
-            callbacks,
-            conn->ssl,
-            conn->sockfd
-        );
-
-        if (mgr) {
-            /* Start I/O thread for concurrent stream handling */
-            if (http2_session_manager_start(mgr) == 0) {
-                conn->http2_session_manager = mgr;
-            } else {
-                /* Failed to start - clean up manager */
-                http2_session_manager_destroy(mgr);
-                conn->http2_session_manager = NULL;
-            }
-        }
+    } else {
+        /* Reusing existing session - just update user_data */
+        nghttp2_session_set_user_data(session, &stream_data);
     }
 
     /* Prepare request headers */
@@ -608,24 +615,40 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
     }
 
     /* Send request */
-    nghttp2_session_send(session);
+    rv = nghttp2_session_send(session);
+    if (rv != 0) {
+        free(stream_data.data_buf);
+        return -1;
+    }
 
     /* Receive response - event loop for non-blocking I/O */
     int sockfd = SSL_get_fd(conn->ssl);
     fd_set readfds, writefds;
     struct timeval tv;
 
-    while (!stream_data.stream_closed &&
-           (nghttp2_session_want_read(session) || nghttp2_session_want_write(session))) {
+    /* Loop until stream is closed. Check want_read/want_write as a hint, but also
+     * check SSL_pending for buffered data and always try at least one iteration
+     * after submitting a request. */
+    bool first_iteration = true;
+    while (!stream_data.stream_closed) {
+        /* Check if session wants to do anything */
+        bool want_read = nghttp2_session_want_read(session) || SSL_pending(conn->ssl) > 0;
+        bool want_write = nghttp2_session_want_write(session);
+
+        /* If session doesn't want to do anything and this isn't the first iteration, exit */
+        if (!want_read && !want_write && !first_iteration) {
+            break;
+        }
+        first_iteration = false;
 
         /* Wait for socket to be ready */
         FD_ZERO(&readfds);
         FD_ZERO(&writefds);
 
-        if (nghttp2_session_want_read(session)) {
+        if (want_read) {
             FD_SET(sockfd, &readfds);
         }
-        if (nghttp2_session_want_write(session)) {
+        if (want_write) {
             FD_SET(sockfd, &writefds);
         }
 
@@ -638,8 +661,10 @@ int httpmorph_http2_request_pooled(struct pooled_connection *conn,
             rv = -1;
             break;
         } else if (select_rv == 0) {
-            /* Timeout */
-            rv = -1;
+            /* Timeout - only error if we haven't received the response yet */
+            if (!stream_data.stream_closed) {
+                rv = -1;
+            }
             break;
         }
 

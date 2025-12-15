@@ -73,10 +73,37 @@ httpmorph_response_t* httpmorph_request_execute(
         bool proxy_use_tls = false;
         SSL *proxy_ssl = NULL;
 
-        /* Don't use connection pool for proxy connections - they are not pooled
-         * due to SSL_CTX use-after-free issues (see line 532 below).
-         * If we retrieve a connection from pool here, it would be a stale direct
-         * connection which cannot be used for proxy requests. */
+        /* Try to get a pooled proxy tunnel connection first */
+        if (pool) {
+            pooled_conn = pool_get_proxy_connection(pool, host, port, request->proxy_url);
+            if (pooled_conn) {
+                /* Reuse existing proxy tunnel from pool */
+                sockfd = pooled_conn->sockfd;
+                ssl = pooled_conn->ssl;
+                use_http2 = pooled_conn->is_http2;
+
+                /* Set HTTP version from pooled connection */
+                if (use_http2) {
+                    response->http_version = HTTPMORPH_VERSION_2_0;
+                } else {
+                    response->http_version = HTTPMORPH_VERSION_1_1;
+                }
+
+                /* Restore TLS info from pooled connection */
+                if (pooled_conn->ja3_fingerprint) {
+                    response->ja3_fingerprint = strdup(pooled_conn->ja3_fingerprint);
+                }
+                if (pooled_conn->tls_version) {
+                    response->tls_version = strdup(pooled_conn->tls_version);
+                }
+                if (pooled_conn->tls_cipher) {
+                    response->tls_cipher = strdup(pooled_conn->tls_cipher);
+                }
+
+                /* Connection reused - no connect/TLS time */
+                connect_time = 0;
+            }
+        }
 
         /* If no pooled connection, create new proxy connection */
         if (sockfd < 0) {
@@ -166,6 +193,13 @@ httpmorph_response_t* httpmorph_request_execute(
                 ssl = pooled_conn->ssl;
                 use_http2 = pooled_conn->is_http2;  /* Use same protocol as pooled connection */
 
+                /* Set HTTP version from pooled connection */
+                if (use_http2) {
+                    response->http_version = HTTPMORPH_VERSION_2_0;
+                } else {
+                    response->http_version = HTTPMORPH_VERSION_1_1;
+                }
+
                 /* Restore TLS info from pooled connection BEFORE potential destruction */
                 if (sockfd >= 0) {
                     /* Connection reused - no connect/TLS time */
@@ -204,10 +238,11 @@ httpmorph_response_t* httpmorph_request_execute(
     }
     response->connect_time_us = connect_time;
 
-    /* 2. TLS Handshake (if HTTPS and not reused) */
+    /* 2. TLS Handshake (if HTTPS and not reused)
+     * Use the cached version for session resumption support */
     if (use_tls && !ssl) {
         uint64_t tls_time = 0;
-        ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+        ssl = httpmorph_tls_connect_cached(client, sockfd, host, port,
                          request->http2_enabled, request->verify_ssl, &tls_time);
         if (!ssl) {
             response->error = HTTPMORPH_ERROR_TLS;
@@ -265,16 +300,34 @@ httpmorph_response_t* httpmorph_request_execute(
         uint64_t first_byte_time = httpmorph_get_time_us();
         int http2_result;
 
-        /* Use pooled version for session reuse if connection came from pool */
+        /* For new HTTP/2 connections, create pooled_conn wrapper to enable session reuse */
+        if (!pooled_conn && !request->proxy_url) {
+            pooled_conn = pool_connection_create(host, port, sockfd, ssl, true /* is_http2 */);
+            if (pooled_conn) {
+                /* Store TLS info for reuse */
+                if (response->ja3_fingerprint) {
+                    pooled_conn->ja3_fingerprint = strdup(response->ja3_fingerprint);
+                }
+                if (response->tls_version) {
+                    pooled_conn->tls_version = strdup(response->tls_version);
+                }
+                if (response->tls_cipher) {
+                    pooled_conn->tls_cipher = strdup(response->tls_cipher);
+                }
+            }
+        }
+
+        /* Use pooled version for session reuse (works for both new and reused connections) */
         if (pooled_conn && pooled_conn->is_http2) {
             /* Use concurrent version if session manager exists (high-performance mode) */
             if (pooled_conn->http2_session_manager) {
                 http2_result = httpmorph_http2_request_concurrent(pooled_conn, request, host, path, response);
             } else {
-                /* Fall back to sequential pooled version */
+                /* Use pooled version which creates and stores the session */
                 http2_result = httpmorph_http2_request_pooled(pooled_conn, request, host, path, response);
             }
         } else {
+            /* Fallback for proxy connections or when pooled_conn creation failed */
             http2_result = httpmorph_http2_request(ssl, request, host, path, response);
         }
 
@@ -308,10 +361,10 @@ httpmorph_response_t* httpmorph_request_execute(
             }
             response->connect_time_us = connect_time;
 
-            /* New TLS handshake if needed */
+            /* New TLS handshake if needed (use cached for session resumption) */
             if (use_tls) {
                 uint64_t tls_time = 0;
-                ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+                ssl = httpmorph_tls_connect_cached(client, sockfd, host, port,
                                 request->http2_enabled, request->verify_ssl, &tls_time);
                 if (!ssl) {
                     response->error = HTTPMORPH_ERROR_TLS;
@@ -358,10 +411,10 @@ httpmorph_response_t* httpmorph_request_execute(
         }
         response->connect_time_us = connect_time;
 
-        /* New TLS handshake */
+        /* New TLS handshake (use cached for session resumption) */
         if (use_tls) {
             uint64_t tls_time = 0;
-            ssl = httpmorph_tls_connect(client->ssl_ctx, sockfd, host, client->browser_profile,
+            ssl = httpmorph_tls_connect_cached(client, sockfd, host, port,
                              request->http2_enabled, request->verify_ssl, &tls_time);
             if (!ssl) {
                 response->error = HTTPMORPH_ERROR_TLS;
@@ -469,49 +522,35 @@ cleanup:
 
         if (!conn_to_pool) {
             /* New connection - create wrapper */
-            bool use_http2 = (response->http_version == HTTPMORPH_VERSION_2_0);
-            /* Don't pool HTTP/2 connections - HTTP/2 pooling has reliability issues */
-            /* Don't pool proxy connections - they can cause SSL_CTX use-after-free issues */
-            if (use_http2 || request->proxy_url) {
-                conn_to_pool = NULL;
+            bool is_http2 = (response->http_version == HTTPMORPH_VERSION_2_0);
+            if (request->proxy_url) {
+                /* Create proxy-aware pooled connection with key: "host:port@proxy_url" */
+                conn_to_pool = pool_proxy_connection_create(host, port, sockfd, ssl, is_http2, request->proxy_url);
             } else {
-                conn_to_pool = pool_connection_create(host, port, sockfd, ssl, use_http2);
-                /* Store TLS info in pooled connection for future reuse with error checking */
-                if (conn_to_pool && ssl) {
-                    bool alloc_failed = false;
+                /* Pool both HTTP/1.1 and HTTP/2 connections for reuse */
+                conn_to_pool = pool_connection_create(host, port, sockfd, ssl, is_http2);
+            }
+            /* Store TLS info in pooled connection for future reuse with error checking */
+            if (conn_to_pool && ssl) {
+                bool alloc_failed = false;
 
-                    if (response->ja3_fingerprint) {
-                        conn_to_pool->ja3_fingerprint = strdup(response->ja3_fingerprint);
-                        if (!conn_to_pool->ja3_fingerprint) alloc_failed = true;
-                    }
-                    if (response->tls_version && !alloc_failed) {
-                        conn_to_pool->tls_version = strdup(response->tls_version);
-                        if (!conn_to_pool->tls_version) alloc_failed = true;
-                    }
-                    if (response->tls_cipher && !alloc_failed) {
-                        conn_to_pool->tls_cipher = strdup(response->tls_cipher);
-                        if (!conn_to_pool->tls_cipher) alloc_failed = true;
-                    }
-
-                    /* If any allocation failed, destroy connection instead of pooling */
-                    if (alloc_failed) {
-                        pool_connection_destroy(conn_to_pool);
-                        conn_to_pool = NULL;
-                    }
+                if (response->ja3_fingerprint) {
+                    conn_to_pool->ja3_fingerprint = strdup(response->ja3_fingerprint);
+                    if (!conn_to_pool->ja3_fingerprint) alloc_failed = true;
                 }
-                /* Store proxy info for proxy connections */
-                if (conn_to_pool && request->proxy_url) {
-                    conn_to_pool->is_proxy = true;
-                    /* Free old values if already set (connection reuse) */
-                    if (conn_to_pool->proxy_url) {
-                        free(conn_to_pool->proxy_url);
-                    }
-                    if (conn_to_pool->target_host) {
-                        free(conn_to_pool->target_host);
-                    }
-                    conn_to_pool->proxy_url = strdup(request->proxy_url);
-                    conn_to_pool->target_host = strdup(host);
-                    conn_to_pool->target_port = port;
+                if (response->tls_version && !alloc_failed) {
+                    conn_to_pool->tls_version = strdup(response->tls_version);
+                    if (!conn_to_pool->tls_version) alloc_failed = true;
+                }
+                if (response->tls_cipher && !alloc_failed) {
+                    conn_to_pool->tls_cipher = strdup(response->tls_cipher);
+                    if (!conn_to_pool->tls_cipher) alloc_failed = true;
+                }
+
+                /* If any allocation failed, destroy connection instead of pooling */
+                if (alloc_failed) {
+                    pool_connection_destroy(conn_to_pool);
+                    conn_to_pool = NULL;
                 }
             }
         }

@@ -43,10 +43,12 @@ struct httpmorph_buffer_pool {
  * Returns the smallest tier that can fit the requested size
  */
 static int get_tier_index(size_t size) {
-    if (size <= BUFFER_SIZE_4KB) return 0;
-    if (size <= BUFFER_SIZE_16KB) return 1;
-    if (size <= BUFFER_SIZE_64KB) return 2;
-    if (size <= BUFFER_SIZE_256KB) return 3;
+    if (size <= BUFFER_SIZE_1KB) return 0;
+    if (size <= BUFFER_SIZE_4KB) return 1;
+    if (size <= BUFFER_SIZE_16KB) return 2;
+    if (size <= BUFFER_SIZE_64KB) return 3;
+    if (size <= BUFFER_SIZE_256KB) return 4;
+    if (size <= BUFFER_SIZE_1MB) return 5;
     return -1;  /* Too large for pooling */
 }
 
@@ -55,10 +57,12 @@ static int get_tier_index(size_t size) {
  */
 static size_t get_tier_size(int tier_index) {
     switch (tier_index) {
-        case 0: return BUFFER_SIZE_4KB;
-        case 1: return BUFFER_SIZE_16KB;
-        case 2: return BUFFER_SIZE_64KB;
-        case 3: return BUFFER_SIZE_256KB;
+        case 0: return BUFFER_SIZE_1KB;
+        case 1: return BUFFER_SIZE_4KB;
+        case 2: return BUFFER_SIZE_16KB;
+        case 3: return BUFFER_SIZE_64KB;
+        case 4: return BUFFER_SIZE_256KB;
+        case 5: return BUFFER_SIZE_1MB;
         default: return 0;
     }
 }
