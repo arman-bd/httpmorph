@@ -919,6 +919,12 @@ class Session:
             elif error_code != 0:
                 raise RequestException(error_msg)
 
+        # Check for status_code=0 which indicates a failed request
+        # This can happen when the request fails silently (e.g., HTTP/2 stream error)
+        if result.get("status_code", 0) == 0:
+            error_msg = result.get("error_message") or "Request failed: no response received"
+            raise ConnectionError(error_msg)
+
         response = Response(result, url=url)
 
         # Parse Set-Cookie headers from response
